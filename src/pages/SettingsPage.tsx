@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Text, Button, Group, Collapse, Modal, Tooltip } from '@mantine/core'
+import { Text, Button, Group, Collapse, Modal, Tooltip, Select } from '@mantine/core'
 import { useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { IconChevronRight } from '@tabler/icons-react'
 import BackupCenter from '../components/BackupCenter'
@@ -9,6 +9,7 @@ import OpenClawDataCleanupDialog from '../components/OpenClawDataCleanupDialog'
 import UpdateCenter from '../components/UpdateCenter'
 import AboutModal from '../components/AboutModal'
 import tooltips from '@/constants/tooltips.json'
+import type { ChatComposerEnterSendMode } from '../lib/chat-composer-enter-send-preference'
 
 function Section({
   title,
@@ -70,12 +71,16 @@ interface SettingsPageProps {
   onReconfigure?: () => void
   onToggleTooltip: () => void
   tooltipEnabled: boolean
+  enterSendMode: ChatComposerEnterSendMode
+  onChangeEnterSendMode: (mode: ChatComposerEnterSendMode) => void
 }
 
 export default function SettingsPage({
   onReconfigure,
   onToggleTooltip,
   tooltipEnabled,
+  enterSendMode,
+  onChangeEnterSendMode,
 }: SettingsPageProps) {
   const { setColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('dark')
@@ -126,6 +131,26 @@ export default function SettingsPage({
             <Button variant="default" size="xs" onClick={onToggleTooltip}>
               打开/关闭软件提示
             </Button>
+          </Tooltip>
+        </Group>
+        <Group gap="sm" align="flex-end">
+          <div style={{ flex: 1 }}>
+            <Text size="xs" className="app-text-secondary" mb={4}>Enter 键发送模式</Text>
+            <Select
+              value={enterSendMode}
+              onChange={(value) => value && onChangeEnterSendMode(value as ChatComposerEnterSendMode)}
+              data={[
+                { value: 'enter', label: 'Enter 发送 · Shift+Enter 换行' },
+                { value: 'shiftEnter', label: 'Shift+Enter 发送 · Enter 换行' },
+                { value: 'altEnter', label: 'Alt+Enter 发送 · Enter 换行' },
+              ]}
+              allowDeselect={false}
+              size="xs"
+              styles={{ input: { fontSize: 'var(--mantine-font-size-xs)' } }}
+            />
+          </div>
+          <Tooltip label={tooltips.settingsPage.chatComposerEnterSendMode} withArrow>
+            <div>ℹ️</div>
           </Tooltip>
         </Group>
       </Section>
