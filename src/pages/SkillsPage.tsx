@@ -1283,10 +1283,20 @@ function SkillRow({
       <div onClick={(e) => e.stopPropagation()}>
         <Switch
           size="sm"
-          color={skill.disabled || hasMissing(skill) ? 'red' : 'green'}
           checked={!skill.disabled && !hasMissing(skill)}
           disabled={actionsDisabled}
           onChange={(e) => onToggle(skill, e.currentTarget.checked)}
+          styles={() => ({
+            track: {
+              backgroundColor: !skill.disabled && !hasMissing(skill)
+                ? 'var(--app-text-success)'
+                : 'var(--app-text-danger)',
+              opacity: 0.8,
+            },
+            thumb: {
+              backgroundColor: 'var(--mantine-color-white)',
+            },
+          })}
         />
       </div>
 
