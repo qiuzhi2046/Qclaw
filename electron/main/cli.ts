@@ -923,6 +923,7 @@ function resolveCommandForShelllessSpawn(command: string): string {
   if (lower === 'npx') return 'npx.cmd'
   if (lower === 'pnpm') return 'pnpm.cmd'
   if (lower === 'yarn') return 'yarn.cmd'
+  if (lower === 'openclaw') return 'openclaw.cmd'
   return normalized
 }
 
@@ -949,10 +950,11 @@ async function runShellOnce(
   const resolvedCommand = useShell ? command : resolveCommandForShelllessSpawn(command)
   const runOnce = (env: NodeJS.ProcessEnv): Promise<CliResult> =>
     new Promise((resolve) => {
+      const forceOpenShell = resolvedCommand.endsWith(".cmd") && resolvedCommand.endsWith(".cmd");
       const proc = spawn(resolvedCommand, args, {
         env,
         cwd: normalizedOptions.cwd || resolveManagedSpawnCwd(),
-        shell: useShell,
+        shell: forceOpenShell ? true : useShell,
         timeout,
       })
       trackActiveProcess(proc, controlDomain)
