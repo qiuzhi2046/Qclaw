@@ -1,3 +1,6 @@
+> **🔱 Fork 声明**：本仓库 fork 自 [qiuzhi2046/Qclaw](https://github.com/qiuzhi2046/Qclaw)，在原项目基础上进行了 **Windows 平台适配、Bug 修复及用户体验优化**。
+> 原创团队仓库：https://github.com/qiuzhi2046/Qclaw ｜ 本 Fork：https://github.com/sjkncs/Qclaw
+
 <br />
 <div align="center">
   <a href="https://github.com/qiuzhi2046/Qclaw">
@@ -18,10 +21,6 @@
     <a href="https://qclawai.com/"><strong>访问官网 &raquo;</strong></a>
     <br />
     <br />
-    <a href="https://github.com/qiuzhi2046/Qclaw/blob/main/README.en.md">English</a>
-    &middot;
-    <a href="https://github.com/qiuzhi2046/Qclaw/blob/main/README.md">简体中文</a>
-    &middot;
     <a href="https://github.com/qiuzhi2046/qclaw/issues/new?labels=bug">报告 Bug</a>
     &middot;
     <a href="https://github.com/qiuzhi2046/qclaw/issues/new?labels=enhancement">功能建议</a>
@@ -32,6 +31,7 @@
   <summary>目录</summary>
   <ol>
     <li><a href="#功能特性">功能特性</a></li>
+    <li><a href="#-本-fork-的优化与改进">🚀 本 Fork 的优化与改进</a></li>
     <li><a href="#为什么会有这个项目">为什么会有这个项目</a></li>
     <li><a href="#快速上手">快速上手</a></li>
     <li><a href="#快速开发">快速开发</a></li>
@@ -67,6 +67,44 @@
 - **数据备份** — 提供自动备份和手动备份
 - **多平台支持** — 支持 macOS、Windows（开发中），开箱即用
 - **自动更新** — 支持OpenClaw最新版本
+
+## 🚀 本 Fork 的优化与改进
+
+> 以下改动均基于原项目 [qiuzhi2046/Qclaw](https://github.com/qiuzhi2046/Qclaw) 进行，旨在提升 Windows 平台兼容性与整体用户体验。
+
+### 🪟 Windows 平台适配（回应社区 Issue [#6](https://github.com/qiuzhi2046/Qclaw/issues/6) — 期待 Windows 上线）
+
+| 问题 | 修复内容 | 涉及文件 |
+|------|----------|----------|
+| npm 全局安装路径嵌套 | 修复 Windows 下 `node_modules\node_modules\openclaw` 嵌套路径解析失败 | `electron/main/openclaw-package.ts` |
+| macOS 专属命令误调用 | 移除在 Windows 上调用 `osascript` 导致的 `spawn EINVAL` 错误 | `electron/main/cli.ts` |
+| CLI 命令映射缺失 | 为 `openclaw` 添加 `.cmd` 后缀映射，确保 `spawn` 正确执行 | `electron/main/cli.ts` → `resolveCommandForShelllessSpawn` |
+| Windows 路径发现 | 新增 `APPDATA`、npm prefix 等 Windows 常见路径的候选查找逻辑 | `electron/main/runtime-path-discovery.ts` |
+| 版本号解析异常 | 处理 `OpenClaw 2026.x.x` 前缀格式的版本号提取 | `src/shared/openclaw-version-policy.ts` → `normalizeVersionCore` |
+
+### ⌨️ Enter 键发送模式优化（回应社区 Issue [#2](https://github.com/qiuzhi2046/Qclaw/issues/2) — Enter 发送太容易误触）
+
+- **新增发送模式切换**：用户可在设置页面选择发送方式
+  - `Enter` 直接发送（原始行为）
+  - `Shift + Enter` 发送（默认，Enter 换行）
+  - `Alt + Enter` 发送（Enter 换行）
+- **新增模块** `src/lib/chat-composer-enter-send-preference.ts`：管理用户偏好的本地存储读写
+- **涉及文件**：`App.tsx`、`ChatPage.tsx`、`SettingsPage.tsx`、`DashboardChatPanel.tsx`
+
+### 🔧 其他修复
+
+- **ARIA 无障碍属性修复**：修正 `ModelCenter.tsx` 中 `aria-valuemin`/`aria-valuemax`/`aria-valuenow` 的 ESLint 误报，使用块级 `eslint-disable` 覆盖多行属性
+- **OpenClaw CLI 升级兼容**：验证 2026 年 2 月版本的安全升级路径，修复飞书插件 `package.json` 中 `workspace:*` 依赖问题
+- **TypeScript 编译清理**：解决所有 TypeScript 编译错误，开发服务器 `npm run dev` 可正常启动
+
+### 📋 社区 Issue 回应状态
+
+| Issue | 标题 | 状态 |
+|-------|------|------|
+| [#2](https://github.com/qiuzhi2046/Qclaw/issues/2) | enter 发送太容易误触了 | ✅ 已在本 Fork 中修复（Enter 键发送模式可配置） |
+| [#6](https://github.com/qiuzhi2046/Qclaw/issues/6) | 秋芝加油期待 Windows 上线 | ✅ 已在本 Fork 中适配 Windows 平台 |
+| [#5](https://github.com/qiuzhi2046/Qclaw/issues/5) | [RFC] AMCP 协议集成提案 | 🔍 关注中，待社区讨论 |
+| [#12](https://github.com/qiuzhi2046/Qclaw/issues/12) | 支持 OpenClaw 配置及多 Agent 可视化与 IM 渠道绑定 | 🔍 关注中，待评估 |
 
 ## 为什么会有这个项目
 
@@ -279,6 +317,13 @@ build/              应用图标与打包资源
 </a>
 
 ## 致谢
+
+### 🙏 特别感谢原创团队
+
+**本项目 Fork 自 [qiuzhi2046/Qclaw](https://github.com/qiuzhi2046/Qclaw)**，由 [秋芝团队（qiuzhi2046）](https://github.com/qiuzhi2046) 原创开发。
+
+感谢秋芝团队构建了如此优秀的 OpenClaw 桌面管家——简洁的交互设计、完善的 IM 接入能力、以及对小白用户极致友好的体验，为整个 OpenClaw 社区降低了巨大的使用门槛。我们在此基础上进行了 Windows 适配和体验优化，所有改动均以 PR 形式回馈上游。
+
 感谢 OpenClaw——没有它就没有 Qclaw，我们只是站在巨人肩膀上搭了个小梯子。
 
 感谢 Electron、React、Vite、Mantine 等众多开源项目，以及所有默默贡献的开源作者。Qclaw 的每一行代码背后，都有你们的影子。
