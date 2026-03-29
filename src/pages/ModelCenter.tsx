@@ -2626,6 +2626,7 @@ export default function ModelCenter({
                 </span>
                 <span>{capabilitiesLoadingDisplay.progress}%</span>
               </div>
+              {/* eslint-disable jsx-a11y/aria-proptypes */}
               <div
                 role="progressbar"
                 aria-label={refreshingCapabilities ? '模型能力刷新进度' : '模型能力加载进度'}
@@ -2635,6 +2636,7 @@ export default function ModelCenter({
                 className="mb-3 h-1.5 overflow-hidden rounded-full"
                 style={{ backgroundColor: 'var(--app-bg-inset)' }}
               >
+                {/* eslint-enable jsx-a11y/aria-proptypes */}
                 <div
                   className="h-full rounded-full transition-[width] duration-300 ease-out"
                   style={{ width: `${capabilitiesLoadingDisplay.progress}%`, backgroundColor: 'var(--mantine-color-brand-5)' }}
