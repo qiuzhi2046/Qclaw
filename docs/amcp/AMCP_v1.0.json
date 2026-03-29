@@ -1,0 +1,980 @@
+{
+  "protocol": "AMCP",
+  "version": "1.0.0",
+  "full_name": "AI Memory Communication Protocol",
+  "status": "DRAFT-RFC-FINAL",
+  "issued": "2026-03-18",
+  "issuer": "StepMind Community",
+  "abstract": "AMCP定义了AI节点与记忆基础设施之间通信的完整七层协议栈。不同于现有的MCP/SMP等语义层约定，AMCP从物理帧格式到语义应用均有刚性规范，实现任意AI×任意数据库之间的高度一致性、分布式存储、上下文调度与跨厂商互操作。本协议为AI时代的记忆基座标准。",
+
+  "rfc_metadata": {
+    "category": "STANDARDS TRACK",
+    "obsoletes": ["SMP/2.x", "MCP/1.x (partial)"],
+    "related": ["TCP/IP RFC 793", "HTTP/1.1 RFC 2616", "HTTP/2 RFC 7540"],
+    "keywords": ["AI", "memory", "distributed", "protocol", "context-scheduling", "knowledge-graph"],
+    "authors": ["StepMind Community"],
+    "license": "Apache 2.0 — freely implementable by any party for any purpose. Use of the \"AMCP Certified\" trademark requires passing the AMCP Conformance Test Suite v1.0."
+  },
+
+  "terminology": {
+    "MUST": "该要求是协议的绝对要求。不符合的实现不得称为AMCP兼容。",
+    "MUST NOT": "该禁止是协议的绝对禁止。",
+    "SHOULD": "推荐行为。有充分理由时可偏离，但偏离者须记录原因。",
+    "MAY": "可选行为。",
+    "PROTOCOL_VIOLATION": "发现违规时，接收节点MUST返回0x00FF帧并断开连接。不允许'尽力而为'的猜测处理。"
+  },
+
+  "layer_stack": {
+    "overview": "AMCP七层协议栈，每层对上提供服务，对下屏蔽实现。任何厂商可独立实现任意层，只须符合该层接口规范。",
+    "layers": {
+      "L1": "身份寻址层 Identity & Addressing Layer",
+      "L2": "分布式存储层 Distributed Storage Layer",
+      "L3": "传输可靠层 Reliable Transport Layer",
+      "L4": "路由调度层 Routing & Scheduling Layer",
+      "L5": "一致性层 Consistency Layer",
+      "L6": "记忆表达层 Memory Representation Layer (AMF)",
+      "L7": "语义应用层 Semantic Application Layer"
+    }
+  },
+
+  "L1_identity_addressing": {
+    "_title": "身份寻址层",
+    "_purpose": "为所有AMCP节点提供全局唯一标识与能力声明机制。这是互操作的基础，类比IP地址+端口，但包含能力语义。",
+
+    "node_address_format": {
+      "syntax": "amcp://{node_type}.{vendor}.{capability_fingerprint}.{region}",
+      "node_type_enum": ["ai", "db", "gateway", "bridge", "relay"],
+      "examples": [
+        "amcp://ai.anthropic.claude-sonnet-4-6.fp-a3c9f2.us-east-1",
+        "amcp://db.stepmind.sqlite-wal-v3.fp-7d2e11.local",
+        "amcp://db.pinecone.vector-v2.fp-9b3c44.cloud",
+        "amcp://ai.openai.gpt-4o.fp-cc1122.eu-west-1",
+        "amcp://gateway.openclaw.hub-v1.fp-abcdef.global"
+      ],
+      "capability_fingerprint": {
+        "definition": "节点核心能力集合的SHA-256前8字节的hex编码",
+        "purpose": "确保声明的能力与实现匹配。指纹变更意味着能力变更，强制重新协商。",
+        "computation": "SHA-256(sorted_capability_keys + versions)"
+      }
+    },
+
+    "capability_declaration": {
+      "_doc": "节点连接时MUST发送能力声明。声明一经发送即为承诺，协议层将根据声明验证行为。",
+      "required_fields": {
+        "amcp_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "example": "1.0.0",
+          "MUST": true
+        },
+        "node_type": {
+          "type": "enum",
+          "values": ["ai", "db", "gateway", "bridge", "relay"],
+          "MUST": true
+        },
+        "node_address": {
+          "type": "amcp_uri",
+          "MUST": true
+        },
+        "public_key": {
+          "type": "string",
+          "format": "Ed25519 public key, base64url encoded",
+          "MUST": true,
+          "purpose": "用于建立加密通道和节点身份验证"
+        },
+        "trust_level": {
+          "type": "enum",
+          "values": ["local", "verified", "federated"],
+          "MUST": true,
+          "semantics": {
+            "local": "自签名，仅本地网络信任",
+            "verified": "通过AMCP根信任锚验证的节点",
+            "federated": "跨组织联邦信任，双向认证"
+          }
+        }
+      },
+      "capability_flags": {
+        "memory_read": "bool — 能否读取记忆",
+        "memory_write": "bool — 能否写入记忆",
+        "memory_invalidate": "bool — 能否失效记忆",
+        "vector_search": "bool — 是否支持向量语义搜索",
+        "amql_query": "bool — 是否支持AMQL查询语言",
+        "distributed_sync": "bool — 是否支持分布式同步",
+        "causal_clock": "bool — 是否维护因果时钟",
+        "streaming": "bool — 是否支持流式记忆传输",
+        "compression": "bool — 是否支持记忆压缩",
+        "max_context_tokens": "int — AI节点: 上下文窗口大小。DB节点: 单次返回最大token数",
+        "supported_amf_versions": "array<string> — 支持的AMF格式版本",
+        "supported_knowledge_types": "array<string> — 支持的知识类型"
+      }
+    },
+
+    "trust_anchor": {
+      "_doc": "AMCP信任体系，类比HTTPS的CA证书链",
+      "root_trust_anchor": "AMCP根信任锚，由StepMind Community维护",
+      "hierarchy": {
+        "level_0": "AMCP Root Trust Anchor (RTA)",
+        "level_1": "Vendor Trust Certificates (VTC) — 主要AI厂商和DB供应商",
+        "level_2": "Instance Certificates — 具体节点实例",
+        "level_3": "Self-signed — 私有部署节点，仅local信任"
+      },
+      "verification": "节点MUST验证连接方的证书链，不能建立未验证的会话（local节点除外）"
+    }
+  },
+
+  "L2_distributed_storage": {
+    "_title": "分布式存储层",
+    "_purpose": "定义记忆的存储分层、端侧固化规则、分布式边界和同步策略。解决'记忆不能全量联网'与'端侧需要可靠知识'之间的张力。",
+
+    "storage_topology": {
+      "tier_0_hot_local": {
+        "name": "端侧热存储 (Edge Hot Storage)",
+        "location": "AI运行的本地节点",
+        "capacity_default": "50MB (可配置，上限1GB)",
+        "latency": "0ms (内存/本地磁盘)",
+        "availability": "离线可用，无网络依赖",
+        "content_policy": "永恒事实(KT-FACT) + 血泪教训(KT-PITFALL) + 当前项目活跃知识 + 最近7天高频访问知识",
+        "sync_mode": "被动接收PUSH + 主动发送PUSH(critical变更)"
+      },
+      "tier_1_warm_edge": {
+        "name": "边缘暖存储 (Edge Warm Storage)",
+        "location": "局域网/私有云节点",
+        "capacity_default": "500MB",
+        "latency": "< 10ms",
+        "availability": "局域网可用",
+        "content_policy": "归纳规律(KT-PATTERN, 30天) + 历史决策(KT-DECISION, 90天) + 跨项目关联知识",
+        "sync_mode": "GOSSIP协议最终一致"
+      },
+      "tier_2_cold_cloud": {
+        "name": "云端冷存储 (Cloud Cold Storage)",
+        "location": "云端/主数据库",
+        "capacity_default": "无限",
+        "latency": "< 500ms",
+        "availability": "需要网络",
+        "content_policy": "完整事件日志 + 所有历史版本 + 跨组织联邦知识",
+        "sync_mode": "按需PULL + 定时批量同步"
+      }
+    },
+
+    "solidification_rules": {
+      "_doc": "端侧固化规则。AMCP实现MUST遵守这些规则，不得绕过。",
+      "always_solidify_to_local": [
+        "knowledge.decay_model.type == 'none'",
+        "knowledge.type IN ['KT-FACT', 'KT-PITFALL']",
+        "knowledge.access_count_7d > 10",
+        "knowledge.tags INTERSECTS current_active_project_tags",
+        "knowledge.sync_priority == 'immediate'"
+      ],
+      "evict_from_local": {
+        "conditions": [
+          "knowledge.last_access_days > 30 AND knowledge.type NOT IN ['KT-FACT', 'KT-PITFALL']",
+          "knowledge.decay_status == 'expired'",
+          "local_storage_utilization > 0.8 AND knowledge.access_rank > 0.9"
+        ],
+        "eviction_policy": "LRU with type-protection (KT-FACT/KT-PITFALL NEVER evicted)",
+        "eviction_action": "移至tier_1，保留本地索引指针（离线时返回CACHE_MISS，在线时自动回填）"
+      },
+      "never_solidify_to_local": [
+        "knowledge.distribution.locality == 'federated_only'",
+        "knowledge.size_bytes > 10485760",
+        "knowledge.classification == 'restricted'"
+      ]
+    },
+
+    "local_index_spec": {
+      "_doc": "端侧索引规范。即使数据不在本地，索引MUST在本地，以支持离线路由决策。",
+      "index_entry": {
+        "knowledge_id": "string (content-addressed hash)",
+        "type": "KnowledgeType enum",
+        "tags": "array<string>",
+        "semantic_vector": "float[256] (预计算的语义向量，支持离线相似度查询)",
+        "tier": "0|1|2 (当前存储层)",
+        "access_count_7d": "int",
+        "last_access": "ISO8601",
+        "checksum": "SHA-256",
+        "sync_watermark": "Lamport timestamp (最后同步时间)",
+        "causal_clock_summary": "vector_clock的紧凑表示"
+      },
+      "index_format": "SQLite (WAL mode, 强制checksum验证)",
+      "index_max_size": "端侧数据量的10%，不超过5MB",
+      "integrity_check": "每次启动MUST验证索引checksum，失败则重建"
+    },
+
+    "sync_boundary_protocol": {
+      "_doc": "同步边界协议：什么时候同步、同步什么、同步到哪里。",
+      "push_triggers": {
+        "condition": "knowledge.type IN ['KT-FACT','KT-PITFALL'] OR knowledge.sync_priority == 'immediate'",
+        "action": "广播到所有已知的tier_1节点",
+        "timing": "写入后立即执行，最大延迟500ms"
+      },
+      "pull_triggers": {
+        "cold_boot": "根据任务上下文语义查询，按ROI排序拉取",
+        "qef_signal": "信号触发时拉取相关历史模式",
+        "cache_miss": "本地索引命中但tier>0时，按需拉取"
+      },
+      "gossip_protocol": {
+        "condition": "非critical知识的更新",
+        "algorithm": "改进的SWIM Gossip，按知识引力加权传播",
+        "convergence_target": "95%节点在60秒内收敛",
+        "anti_entropy": "每300秒全量比对一次，修复漂移"
+      },
+      "batch_sync": {
+        "schedule": "每天UTC 02:00",
+        "scope": "所有tier_0→tier_2的增量同步",
+        "format": "AMF批量包，gzip压缩",
+        "max_size": "10MB per batch"
+      }
+    }
+  },
+
+  "L3_reliable_transport": {
+    "_title": "传输可靠层",
+    "_purpose": "定义AMCP的二进制帧格式和传输保证机制。这是协议刚性的物理基础。所有AMCP通信MUST使用此帧格式。",
+
+    "frame_format": {
+      "_doc": "AMCP传输帧的二进制格式规范。字节序：大端(Big-Endian)。",
+      "header": {
+        "MAGIC": {
+          "offset": 0,
+          "size_bytes": 4,
+          "value": "0x414D4350",
+          "ascii": "AMCP",
+          "MUST": "所有帧MUST以此魔数开头。不匹配时MUST返回PROTOCOL_VIOLATION并断开连接。"
+        },
+        "VERSION": {
+          "offset": 4,
+          "size_bytes": 2,
+          "format": "MAJOR(1byte) . MINOR(1byte)",
+          "example": "0x0100 = v1.0"
+        },
+        "MSG_TYPE": {
+          "offset": 6,
+          "size_bytes": 2,
+          "enum": {
+            "0x0001": "COLD_BOOT_REQUEST — AI节点启动，请求记忆加载",
+            "0x0002": "COLD_BOOT_RESPONSE — DB节点返回冷启动记忆包",
+            "0x0010": "MEMORY_READ — 读取记忆请求",
+            "0x0011": "MEMORY_READ_RESPONSE — 读取记忆响应",
+            "0x0012": "MEMORY_WRITE — 写入记忆",
+            "0x0013": "MEMORY_WRITE_ACK — 写入确认",
+            "0x0014": "MEMORY_INVALIDATE — 失效记忆（不是删除）",
+            "0x0020": "SYNC_PUSH — 主动推送记忆更新",
+            "0x0021": "SYNC_PULL_REQUEST — 请求拉取",
+            "0x0022": "SYNC_PULL_RESPONSE — 拉取响应",
+            "0x0023": "SYNC_ACK — 同步确认",
+            "0x0030": "QEF_SIGNAL — 量化进化信号",
+            "0x0031": "QEF_ACK — 信号处理确认",
+            "0x0040": "CAPABILITY_HELLO — 能力声明（握手）",
+            "0x0041": "CAPABILITY_RESPONSE — 能力协商响应",
+            "0x0050": "HEALTH_CHECK — 心跳/健康检查",
+            "0x0051": "HEALTH_RESPONSE — 健康响应",
+            "0x0060": "SESSION_BEGIN — 会话开始",
+            "0x0061": "SESSION_END — 会话结束",
+            "0x0070": "KNOWLEDGE_DISTILL — 触发知识提炼",
+            "0x00FE": "ERROR — 应用层错误（可恢复）",
+            "0x00FF": "PROTOCOL_VIOLATION — 协议违规（强制断开，不可恢复）"
+          }
+        },
+        "FLAGS": {
+          "offset": 8,
+          "size_bytes": 2,
+          "bits": {
+            "bit_0": "ENCRYPTED — payload已用AES-256-GCM加密",
+            "bit_1": "COMPRESSED — payload已用LZ4压缩",
+            "bit_2": "FRAGMENTED — 此帧为分片包",
+            "bit_3": "FINAL_FRAGMENT — 最后一个分片",
+            "bit_4": "IDEMPOTENT — 此操作是幂等的（可安全重试）",
+            "bit_5": "REQUIRES_ACK — 需要明确的ACK确认",
+            "bit_6..15": "RESERVED — MUST为0，非零时PROTOCOL_VIOLATION"
+          }
+        },
+        "PAYLOAD_LENGTH": {
+          "offset": 10,
+          "size_bytes": 4,
+          "unit": "bytes",
+          "max_value": 10485760,
+          "note": "单帧最大10MB。超过时MUST分片。"
+        },
+        "SEQUENCE_NUMBER": {
+          "offset": 14,
+          "size_bytes": 8,
+          "type": "uint64",
+          "note": "会话内单调递增。用于重排序和去重。"
+        },
+        "SESSION_ID": {
+          "offset": 22,
+          "size_bytes": 16,
+          "format": "UUID v4，二进制表示",
+          "note": "标识本次AMCP会话。COLD_BOOT_REQUEST中为零值，响应后分配真实ID。"
+        },
+        "CAUSAL_CLOCK": {
+          "offset": 38,
+          "size_bytes": 8,
+          "type": "uint64 Lamport timestamp",
+          "MUST": "每次发送时Lamport时钟+1。接收到更大值时更新本地时钟。"
+        },
+        "CHECKSUM": {
+          "offset": 46,
+          "size_bytes": 4,
+          "algorithm": "CRC-32C (Castagnoli)",
+          "scope": "覆盖整个帧（header + payload）",
+          "MUST": "接收方MUST验证checksum，失败时静默丢弃（不是PROTOCOL_VIOLATION，防止攻击放大）"
+        },
+        "TOTAL_HEADER_SIZE": "50 bytes"
+      },
+      "payload": {
+        "format": "MessagePack编码的结构化数据（不是JSON，性能更好）",
+        "encrypted_when": "FLAGS.ENCRYPTED=1，用AES-256-GCM，key通过ECDH握手协商",
+        "compressed_when": "FLAGS.COMPRESSED=1，用LZ4，仅在payload > 1KB时使用",
+        "content": "根据MSG_TYPE不同，payload结构不同。见各MSG_TYPE规范。"
+      }
+    },
+
+    "reliability_guarantees": {
+      "idempotency": {
+        "MUST": "所有MEMORY_WRITE操作MUST是幂等的。相同的knowledge_id写入N次等于写入1次。",
+        "mechanism": "接收方通过knowledge_id去重，重复写入返回已有记录的ACK"
+      },
+      "at_least_once_delivery": {
+        "scope": "REQUIRES_ACK=1的帧",
+        "timeout": "5000ms",
+        "max_retries": 3,
+        "backoff": "指数退避: 5s, 10s, 20s",
+        "on_failure": "写入本地离线队列，网络恢复后重发"
+      },
+      "ordering": {
+        "guarantee": "同一SESSION_ID内的帧按SEQUENCE_NUMBER顺序处理",
+        "cross_session": "不保证跨会话顺序，由因果时钟（L5）处理"
+      },
+      "protocol_violation_handling": {
+        "trigger_conditions": [
+          "MAGIC != 0x414D4350",
+          "FLAGS.bit_6_15 != 0 (reserved bits set)",
+          "PAYLOAD_LENGTH > 10485760",
+          "非法的状态机转换（见L5）",
+          "能力声明与行为不符"
+        ],
+        "response": "MUST立即发送0x00FF帧，然后断开连接。不记录对方节点地址供重连（防止中毒）。"
+      }
+    }
+  },
+
+  "L4_routing_scheduling": {
+    "_title": "路由调度层",
+    "_purpose": "解决AI上下文调度低效问题。核心创新：上下文调度引擎(CSE)和记忆查询语言(AMQL)。AI不再手动管理上下文，由L4自动优化。",
+
+    "context_scheduling_engine": {
+      "_doc": "CSE: 上下文调度引擎。AI节点MUST在每次COLD_BOOT前运行CSE，由CSE决定加载哪些记忆。",
+
+      "memory_roi_formula": {
+        "definition": "Memory ROI = (relevance × confidence × recency_factor) / token_cost",
+        "components": {
+          "relevance": "0.0-1.0，语义相似度得分（向量余弦相似度）",
+          "confidence": "0.0-1.0，来自AMF knowledge.core.confidence字段",
+          "recency_factor": "公式: 1.0 / (1 + decay_rate × days_since_access)，decay_rate由knowledge_type决定",
+          "token_cost": "知识序列化后的估算token数（1 token ≈ 4 bytes）"
+        },
+        "special_cases": {
+          "KT-FACT": "recency_factor = 1.0 (不衰减)",
+          "KT-PITFALL": "recency_factor = 1.0 (不衰减)",
+          "KT-CONTEXT": "decay_rate = 0.1 (快速衰减)",
+          "KT-PATTERN": "decay_rate = 0.01 (慢速衰减)"
+        }
+      },
+
+      "context_window_allocation": {
+        "_doc": "上下文窗口的固定分配比例。实现MUST遵守此分配，不得随意压缩RESERVED区。",
+        "zones": {
+          "RESERVED": {
+            "allocation": "1%",
+            "content": "AMCP协议头 + 节点标识 + 会话元数据",
+            "evictable": false
+          },
+          "CORE_PRINCIPLES": {
+            "allocation": "4%",
+            "content": "永恒事实(KT-FACT) + 核心原则 + 血泪教训(KT-PITFALL)",
+            "evictable": false,
+            "MUST": "此区域MUST在所有上下文组装中存在"
+          },
+          "HIGH_ROI": {
+            "allocation": "25%",
+            "content": "当前任务最相关记忆(top-K by ROI)",
+            "evictable": "部分可替换"
+          },
+          "MEDIUM_ROI": {
+            "allocation": "15%",
+            "content": "关联历史模式和决策记录",
+            "evictable": true
+          },
+          "WORKING_MEMORY": {
+            "allocation": "45%",
+            "content": "当前对话内容，动态使用",
+            "evictable": "会话结束时清空"
+          },
+          "OVERFLOW_BUFFER": {
+            "allocation": "10%",
+            "content": "动态压缩/释放缓冲区",
+            "evictable": true,
+            "note": "当WORKING_MEMORY接近满时，MEDIUM_ROI中低分记忆被压缩移入此区"
+          }
+        }
+      },
+
+      "scheduling_algorithm": {
+        "step_1": "提取当前任务描述的语义向量",
+        "step_2": "扫描本地索引，计算所有候选记忆的ROI",
+        "step_3": "按ROI降序排列",
+        "step_4": "CORE_PRINCIPLES区：强制填充KT-FACT+KT-PITFALL",
+        "step_5": "HIGH_ROI区：贪心填充，直到达到分配上限",
+        "step_6": "MEDIUM_ROI区：填充关联知识cluster",
+        "step_7": "输出确定性上下文包（相同输入MUST产生相同输出，可验证）",
+        "complexity": "O(N log N)，N为本地索引条目数",
+        "max_latency": "< 100ms（端侧索引扫描）"
+      }
+    },
+
+    "amql": {
+      "_title": "AMCP Memory Query Language",
+      "_doc": "AMQL是跨厂商统一的记忆查询语言。所有AMCP-DB节点MUST支持AMQL核心子集。扩展方言SHOULD向后兼容。",
+
+      "syntax": {
+        "basic_recall": "RECALL [fields] WHERE [conditions] [ORDER BY] [LIMIT tokens(N)|rows(N)]",
+        "write": "REMEMBER [amf_object]",
+        "invalidate": "FORGET knowledge_id [REASON reason_string]",
+        "distill": "DISTILL FROM [source_query] INTO [target_type] [WITH confidence_threshold]"
+      },
+
+      "examples": {
+        "semantic_search": "RECALL * WHERE semantic_match('止损策略') AND type IN [KT-FACT, KT-PITFALL] AND confidence > 0.8 LIMIT tokens(10000)",
+        "temporal_query": "RECALL * WHERE project = 'StepQuant' AND created_after = '2026-01-01' AND decay_status != 'expired' ORDER BY access_recency DESC",
+        "causal_query": "RECALL * WHERE caused_by = session_id('S-20260313-143022-abc123') OR referenced_by = qef_signal_id('QEF-001-20260313')",
+        "cluster_load": "RECALL * WHERE cluster_id = (SELECT cluster_id FROM clusters WHERE centroid_match('risk_management') LIMIT 1) LIMIT tokens(15000)",
+        "cross_project": "RECALL * WHERE type = KT-PITFALL AND tags CONTAINS 'api_integration' AND project != current_project() ORDER BY confidence DESC LIMIT rows(20)"
+      },
+
+      "query_response_format": {
+        "results": "array<AMF>",
+        "total_tokens": "int — 结果集总token估算",
+        "cache_hits": "int — 来自端侧的命中数",
+        "network_fetches": "int — 需要网络拉取的数量",
+        "query_time_ms": "float",
+        "truncated": "bool — 是否因LIMIT被截断"
+      }
+    },
+
+    "memory_routing": {
+      "_doc": "记忆路由规则：决定读写请求发往哪个节点",
+      "read_routing": {
+        "tier_0_first": "先查端侧，命中则立即返回",
+        "tier_1_fallback": "端侧未命中，查边缘节点",
+        "tier_2_last_resort": "边缘也未命中，查云端",
+        "parallel_optional": "可配置并行查询所有层（速度优先模式）"
+      },
+      "write_routing": {
+        "always_local": "写入MUST先写入端侧（保证本地一致性）",
+        "then_propagate": "按知识类型决定传播范围（见L2 sync_boundary_protocol）"
+      },
+      "conflict_routing": {
+        "on_conflict": "冲突时路由到L5一致性层处理，不是静默覆盖"
+      }
+    }
+  },
+
+  "L5_consistency": {
+    "_title": "一致性层",
+    "_purpose": "保证分布式环境下AMCP节点间的知识一致性。三个维度：物理一致性（checksum）、逻辑一致性（因果时钟）、语义一致性（知识格式标准化）。",
+
+    "three_consistency_dimensions": {
+      "physical": {
+        "definition": "同一条记忆在所有节点的二进制表示相同",
+        "mechanism": "内容寻址存储：knowledge_id = SHA-256(canonical_serialization(amf_object))",
+        "verification": "接收方重新计算knowledge_id，与发送方的不符时PROTOCOL_VIOLATION",
+        "note": "内容寻址使得相同知识在全网只有一个ID，天然防止分裂脑"
+      },
+      "logical": {
+        "definition": "知识更新的顺序在所有节点上是一致的",
+        "mechanism": "混合逻辑时钟(HLC) = Lamport时钟 + 物理时钟 + 节点ID",
+        "causal_tracking": "每条知识记录 caused_by[] 和 superseded_by 字段",
+        "conflict_resolution": "因果链更长者（有更多证据支撑）在冲突中胜出"
+      },
+      "semantic": {
+        "definition": "知识的含义在不同AI模型上被一致理解",
+        "mechanism": "AMF格式要求核心陈述为结构化三元组（subject-predicate-object），禁止纯自然语言作为机器可读的知识载体",
+        "validation": "conformance test suite中包含语义一致性测试"
+      }
+    },
+
+    "causal_clock_spec": {
+      "_doc": "混合逻辑时钟(HLC)规范",
+      "structure": {
+        "physical_ms": "uint48 — 物理时间戳，毫秒",
+        "logical": "uint16 — Lamport逻辑时钟，同一物理毫秒内的排序",
+        "node_id": "uint64 — 节点标识的hash，用于打破平局"
+      },
+      "increment_rules": {
+        "on_send": "physical_ms = max(local_physical, last_hlc.physical_ms); logical = last_hlc.logical + 1 if same ms else 0",
+        "on_receive": "physical_ms = max(local_physical, received_hlc.physical_ms); logical = max(local_logical, received_hlc.logical) + 1 if same ms else 0"
+      },
+      "knowledge_causality": {
+        "caused_by": "array<knowledge_id> — 直接因果前驱",
+        "session_context": "session_id — 在哪个会话中创建",
+        "qef_context": "qef_signal_id (optional) — 由哪个QEF信号触发"
+      }
+    },
+
+    "state_machine": {
+      "_doc": "AMCP会话状态机。实现MUST严格遵守，非法转换触发PROTOCOL_VIOLATION。",
+      "states": ["INIT", "HANDSHAKING", "COLD_BOOTING", "ACTIVE", "SYNCING", "SUSPENDED", "TERMINATING", "TERMINATED"],
+      "transitions": {
+        "INIT → HANDSHAKING": "收到或发送CAPABILITY_HELLO",
+        "HANDSHAKING → COLD_BOOTING": "能力协商成功，发送COLD_BOOT_REQUEST",
+        "COLD_BOOTING → ACTIVE": "收到COLD_BOOT_RESPONSE且验证通过",
+        "ACTIVE → SYNCING": "触发同步操作",
+        "SYNCING → ACTIVE": "同步完成(SYNC_ACK)",
+        "ACTIVE → SUSPENDED": "会话超时警告(3.5小时)",
+        "SUSPENDED → ACTIVE": "收到新请求",
+        "ACTIVE → TERMINATING": "发送SESSION_END",
+        "TERMINATING → TERMINATED": "收到SESSION_END_ACK",
+        "ANY → TERMINATED": "收到0x00FF PROTOCOL_VIOLATION"
+      },
+      "forbidden_transitions": {
+        "INIT → ACTIVE": "跳过握手和冷启动 — PROTOCOL_VIOLATION",
+        "TERMINATED → ANY": "已终止会话不可复活 — PROTOCOL_VIOLATION",
+        "COLD_BOOTING → SYNCING": "冷启动未完成就同步 — PROTOCOL_VIOLATION"
+      },
+      "timeouts": {
+        "HANDSHAKING": "30s (超时→TERMINATED)",
+        "COLD_BOOTING": "60s (超时→TERMINATED)",
+        "ACTIVE_max_duration": "4h (超时→SUSPENDED→TERMINATED)",
+        "SYNCING": "120s per sync batch"
+      }
+    },
+
+    "knowledge_lifecycle": {
+      "states": ["draft", "active", "superseded", "invalidated", "archived"],
+      "transitions": {
+        "draft → active": "写入被至少一个节点确认",
+        "active → superseded": "有新知识声明supersedes此知识",
+        "active → invalidated": "被现实证伪（QEF信号或人工标记）",
+        "active → archived": "超过冷存储阈值",
+        "FORBIDDEN": "任何状态不可→deleted（删除违反审计完整性）"
+      },
+      "immutability": "知识内容一旦写入不可修改。所有'更新'实际是创建新版本并让旧版本进入superseded状态。这是L3不可变事件日志的知识层对应。"
+    },
+
+    "status_codes": {
+      "_doc": "AMCP状态码体系，类比HTTP状态码，用于应用层错误报告（L3的0x00FF是协议层错误，这里是应用层）",
+      "2xx_success": {
+        "200": "OK — 操作成功",
+        "201": "CREATED — 新知识已创建",
+        "204": "NO_CONTENT — 成功但无返回内容（如MEMORY_INVALIDATE）",
+        "206": "PARTIAL — 部分成功（如分片传输中的中间片）"
+      },
+      "3xx_redirect": {
+        "301": "KNOWLEDGE_SUPERSEDED — 请求的知识已被新版本取代，返回新版本ID",
+        "304": "NOT_MODIFIED — 知识自上次同步后未变更（用于增量同步优化）"
+      },
+      "4xx_client_error": {
+        "400": "MALFORMED_AMF — AMF格式不合法",
+        "401": "UNAUTHORIZED — 节点未认证",
+        "403": "FORBIDDEN — 节点无权访问（trust_level不足）",
+        "404": "KNOWLEDGE_NOT_FOUND — 在所有层都未找到",
+        "408": "SESSION_TIMEOUT — 会话超时",
+        "409": "CONFLICT — 知识冲突，路由到L5处理",
+        "410": "INVALIDATED — 知识已失效",
+        "412": "CAUSAL_VIOLATION — 因果关系违规（因果前驱不存在）",
+        "429": "RATE_LIMITED — 频率限制"
+      },
+      "5xx_server_error": {
+        "500": "INTERNAL_ERROR — 节点内部错误",
+        "503": "STORAGE_UNAVAILABLE — 存储层不可用",
+        "507": "STORAGE_FULL — 端侧存储已满",
+        "508": "SYNC_LOOP — 检测到同步循环"
+      },
+      "7xx_protocol": {
+        "700": "CAPABILITY_MISMATCH — 请求的操作超出声明的能力",
+        "701": "VERSION_INCOMPATIBLE — AMCP版本不兼容",
+        "702": "COLD_BOOT_REQUIRED — 当前状态要求先执行冷启动",
+        "703": "KNOWLEDGE_TYPE_UNSUPPORTED — 节点不支持该知识类型"
+      }
+    }
+  },
+
+  "L6_memory_representation": {
+    "_title": "记忆表达层 — AMF (AMCP Memory Format)",
+    "_purpose": "定义知识的标准编码格式。AMF是AMCP的Content-Type，所有知识MUST以AMF格式表达。核心陈述用结构化三元组而非自然语言，确保跨AI语义一致性。",
+
+    "knowledge_types": {
+      "KT-FACT": {
+        "name": "永恒事实",
+        "description": "确定的、不随时间变化的事实",
+        "decay": "none",
+        "confidence_floor": 0.9,
+        "examples": ["OKX TP/SL REQUIRES attachAlgoOrds", "Python 除法 a/b RETURNS float"],
+        "solidification": "MUST solidify to tier_0"
+      },
+      "KT-PATTERN": {
+        "name": "归纳规律",
+        "description": "从数据中归纳的统计规律，有置信度和样本量",
+        "decay": "slow (half_life: 30 days)",
+        "confidence_floor": 0.6,
+        "examples": ["RSI<25时做多胜率 = 0.62 (n=200)", "高波动市场中趋势策略优于均值回归"],
+        "solidification": "tier_1"
+      },
+      "KT-CONTEXT": {
+        "name": "上下文知识",
+        "description": "特定时期有效的上下文信息",
+        "decay": "fast (half_life: 7 days)",
+        "confidence_floor": 0.5,
+        "examples": ["2026Q1市场处于高波动区间", "当前项目版本为v0.5.0-dev"],
+        "solidification": "tier_0 (7天内), tier_1 (之后)"
+      },
+      "KT-DECISION": {
+        "name": "决策记录",
+        "description": "历史决策及其理由，记录为什么选择了A而不是B",
+        "decay": "medium (half_life: 90 days)",
+        "confidence_floor": 0.7,
+        "examples": ["选择统一合并而非分步迭代 BECAUSE 架构反复重构成本>收益"],
+        "solidification": "tier_1"
+      },
+      "KT-PITFALL": {
+        "name": "血泪教训",
+        "description": "曾经踩过的坑。最高优先级知识。",
+        "decay": "none",
+        "confidence_floor": 0.95,
+        "examples": ["直接使用tpTriggerPx CAUSES TP/SL失效 VERIFIED_BY production_incident_20260310"],
+        "solidification": "MUST solidify to tier_0"
+      },
+      "KT-PRINCIPLE": {
+        "name": "方法论原则",
+        "description": "从多个项目、多次教训中提炼的行为准则",
+        "decay": "very_slow (half_life: 365 days)",
+        "confidence_floor": 0.8,
+        "examples": ["代码高效原则: 新增/删除比>3:1时需要审查"],
+        "solidification": "tier_0"
+      },
+      "KT-SIGNAL": {
+        "name": "进化信号",
+        "description": "系统自动暴露的量化进化方向信号（QEF协议产生）",
+        "decay": "event_triggered (resolved后立即过期)",
+        "confidence_floor": 0.0,
+        "solidification": "tier_0 (status=emitted), tier_1 (status=resolved)"
+      }
+    },
+
+    "amf_schema": {
+      "_doc": "AMF完整schema。所有字段含义和约束。MUST实现的字段标注required=true。",
+      "knowledge_id": {
+        "type": "string",
+        "format": "K-{SHA-256前32字节的hex}",
+        "computation": "SHA-256(canonical_msgpack(core + meta.created_at + meta.created_by))",
+        "required": true,
+        "note": "内容寻址，相同内容产生相同ID，跨节点天然去重"
+      },
+      "amf_version": {
+        "type": "string",
+        "value": "1.0",
+        "required": true
+      },
+      "type": {
+        "type": "enum",
+        "values": ["KT-FACT", "KT-PATTERN", "KT-CONTEXT", "KT-DECISION", "KT-PITFALL", "KT-PRINCIPLE", "KT-SIGNAL"],
+        "required": true
+      },
+      "core": {
+        "_doc": "结构化核心陈述。这是机器可读的部分，跨AI语义一致性的关键。",
+        "subject": {
+          "type": "string",
+          "format": "命名空间.实体.属性 (点号分隔)",
+          "examples": ["OKX.API.TP_SL", "Python.Division.Result", "StepQuant.Parameter.rsi_buy"],
+          "required": true
+        },
+        "predicate": {
+          "type": "enum",
+          "values": ["REQUIRES", "CAUSES", "EQUALS", "IMPLIES", "CONFLICTS_WITH", "SUPERSEDES", "CORRELATES_WITH", "OPTIMIZED_BY", "VERIFIED_BY", "INVALIDATED_BY"],
+          "required": true
+        },
+        "object": {
+          "type": "string",
+          "description": "断言的宾语，可以是值、另一个knowledge_id、或命名空间路径",
+          "required": true
+        },
+        "condition": {
+          "type": "string",
+          "description": "该知识成立的条件（可选）",
+          "examples": ["when: order_type IN [LIMIT, MARKET]", "when: market_regime = trending"],
+          "required": false
+        },
+        "confidence": {
+          "type": "float",
+          "range": "[0.0, 1.0]",
+          "required": true
+        },
+        "evidence": {
+          "type": "array<string>",
+          "description": "支持该知识的证据（session_id, qef_signal_id, trade_id等）",
+          "required": false,
+          "note": "confidence越高，evidence应越充分"
+        },
+        "sample_size": {
+          "type": "int",
+          "description": "对于KT-PATTERN，支撑该规律的样本量",
+          "required_for": ["KT-PATTERN"]
+        }
+      },
+      "meta": {
+        "created_at": {"type": "ISO8601", "required": true},
+        "created_by": {"type": "amcp_uri", "description": "创建该知识的节点地址", "required": true},
+        "project_scope": {"type": "array<string>", "description": "['*']表示全局知识，['StepQuant']表示项目私有", "required": true},
+        "language": {"type": "BCP47", "default": "zh-CN", "description": "annotation的语言"},
+        "decay_model": {
+          "type": {
+            "type": "enum",
+            "values": ["none", "linear", "exponential", "event_triggered"]
+          },
+          "half_life_days": {"type": "float", "description": "half-life in days，仅当type=exponential时有效"},
+          "invalidation_events": {"type": "array<string>", "description": "触发失效的事件列表，如['OKX.API.VERSION_CHANGE']"}
+        }
+      },
+      "distribution": {
+        "locality": {"type": "enum", "values": ["local", "edge", "cloud", "federated"]},
+        "sync_priority": {"type": "enum", "values": ["immediate", "eventual", "manual"]},
+        "access_tier": {"type": "enum", "values": ["hot", "warm", "cold"]}
+      },
+      "causal": {
+        "caused_by": {"type": "array<knowledge_id>", "description": "因果前驱"},
+        "supersedes": {"type": "knowledge_id", "description": "此知识取代的旧版本"},
+        "superseded_by": {"type": "knowledge_id", "description": "被哪个知识取代（只读，由协议写入）"},
+        "hlc": {"type": "HLC", "description": "混合逻辑时钟值，由L5写入"}
+      },
+      "annotation": {
+        "_doc": "人类可读注释。这部分不参与机器逻辑推理，只用于调试和展示。",
+        "natural_language": {"type": "string", "description": "自然语言描述"},
+        "tags": {"type": "array<string>"},
+        "context_hint": {"type": "string", "description": "何时应该加载这条知识的提示"}
+      },
+      "integrity": {
+        "checksum": {"type": "SHA-256 hex", "scope": "core + meta字段", "required": true},
+        "signature": {"type": "Ed25519 signature", "description": "创建节点的签名，可选但推荐"},
+        "tamper_evident": {"type": "bool", "value": true}
+      }
+    },
+
+    "amf_example": {
+      "_doc": "完整的AMF实例",
+      "knowledge_id": "K-a3f9c2e1b4d87a60f2e8c1b9d3a5f7e2c4b6d8a0f1e3c5b7d9a2f4c6b8d0a2f4",
+      "amf_version": "1.0",
+      "type": "KT-PITFALL",
+      "core": {
+        "subject": "OKX.API.Order.TP_SL",
+        "predicate": "REQUIRES",
+        "object": "attachAlgoOrds",
+        "condition": "when: order_type IN [LIMIT, MARKET] AND tp_sl_needed = true",
+        "confidence": 0.99,
+        "evidence": ["session:S-20260310-143022-abc123", "incident:PROD-2026-03-10-001"]
+      },
+      "meta": {
+        "created_at": "2026-03-10T14:35:00Z",
+        "created_by": "amcp://ai.anthropic.claude-sonnet-4-6.fp-a3c9f2.us-east-1",
+        "project_scope": ["StepQuant", "OKX-integration"],
+        "language": "zh-CN",
+        "decay_model": {
+          "type": "event_triggered",
+          "invalidation_events": ["OKX.API.MAJOR_VERSION_CHANGE"]
+        }
+      },
+      "distribution": {
+        "locality": "local",
+        "sync_priority": "immediate",
+        "access_tier": "hot"
+      },
+      "causal": {
+        "caused_by": [],
+        "supersedes": null,
+        "superseded_by": null,
+        "hlc": "2026-03-10T14:35:00.123Z-0001-node_abc"
+      },
+      "annotation": {
+        "natural_language": "OKX交易所的止盈止损参数必须通过attachAlgoOrds接口设置，直接使用tpTriggerPx字段会被交易所静默忽略，导致止损失效，已在生产环境验证。",
+        "tags": ["okx", "api", "tp_sl", "critical", "production_verified"],
+        "context_hint": "任何涉及OKX订单管理的任务都应加载此知识"
+      },
+      "integrity": {
+        "checksum": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tamper_evident": true
+      }
+    }
+  },
+
+  "L7_semantic_application": {
+    "_title": "语义应用层",
+    "_purpose": "有了L1-L6的基础设施保障，L7负责业务语义。包括：SMP作为L7的一个特定实现，标准化的AI工作流，以及QEF量化进化信号协议。",
+
+    "standard_ai_workflow": {
+      "_doc": "任何AMCP兼容的AI节点SHOULD遵循此工作流。这是SMP v2.x工作流的AMCP标准化版本。",
+      "session_begin": {
+        "step_1": "L1: 发送CAPABILITY_HELLO，完成能力协商",
+        "step_2": "L3: 建立加密通道",
+        "step_3": "L5: 状态机转换 INIT→HANDSHAKING→COLD_BOOTING",
+        "step_4": "L4: CSE运行，组装上下文包（< 100ms）",
+        "step_5": "L3: 发送COLD_BOOT_REQUEST",
+        "step_6": "L5: 状态机转换 COLD_BOOTING→ACTIVE",
+        "step_7": "输出冷启动确认（标准格式）"
+      },
+      "cold_boot_confirmation_format": "[AMCP 1.0] Cold boot: {project} v{version} | context: {token_count}t from {knowledge_count}k | QEF: {pending_signals} pending | state: ACTIVE",
+      "session_work": {
+        "reading_memory": "通过AMQL查询，CSE自动路由到最优层",
+        "writing_memory": "所有新知识MUST以AMF格式写入，MUST声明type和evidence",
+        "updating_memory": "MUST创建新版本并让旧版本进入superseded状态，禁止直接修改"
+      },
+      "session_end": {
+        "step_1": "将本次会话产生的delta知识编码为AMF格式",
+        "step_2": "L3: 发送所有MEMORY_WRITE，等待ACK",
+        "step_3": "L5: 触发因果时钟更新",
+        "step_4": "L2: 按优先级触发同步",
+        "step_5": "L3: 发送SESSION_END，等待SESSION_END_ACK",
+        "step_6": "L5: 状态机转换 ACTIVE→TERMINATING→TERMINATED"
+      }
+    },
+
+    "qef_standard": {
+      "_doc": "量化进化反馈(QEF)作为L7的内置信号类型，使用KT-SIGNAL知识类型表达",
+      "signal_schema": {
+        "signal_id": "QEF-{type_code}-{ISO_date}-{6_random_hex}",
+        "status": "emitted | acknowledged | addressed | resolved | dismissed",
+        "priority": "critical | high | medium | low",
+        "metric": "量化指标对象（必须是数字/比率/趋势，不是文本日志）",
+        "action_hint": "建议的处理方向",
+        "evidence": "产生此信号的原始数据引用"
+      },
+      "signal_lifecycle_enforcement": "QEF信号MUST被后续会话的AI消费。在ACTIVE状态超过7天且status=emitted的信号，协议层MUST在冷启动响应中将其标记为URGENT。"
+    },
+
+    "smp_as_l7_implementation": {
+      "_doc": "SMP v2.x是AMCP L7的一个具体实现。SMP的所有概念在AMCP中都有对应。",
+      "mapping": {
+        "SMP_session": "AMCP L5 state_machine + L3 SESSION_BEGIN/END",
+        "SMP_channel_branches": "AMCP L4 routing_rules",
+        "SMP_cold_boot": "AMCP L4 CSE + L3 COLD_BOOT_REQUEST/RESPONSE",
+        "SMP_RULES_NEVER_FORGET": "AMCP AMF KT-FACT + KT-PITFALL (decay=none, solidify=tier_0)",
+        "SMP_QEF": "AMCP L7 qef_standard + KT-SIGNAL",
+        "SMP_VMS": "AMCP knowledge versioning (supersedes/superseded_by)",
+        "SMP_DCS": "AMCP L2 storage_topology + solidification_rules",
+        "SMP_MFP": "AMCP mechanical_agent_profile (见下)"
+      }
+    },
+
+    "mechanical_agent_profile": {
+      "_doc": "非AI的机械流程（如StepQuant交易引擎）的AMCP接入规范",
+      "node_type": "bridge",
+      "capabilities": {
+        "memory_write": true,
+        "memory_read": false,
+        "qef_signal_emit": true,
+        "heartbeat": true
+      },
+      "heartbeat_spec": {
+        "interval_s": 60,
+        "format": "KT-SIGNAL with subject='system.heartbeat'",
+        "stale_threshold_s": 300
+      },
+      "auto_upload_triggers": ["每N个操作周期", "操作完成", "参数进化", "异常检测", "定时批量"],
+      "ctrl_c_flow": "与SMP MFP一致，额外要求：关闭前MUST发送SESSION_END帧"
+    }
+  },
+
+  "conformance": {
+    "_title": "一致性规范 — AMCP Conformance Test Suite v1.0",
+    "_doc": "声称实现AMCP的任何节点MUST通过以下测试。测试分为三级，每级都是上一级的超集。",
+
+    "level_1_basic": {
+      "description": "基础一致性 — 可以参与AMCP网络",
+      "tests": [
+        "T1-01: 帧格式验证 — 发送的所有帧MUST包含正确的MAGIC值",
+        "T1-02: 能力声明 — 连接时MUST发送CAPABILITY_HELLO",
+        "T1-03: 协议违规处理 — 收到非法帧时MUST返回0x00FF并断开",
+        "T1-04: AMF格式验证 — 所有写入的知识MUST通过AMF schema验证",
+        "T1-05: 知识不可变 — 实现MUST拒绝直接修改已有知识的请求",
+        "T1-06: 状态机 — 非法状态转换MUST被拒绝",
+        "T1-07: Checksum验证 — 帧checksum不匹配时MUST静默丢弃",
+        "T1-08: 内容寻址 — knowledge_id计算MUST符合SHA-256规范"
+      ]
+    },
+    "level_2_standard": {
+      "description": "标准一致性 — 可以参与生产环境",
+      "tests": [
+        "T2-01: 冷启动流程 — CSE MUST在100ms内完成上下文组装",
+        "T2-02: AMQL核心 — MUST支持semantic_match, type过滤, confidence过滤",
+        "T2-03: 分层存储 — MUST实现tier_0端侧存储和本地索引",
+        "T2-04: 幂等写入 — 相同knowledge_id写入N次的结果与写入1次相同",
+        "T2-05: 知识衰减 — KT-CONTEXT知识MUST在超过half_life后降低confidence",
+        "T2-06: QEF信号 — MUST能发送和接收KT-SIGNAL类型知识",
+        "T2-07: 因果时钟 — MUST正确维护HLC并在帧头携带",
+        "T2-08: 跨厂商互操作 — 与参考实现的互操作测试"
+      ]
+    },
+    "level_3_advanced": {
+      "description": "高级一致性 — 可以作为基础设施节点",
+      "tests": [
+        "T3-01: 分布式同步 — Gossip协议在60秒内达到95%节点收敛",
+        "T3-02: 冲突解决 — 并发写入冲突时按因果链长度正确解决",
+        "T3-03: 知识引力 — cluster化后相关知识MUST优先被同时加载",
+        "T3-04: 端侧固化规则 — KT-FACT/KT-PITFALL MUST被固化且MUST NOT被驱逐",
+        "T3-05: 知识提炼 — KDE从session历史提炼的原则MUST通过语义一致性测试",
+        "T3-06: 联邦同步 — 跨组织知识同步保持物理/逻辑/语义三层一致性"
+      ]
+    }
+  },
+
+  "reference_implementation": {
+    "_title": "参考实现指南",
+    "_doc": "本协议的第一个参考实现为 stepmind-amcp-bridge，可独立运行或集成到任意项目中。",
+
+    "minimal_viable_implementation": {
+      "description": "通过L1基础测试所需的最小实现",
+      "components": [
+        "amcp_frame.py — 帧编解码（50字节header + MessagePack payload）",
+        "capability_manager.py — 能力声明和协商",
+        "amf_validator.py — AMF格式验证（基于JSON Schema的等价实现）",
+        "local_index.py — SQLite端侧索引（WAL模式）",
+        "state_machine.py — AMCP会话状态机"
+      ],
+      "estimated_loc": "< 2000行Python，不包含注释"
+    },
+
+    "stepmind_bridge_upgrade": {
+      "description": "将现有stepmind_bridge.py升级为AMCP兼容实现的路径",
+      "phase_0": "添加AMF格式支持，将RULES_NEVER_FORGET重新编码为KT-FACT/KT-PITFALL",
+      "phase_1": "实现CSE替代手动冷启动序列，添加本地索引",
+      "phase_2": "实现完整状态机和因果时钟",
+      "phase_3": "开放为独立AMCP节点，支持第二个AI接入"
+    }
+  },
+
+  "versioning_and_evolution": {
+    "protocol_versioning": "遵循语义版本，MAJOR变更不保证向后兼容，MINOR变更保证向后兼容",
+    "backward_compatibility": "v1.x节点MUST能与v1.0节点通信，能力不足时降级（不是拒绝连接）",
+    "deprecation_policy": "协议特性废弃前MUST有至少一个MAJOR版本的deprecation period",
+    "extension_mechanism": "厂商扩展通过vendor_extensions字段添加，不得修改核心字段语义",
+    "evolution_principle": "协议本身也遵循P-008无限进化原则：每个版本都必须有可量化的改进"
+  },
+
+  "security_considerations": {
+    "threat_model": "主要威胁：知识污染、重放攻击、中间人攻击、节点伪造、恶意驱逐",
+    "mitigations": {
+      "knowledge_poisoning": "内容寻址ID + Ed25519签名 + confidence衰减（无证据支撑的知识自然淡出）",
+      "replay_attack": "序列号单调递增 + HLC时间戳 + session_id绑定",
+      "mitm": "AES-256-GCM全程加密 + ECDH密钥交换 + 证书链验证",
+      "node_impersonation": "L1信任锚体系 + 能力指纹验证",
+      "malicious_eviction": "KT-FACT/KT-PITFALL强制保护，不可被驱逐"
+    },
+    "privacy": "project_scope字段控制知识可见范围。local知识MUST NOT被传播到federation level。"
+  },
+
+  "closing_statement": {
+    "issued_by": "StepMind Community",
+    "issued_on": "2026-03-18",
+    "status": "AMCP v1.0.0 — the first complete specification of the AI Memory Communication Protocol. Released as an open standard, freely implementable by any party. The future is distributed, persistent, and consistent. 阶跃九思，无限进化。",
+    "call_to_action": "实现者请将conformance测试结果提交至StepMind AMCP Registry，以获得官方兼容性认证。第一个通过Level-3的实现将成为协议的规范参考实现。"
+  }
+}
