@@ -950,7 +950,7 @@ async function runShellOnce(
   const resolvedCommand = useShell ? command : resolveCommandForShelllessSpawn(command)
   const runOnce = (env: NodeJS.ProcessEnv): Promise<CliResult> =>
     new Promise((resolve) => {
-      const forceOpenShell = resolvedCommand.endsWith(".cmd") && resolvedCommand.endsWith(".cmd");
+      const forceOpenShell = resolvedCommand.endsWith(".cmd") && process.platform === "win32";
       const proc = spawn(resolvedCommand, args, {
         env,
         cwd: normalizedOptions.cwd || resolveManagedSpawnCwd(),
