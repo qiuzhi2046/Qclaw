@@ -116,7 +116,9 @@ function createWindow() {
   })
 
   browserWindow.on('close', (event) => {
-    if (process.platform !== 'darwin' || isQuitting) return
+    if (isQuitting) return
+    // macOS: standard behavior — hide to Dock
+    // Windows: minimize to system tray instead of quitting
     event.preventDefault()
     browserWindow.hide()
   })
@@ -272,7 +274,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   win = null
-  if (process.platform !== 'darwin') app.quit()
+  // Keep the app running in the system tray on all platforms
 })
 
 app.on('before-quit', (event) => {

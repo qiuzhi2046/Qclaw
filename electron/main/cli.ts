@@ -3619,6 +3619,57 @@ export async function checkOAuthComplete(providerKey: string): Promise<boolean> 
 /**
  * 刷新环境变量，让新安装的程序可以被检测到
  */
+/**
+ * Broadcast WM_SETTINGCHANGE to all top-level windows so other processes
+ * (explorer, new terminal sessions, etc.) pick up environment variable
+ * changes (especially PATH) without requiring a reboot or log-out.
+ *
+ * Equivalent to: SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment", ...)
+ */
+async function broadcastWindowsEnvironmentChange(): Promise<void> {
+  if (process.platform !== 'win32') return
+  const childProcess = await getSpawnFn()
+  return new Promise((resolve, reject) => {
+    const proc = childProcess.spawn(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        [
+          'Add-Type -TypeDefinition @"',
+          'using System;',
+          'using System.Runtime.InteropServices;',
+          'public static class EnvNotify {',
+          '  [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]',
+          '  public static extern IntPtr SendMessageTimeout(',
+          '    IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam,',
+          '    uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);',
+          '  public static readonly IntPtr HWND_BROADCAST = (IntPtr)0xffff;',
+          '  public static readonly uint WM_SETTINGCHANGE = 0x001A;',
+          '  public static readonly uint SMTO_ABORTIFHUNG = 0x0002;',
+          '  public static void Notify() {',
+          '    UIntPtr result;',
+          '    SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, UIntPtr.Zero, "Environment", SMTO_ABORTIFHUNG, 5000, out result);',
+          '  }',
+          '}',
+          '"@',
+          '[EnvNotify]::Notify()',
+        ].join('\n'),
+      ],
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        shell: true,
+        timeout: 15000,
+      }
+    )
+    proc.on('error', reject)
+    proc.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`broadcastEnvironment failed with exit code ${code}`))
+    })
+  })
+}
+
 export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: string }> {
   const platform = process.platform
 
@@ -3645,12 +3696,26 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
       }
 
       // Windows: 从注册表读取最新 PATH 并更新当前进程的环境变量
-      const result = await runShell('powershell', [
+      // Prefer pwsh (PowerShell 7+) for speed, fall back to Windows PowerShell 5.1
+      const psCmd = '[System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")'
+      const pwshResult = await runShell('pwsh', [
         '-NoProfile',
         '-Command',
-        '[System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")'
+        psCmd,
       ], MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs, 'env')
+
+      const result = pwshResult.ok ? pwshResult : await runShell('powershell', [
+        '-NoProfile',
+        '-Command',
+        psCmd,
+      ], MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs, 'env')
+
       if (result.ok && result.stdout.trim()) {
+        // Broadcast WM_SETTINGCHANGE so other processes (e.g. explorer, new terminals)
+        // pick up the PATH change without requiring a reboot.
+        await broadcastWindowsEnvironmentChange().catch(() => {
+          // Best-effort: if broadcast fails, PATH refresh still works for the current process.
+        })
         return commitPath(result.stdout.trim())
       }
       return commitPath(buildCliPathWithCandidates({

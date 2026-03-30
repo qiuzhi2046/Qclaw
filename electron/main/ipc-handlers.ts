@@ -1024,6 +1024,16 @@ export function registerIpcHandlers() {
     return usrLocalProbe.ok
   }
 
+  const isWingetAvailable = async (): Promise<boolean> => {
+    const probe = await runShell('winget', ['--version'], 15_000, 'env-setup')
+    return probe.ok
+  }
+
+  const isChocoAvailable = async (): Promise<boolean> => {
+    const probe = await runShell('choco', ['--version'], 15_000, 'env-setup')
+    return probe.ok
+  }
+
   ipcMain.handle('deps:installBin', async (_e, bin: string) => {
     return withManagedOperationLock('runtime-install', async () => {
       const safePackage = normalizeSafeInstallPackageName(bin)
@@ -1121,7 +1131,7 @@ export function registerIpcHandlers() {
         return { ok: true, stdout: '', stderr: '', code: 0 }
       }
 
-      // 2. 尝试 brew install
+      // 2. Try platform-native package manager (brew on macOS, winget/choco on Windows)
       if (process.platform === 'darwin') {
         if (await isBrewAvailable()) {
           for (const bin of missingBins) {
@@ -1145,6 +1155,39 @@ export function registerIpcHandlers() {
           log('请先在终端安装 Homebrew:')
           log('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"')
           return { ok: false, stdout: '', stderr: `需要 Homebrew 来安装依赖，请先安装 Homebrew`, code: 1 }
+        }
+      } else if (process.platform === 'win32') {
+        // Windows: try winget first, then chocolatey as fallback
+        const wingetAvailable = await isWingetAvailable()
+        const chocoAvailable = !wingetAvailable && await isChocoAvailable()
+
+        if (wingetAvailable) {
+          for (const bin of missingBins) {
+            if (await verifyBin(bin)) continue
+            log(`通过 winget 安装 ${bin} ...`)
+            const installResult = await runShell('winget', ['install', '--id', bin, '-e', '--accept-source-agreements', '--accept-package-agreements'], 120_000, 'env-setup')
+            if (installResult.ok || await verifyBin(bin)) {
+              log(`${bin} 已通过 winget 安装`)
+            }
+          }
+        } else if (chocoAvailable) {
+          for (const bin of missingBins) {
+            if (await verifyBin(bin)) continue
+            log(`通过 Chocolatey 安装 ${bin} ...`)
+            await runShell('choco', ['install', bin, '-y'], 120_000, 'env-setup')
+            if (await verifyBin(bin)) {
+              log(`${bin} 已通过 Chocolatey 安装`)
+            }
+          }
+        } else {
+          log('未检测到 winget 或 Chocolatey，部分依赖无法自动安装')
+          log('建议安装 winget (Windows 10+ 自带) 或 Chocolatey:')
+          log('https://winget.run 或 https://chocolatey.org/install')
+        }
+
+        if (await checkAllResolved(missingBins)) {
+          log('所有依赖安装完成')
+          return { ok: true, stdout: '', stderr: '', code: 0 }
         }
       }
 
