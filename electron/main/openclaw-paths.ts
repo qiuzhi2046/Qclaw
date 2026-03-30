@@ -83,6 +83,11 @@ export function formatDisplayPath(
     normalizedPath.startsWith(`${normalizedHomeDir}${platform === 'win32' ? '\\' : '/'}`)
 
   if (!isMatch) return normalizedPath
+
+  // Windows: show full path — users are more familiar with C:\Users\xxx\.openclaw
+  // macOS/Linux: use ~ shorthand — standard Unix convention
+  if (platform === 'win32') return normalizedPath
+
   return `~${normalizedPath.slice(normalizedHomeDir.length)}`
 }
 

@@ -3385,6 +3385,17 @@ export async function cleanupOpenClawStateAndData(
 
   if (isWin) {
     if (!officialStateCleanupSucceeded) {
+      // Windows: first try to gracefully stop any lingering gateway/node processes
+      // that may hold file locks on the OpenClaw home directory.
+      await runShell('taskkill', ['/f', '/im', 'openclaw.exe', '/t'], 5_000, 'upgrade').catch(() => {
+        // openclaw.exe may not be running, ignore
+      })
+      await runShell('taskkill', ['/f', '/im', 'node.exe', '/fi', 'WINDOWTITLE eq openclaw*'], 5_000, 'upgrade').catch(() => {
+        // No matching node process, ignore
+      })
+      // Short delay to let file handles release
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
       // 旧版 OpenClaw 无官方 uninstall 时，回退到本地目录删除
       const rmOpenclaw = await runShell(
         'cmd',
@@ -3393,7 +3404,7 @@ export async function cleanupOpenClawStateAndData(
         'upgrade'
       )
       if (!rmOpenclaw.ok) {
-        errors.push(`删除 ${targetDisplayHomeDir} 失败: ${rmOpenclaw.stderr}`)
+        errors.push(`删除 ${targetDisplayHomeDir} 失败。可能存在文件被其他进程占用，请关闭所有 OpenClaw 相关程序后重试。`)
       }
     }
   } else {
