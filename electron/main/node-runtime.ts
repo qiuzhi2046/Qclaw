@@ -205,6 +205,23 @@ export function buildMacNpmCommand(
   return prefixPosixCommandWithWorkingDirectory(commands.join(' && '), options.workingDirectory)
 }
 
+export function buildWindowsNpmCommand(
+  npmArgs: string[],
+  options: {
+    detectedBinDir?: string | null
+    npmCacheDir?: string
+    workingDirectory?: string | null
+  } = {}
+): { command: string; args: string[]; shell: boolean } {
+  // On Windows we invoke npm.cmd directly; PATH augmentation is handled by the caller via env.
+  const npmExecutable = 'npm.cmd'
+  return {
+    command: npmExecutable,
+    args: npmArgs,
+    shell: true,
+  }
+}
+
 export function isNodeVersionAtLeast(currentVersion: string, requiredVersion: string): boolean {
   const current = parseSemver(currentVersion)
   const required = parseSemver(requiredVersion)

@@ -8,7 +8,7 @@ import QClawUpdateDialog from './QClawUpdateDialog'
 
 function summarizeOpenClaw(check: CombinedUpdateCheckResult | null): string {
   if (!check) return '读取中...'
-  if (check.openclaw.policyState === 'supported_target') return '当前已是受支持上限版本'
+  if (check.openclaw.policyState === 'supported_target') return '版本正常'
   if (check.openclaw.policyState === 'supported_not_target' && check.openclaw.targetVersion) {
     if (check.openclaw.enforcement === 'manual_block') {
       return `如需升级请手动切换到 ${check.openclaw.targetVersion}`

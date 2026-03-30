@@ -409,8 +409,8 @@ export function buildOpenClawGateState(
         canUpgrade: false,
         canAutoCorrect: false,
         blocksContinue: false,
-        statusLabel: '已处于受支持上限',
-        message: withTakeoverSuffix('当前 OpenClaw 已是受支持上限版本'),
+        statusLabel: '版本正常',
+        message: withTakeoverSuffix('当前 OpenClaw 版本正常，无需升级'),
       }
   }
 }

@@ -100,7 +100,7 @@ export default function OpenClawUpgradeDialog({
 
           {check.policyState === 'supported_target' && (
             <Alert color="green" variant="light" mt="md">
-              当前 OpenClaw 已是受支持上限版本，无需再升级。
+              当前 OpenClaw 版本正常，无需升级。
             </Alert>
           )}
 

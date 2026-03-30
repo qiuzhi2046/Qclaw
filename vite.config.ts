@@ -30,6 +30,9 @@ function resolveElectronSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 function syncDevElectronBundleIcon() {
+  // macOS only: sync .icns icon and update Info.plist for dev Electron.app
+  if (process.platform !== 'darwin') return
+
   const sourceIconPath = path.join(__dirname, 'build', 'icon.icns')
   const electronAppPath = path.join(
     __dirname,

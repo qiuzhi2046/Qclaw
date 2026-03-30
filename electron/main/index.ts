@@ -97,7 +97,8 @@ function createWindow() {
     height: mainWindowBounds.height,
     minWidth: mainWindowBounds.minWidth,
     minHeight: mainWindowBounds.minHeight,
-    titleBarStyle: 'hiddenInset',
+    // hiddenInset is macOS-only; on Windows use 'hidden' to keep native controls but hide the title bar
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : process.platform === 'win32' ? 'hidden' : 'default',
     show: false,
     backgroundColor: DESKTOP_WINDOW_POLICY.backgroundColor,
     webPreferences: { preload },
@@ -235,7 +236,10 @@ async function restartGatewayFromTray() {
 function createTray() {
   const trayIconPath = path.join(process.env.VITE_PUBLIC!, 'tray.png')
   const trayIcon = nativeImage.createFromPath(trayIconPath)
-  trayIcon.setTemplateImage(true)
+  // setTemplateImage is macOS-only; on other platforms it's a no-op but safe to call
+  if (process.platform === 'darwin') {
+    trayIcon.setTemplateImage(true)
+  }
   const resized = trayIcon.resize({ width: 32, height: 32 })
   tray = new Tray(resized)
   tray.setToolTip('Qclaw')
