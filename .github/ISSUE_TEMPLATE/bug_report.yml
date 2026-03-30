@@ -27,7 +27,7 @@ body:
         3. 点击 '...'
         4. 出现错误
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: expected
@@ -35,7 +35,7 @@ body:
       label: 期望行为
       description: 你期望看到什么结果？
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: actual
@@ -43,7 +43,7 @@ body:
       label: 实际行为
       description: 实际发生了什么？
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: os
@@ -61,7 +61,7 @@ body:
     attributes:
       label: 应用版本
       description: 可在设置页面查看
-      placeholder: "2.2.0"
+      placeholder: "3.29"
     validations:
       required: true
 
