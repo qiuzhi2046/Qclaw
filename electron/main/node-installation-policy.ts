@@ -55,7 +55,7 @@ export interface NodeInstallPlan {
   requiredVersion: string
   requirementSource: RequirementSource
   source: PlanSource
-  platform: 'darwin' | 'win32'
+  platform: 'darwin' | 'win32' | 'linux'
   detectedArch: NodeArch
   installerArch: NodeInstallerArch
   distBaseUrl: string
@@ -348,8 +348,26 @@ function resolveWindowsInstallerArch(
   return null
 }
 
+function resolveLinuxInstallerArch(
+  files: string[],
+  detectedArch: NodeArch
+): NodeArch | null {
+  const availability: Array<{ installerArch: NodeArch; fileKey: string }> =
+    detectedArch === 'arm64'
+      ? [
+          { installerArch: 'arm64', fileKey: 'linux-arm64' },
+          { installerArch: 'x64', fileKey: 'linux-x64' },
+        ]
+      : [{ installerArch: 'x64', fileKey: 'linux-x64' }]
+
+  for (const candidate of availability) {
+    if (files.includes(candidate.fileKey)) return candidate.installerArch
+  }
+  return null
+}
+
 function resolveInstallerArchForRelease(
-  platform: 'darwin' | 'win32',
+  platform: 'darwin' | 'win32' | 'linux',
   files: string[],
   detectedArch: NodeArch
 ): NodeInstallerArch | null {
@@ -357,12 +375,20 @@ function resolveInstallerArchForRelease(
     return files.includes('osx-x64-pkg') ? 'universal' : null
   }
 
+  if (platform === 'linux') {
+    return resolveLinuxInstallerArch(files, detectedArch)
+  }
+
   return resolveWindowsInstallerArch(files, detectedArch)
 }
 
-function buildInstallerFilename(version: string, platform: 'darwin' | 'win32', installerArch: NodeInstallerArch): string {
+function buildInstallerFilename(version: string, platform: 'darwin' | 'win32' | 'linux', installerArch: NodeInstallerArch): string {
   if (platform === 'darwin') {
     return `node-${version}.pkg`
+  }
+
+  if (platform === 'linux') {
+    return `node-${version}-linux-${installerArch}.tar.xz`
   }
 
   return `node-${version}-${installerArch}.msi`
@@ -371,7 +397,7 @@ function buildInstallerFilename(version: string, platform: 'darwin' | 'win32', i
 function buildInstallPlan(
   version: string,
   source: PlanSource,
-  platform: 'darwin' | 'win32',
+  platform: 'darwin' | 'win32' | 'linux',
   detectedArch: NodeArch,
   installerArch: NodeInstallerArch,
   requiredVersion: string,
@@ -396,7 +422,7 @@ function buildInstallPlan(
 
 function selectPlanFromDistIndex(
   entries: NodeDistIndexEntry[],
-  platform: 'darwin' | 'win32',
+  platform: 'darwin' | 'win32' | 'linux',
   detectedArch: NodeArch,
   requiredVersion: string,
   requirementSource: RequirementSource,
@@ -540,7 +566,7 @@ export async function resolveNodeInstallPlan(
 
   const promise = (async () => {
     const platform = (options.platform || process.platform) as NodeJS.Platform
-    if (platform !== 'darwin' && platform !== 'win32') {
+    if (platform !== 'darwin' && platform !== 'win32' && platform !== 'linux') {
       throw new Error(`Unsupported platform for auto-install: ${platform}`)
     }
 
@@ -554,7 +580,7 @@ export async function resolveNodeInstallPlan(
     const pinnedVersion = normalizeNodeVersionTag(String(env[ENV_NODE_INSTALL_VERSION] || ''))
 
     if (pinnedVersion) {
-      const installerArch = platform === 'darwin' ? 'universal' : detectedArch === 'arm64' ? 'x64' : detectedArch
+      const installerArch = platform === 'darwin' ? 'universal' : detectedArch
       return buildInstallPlan(
         pinnedVersion,
         'env-override',
@@ -584,7 +610,7 @@ export async function resolveNodeInstallPlan(
     }
 
     const fallbackVersion = getBundledFallbackVersion(required.minVersion)
-    const fallbackInstallerArch = platform === 'darwin' ? 'universal' : detectedArch === 'arm64' ? 'x64' : detectedArch
+    const fallbackInstallerArch = platform === 'darwin' ? 'universal' : detectedArch
     return buildInstallPlan(
       fallbackVersion,
       'bundled-fallback',
