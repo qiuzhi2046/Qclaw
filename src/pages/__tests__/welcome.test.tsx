@@ -20,8 +20,8 @@ describe('Welcome', () => {
     )
 
     expect(html).toContain('环境风险')
-    expect(html).toContain('Qclaw 会接管您的 Node 环境')
-    expect(html).toContain('如果您有本地项目依赖特定的 Node 环境，请谨慎安装')
-    expect(html).toContain('最后，建议不要在工作机上使用')
+    expect(html).toContain('Openclaw权限较大，不建议使用含有重要文件的工作电脑')
+    expect(html).toContain('当前Openclaw 要求 Node.js 版本高于22.16')
+    expect(html).toContain('Qclaw 会自动安装最新版node，可能造成node版本覆盖')
   })
 })
