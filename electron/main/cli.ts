@@ -3669,7 +3669,6 @@ async function broadcastWindowsEnvironmentChange(): Promise<void> {
       ],
       {
         stdio: ['ignore', 'ignore', 'pipe'],
-        shell: true,
         timeout: 15000,
       }
     )
