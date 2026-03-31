@@ -75,7 +75,12 @@ jobs:
         run: npm install
 
       - name: Run full Vitest suite
+        if: matrix.os != 'windows-latest'
         run: npm test
+
+      - name: Run full Vitest suite
+        if: matrix.os == 'windows-latest'
+        run: npm test -- --minWorkers=1 --maxWorkers=1
 
   model-regression:
     name: Model regression (ubuntu-latest)
