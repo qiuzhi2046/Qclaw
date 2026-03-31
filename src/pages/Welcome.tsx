@@ -35,7 +35,7 @@ export default function Welcome({ onAccept }: WelcomeProps) {
           <li>读取和修改文件、执行系统命令、连接互联网</li>
           <li>访问您的 API 密钥（用于调用 AI 服务）</li>
           <li>操作 IM 应用（飞书、企微、钉钉等）</li>
-          <li className="app-text-warning">使用 AI 服务会产生费用，取决于您选择的提供商</li>
+          <li><span className="app-text-warning font-medium">使用 AI 服务会产生费用，取决于您选择的提供商</span></li>
         </ul>
       </div>
 
@@ -53,6 +53,19 @@ export default function Welcome({ onAccept }: WelcomeProps) {
           <li><span className="app-text-warning font-medium">保护现有配置（安装前自动备份，不会覆盖您的设置）</span></li>
           <li>本地数据存储（所有配置和数据仅保存在您的电脑上）</li>
         </ul>
+      </div>
+
+      <div className="w-full rounded-lg app-bg-secondary px-3.5 py-2.5 flex flex-col">
+        <div className="flex items-center gap-1.5">
+          <IconPinFilled size={12} className="text-red-400 flex-shrink-0" />
+          <Text fw={600} size="sm" className="app-text-primary">环境风险</Text>
+        </div>
+        <Text size="xs" className="app-text-warning mt-0.5 font-medium">
+          <ul className="list-disc list-inside app-text-secondary mt-0.5 flex flex-col" style={{ fontSize: '12.5px', lineHeight: 1.7 }}>
+          <li><span className="app-text-warning font-medium">Openclaw权限较大，不建议使用含有重要文件的工作电脑。</span></li>  
+          <li>对于开发者：当前Openclaw 要求 Node.js 版本高于22.16，如果您本地的 Node.js 低于22.16，Qclaw 会自动安装最新版node，可能造成node版本覆盖。</li>  
+        </ul>
+        </Text>
       </div>
 
       {/* Checkbox */}

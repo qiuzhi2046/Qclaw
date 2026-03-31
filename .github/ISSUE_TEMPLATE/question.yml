@@ -18,7 +18,7 @@ body:
   - type: textarea
     id: context
     attributes:
-      label: 相关上���文
+      label: 相关上下文
       description: 操作系统、应用版本、截图或日志等有助于回答问题的信息
     validations:
       required: false
