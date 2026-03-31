@@ -76,6 +76,9 @@ describe('managed channel lifecycle specs', () => {
       'dingtalk',
       'qqbot',
       'openclaw-weixin',
+      'line',
+      'telegram',
+      'slack',
     ])
 
     expect(getManagedChannelLifecycleSpec('feishu')).toMatchObject({
