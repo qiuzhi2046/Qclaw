@@ -18,6 +18,10 @@
     <a href="https://qclawai.com/"><strong>访问官网 &raquo;</strong></a>
     <br />
     <br />
+    <a href="https://github.com/qiuzhi2046/Qclaw/blob/main/README.en.md">English</a>
+    &middot;
+    <a href="https://github.com/qiuzhi2046/Qclaw/blob/main/README.md">简体中文</a>
+    &middot;
     <a href="https://github.com/qiuzhi2046/qclaw/issues/new?labels=bug">报告 Bug</a>
     &middot;
     <a href="https://github.com/qiuzhi2046/qclaw/issues/new?labels=enhancement">功能建议</a>
