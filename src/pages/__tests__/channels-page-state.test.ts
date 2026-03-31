@@ -4,6 +4,7 @@ import {
   shouldReuseModelOptionsCache,
   shouldShowFeishuPluginRepairAction,
   shouldShowPluginStatus,
+  shouldShowChannelResourceConfig,
 } from '../ChannelsPage'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
@@ -97,5 +98,79 @@ describe('channels page state helpers', () => {
     expect(channelsPageSource).toContain("mode: 'all'")
     expect(channelsPageSource).toContain('envVars')
     expect(channelsPageSource).toContain('configData')
+  })
+})
+
+// ─── Task 4: Generic channel resource config UI ───
+
+describe('shouldShowChannelResourceConfig', () => {
+  it('shows resource config for feishu bots with agentId', () => {
+    expect(
+      shouldShowChannelResourceConfig({
+        channelId: 'feishu',
+        agentId: 'agent_123',
+      })
+    ).toBe(true)
+  })
+
+  it('shows resource config for LINE channels', () => {
+    expect(
+      shouldShowChannelResourceConfig({
+        channelId: 'line',
+      })
+    ).toBe(true)
+  })
+
+  it('shows resource config for Telegram channels', () => {
+    expect(
+      shouldShowChannelResourceConfig({
+        channelId: 'telegram',
+      })
+    ).toBe(true)
+  })
+
+  it('shows resource config for Slack channels', () => {
+    expect(
+      shouldShowChannelResourceConfig({
+        channelId: 'slack',
+      })
+    ).toBe(true)
+  })
+
+  it('does not show resource config for feishu without agentId', () => {
+    expect(
+      shouldShowChannelResourceConfig({
+        channelId: 'feishu',
+      })
+    ).toBe(false)
+  })
+
+  it('does not show resource config for wecom', () => {
+    expect(
+      shouldShowChannelResourceConfig({
+        channelId: 'wecom',
+      })
+    ).toBe(false)
+  })
+})
+
+describe('generic resource config button in ChannelsPage source', () => {
+  it('renders a resource config button for non-Feishu channels in the source', () => {
+    const channelsPageSource = fs.readFileSync(
+      path.join(process.cwd(), 'src', 'pages', 'ChannelsPage.tsx'),
+      'utf8'
+    )
+
+    expect(channelsPageSource).toContain('资源配置')
+    expect(channelsPageSource).toContain('handleOpenResourceConfig')
+  })
+
+  it('preserves the existing feishu model config button', () => {
+    const channelsPageSource = fs.readFileSync(
+      path.join(process.cwd(), 'src', 'pages', 'ChannelsPage.tsx'),
+      'utf8'
+    )
+
+    expect(channelsPageSource).toContain('配置模型')
   })
 })
