@@ -24,7 +24,7 @@ import {
   restoreCapturedFeishuBotConfig,
   shouldValidateFeishuManualCredentials,
 } from '../ChannelConnect'
-import { getChannelDefinition, listChannelDefinitions } from '../../lib/openclaw-channel-registry'
+import { getChannelDefinition, listChannelDefinitions, applyChannelConfig } from '../../lib/openclaw-channel-registry'
 
 describe('shouldShowChannelConnectSkipButton', () => {
   it('stays hidden by default when the channel has not earned skip availability yet', () => {
@@ -1198,5 +1198,86 @@ describe('new IM channel definitions (LINE, Telegram, Slack)', () => {
   it('Slack has skipPairing enabled', () => {
     const slack = getChannelDefinition('slack')
     expect(slack?.skipPairing).toBe(true)
+  })
+})
+
+// ─── Task 2: Config writes for LINE / Telegram / Slack ───
+
+describe('applyChannelConfig for new IM channels', () => {
+  it('LINE writes channels.line.enabled, channelAccessToken, channelSecret, and default dmPolicy', () => {
+    const result = applyChannelConfig({}, 'line', {
+      channelAccessToken: 'line_token_123',
+      channelSecret: 'line_secret_abc',
+    })
+
+    expect(result.channels.line.enabled).toBe(true)
+    expect(result.channels.line.channelAccessToken).toBe('line_token_123')
+    expect(result.channels.line.channelSecret).toBe('line_secret_abc')
+    expect(result.channels.line.dmPolicy).toBe('pairing')
+  })
+
+  it('Telegram writes channels.telegram.enabled, botToken, and default dmPolicy', () => {
+    const result = applyChannelConfig({}, 'telegram', {
+      botToken: '123456:ABC-DEF',
+    })
+
+    expect(result.channels.telegram.enabled).toBe(true)
+    expect(result.channels.telegram.botToken).toBe('123456:ABC-DEF')
+    expect(result.channels.telegram.dmPolicy).toBe('pairing')
+  })
+
+  it('Slack writes channels.slack.enabled, botToken, appToken, and default dmPolicy', () => {
+    const result = applyChannelConfig({}, 'slack', {
+      botToken: 'xoxb-test',
+      appToken: 'xapp-test',
+    })
+
+    expect(result.channels.slack.enabled).toBe(true)
+    expect(result.channels.slack.botToken).toBe('xoxb-test')
+    expect(result.channels.slack.appToken).toBe('xapp-test')
+    expect(result.channels.slack.dmPolicy).toBe('pairing')
+  })
+
+  it('plugin allowlist is added for LINE', () => {
+    const result = applyChannelConfig({}, 'line', {
+      channelAccessToken: 'token',
+      channelSecret: 'secret',
+    })
+
+    expect(result.plugins.allow).toContain('openclaw-line')
+  })
+
+  it('plugin allowlist is added for Telegram', () => {
+    const result = applyChannelConfig({}, 'telegram', {
+      botToken: 'token',
+    })
+
+    expect(result.plugins.allow).toContain('openclaw-telegram')
+  })
+
+  it('plugin allowlist is added for Slack', () => {
+    const result = applyChannelConfig({}, 'slack', {
+      botToken: 'xoxb-test',
+      appToken: 'xapp-test',
+    })
+
+    expect(result.plugins.allow).toContain('openclaw-slack')
+  })
+
+  it('LINE config write preserves existing unrelated channel config', () => {
+    const existing = {
+      channels: {
+        feishu: { enabled: true, appId: 'cli_test', appSecret: 'secret' },
+      },
+    }
+
+    const result = applyChannelConfig(existing, 'line', {
+      channelAccessToken: 'line_token',
+      channelSecret: 'line_secret',
+    })
+
+    expect(result.channels.feishu.enabled).toBe(true)
+    expect(result.channels.feishu.appId).toBe('cli_test')
+    expect(result.channels.line.enabled).toBe(true)
   })
 })

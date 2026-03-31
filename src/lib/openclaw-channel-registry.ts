@@ -514,6 +514,38 @@ export function applyChannelConfig(
           ? existingChannel.accounts
           : {},
     }
+  } else if (channel.id === 'line') {
+    const existingChannel = (nextConfig.channels.line || {}) as Record<string, any>
+    nextConfig.channels.line = {
+      ...existingChannel,
+      enabled: true,
+      channelAccessToken: values.channelAccessToken,
+      channelSecret: values.channelSecret,
+      dmPolicy: typeof existingChannel.dmPolicy === 'string' && existingChannel.dmPolicy.trim()
+        ? existingChannel.dmPolicy.trim()
+        : 'pairing',
+    }
+  } else if (channel.id === 'telegram') {
+    const existingChannel = (nextConfig.channels.telegram || {}) as Record<string, any>
+    nextConfig.channels.telegram = {
+      ...existingChannel,
+      enabled: true,
+      botToken: values.botToken,
+      dmPolicy: typeof existingChannel.dmPolicy === 'string' && existingChannel.dmPolicy.trim()
+        ? existingChannel.dmPolicy.trim()
+        : 'pairing',
+    }
+  } else if (channel.id === 'slack') {
+    const existingChannel = (nextConfig.channels.slack || {}) as Record<string, any>
+    nextConfig.channels.slack = {
+      ...existingChannel,
+      enabled: true,
+      botToken: values.botToken,
+      appToken: values.appToken,
+      dmPolicy: typeof existingChannel.dmPolicy === 'string' && existingChannel.dmPolicy.trim()
+        ? existingChannel.dmPolicy.trim()
+        : 'pairing',
+    }
   }
 
   ensurePluginAllow(nextConfig, resolveChannelPluginAllowId(channel))
