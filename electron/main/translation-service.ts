@@ -121,10 +121,8 @@ export function clearTranslationCache(): void {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath)
     }
-    
-    safeLog(`[Translation] Cleared ${size} cached translations`)
   } catch (error) {
-    safeError('[Translation] Failed to clear cache:', error)
+    // Silent error handling
   }
 }
 
