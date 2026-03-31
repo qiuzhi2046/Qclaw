@@ -24,7 +24,7 @@ import {
   restoreCapturedFeishuBotConfig,
   shouldValidateFeishuManualCredentials,
 } from '../ChannelConnect'
-import { getChannelDefinition } from '../../lib/openclaw-channel-registry'
+import { getChannelDefinition, listChannelDefinitions } from '../../lib/openclaw-channel-registry'
 
 describe('shouldShowChannelConnectSkipButton', () => {
   it('stays hidden by default when the channel has not earned skip availability yet', () => {
@@ -1148,5 +1148,55 @@ describe('mergeFeishuCreateModeBots', () => {
 
     expect(result.addedBots).toEqual([])
     expect(result.nextConfig).toEqual(currentConfig)
+  })
+})
+
+// ─── Task 1: LINE / Telegram / Slack channel definitions ───
+
+describe('new IM channel definitions (LINE, Telegram, Slack)', () => {
+  it('listChannelDefinitions contains line, telegram, and slack', () => {
+    const definitions = listChannelDefinitions()
+    const ids = definitions.map((d) => d.id)
+    expect(ids).toContain('line')
+    expect(ids).toContain('telegram')
+    expect(ids).toContain('slack')
+  })
+
+  it('LINE definition exposes channelAccessToken and channelSecret fields', () => {
+    const line = getChannelDefinition('line')
+    expect(line).not.toBeNull()
+    const fieldKeys = line!.fields.map((f) => f.key)
+    expect(fieldKeys).toContain('channelAccessToken')
+    expect(fieldKeys).toContain('channelSecret')
+  })
+
+  it('Telegram definition exposes botToken field', () => {
+    const telegram = getChannelDefinition('telegram')
+    expect(telegram).not.toBeNull()
+    const fieldKeys = telegram!.fields.map((f) => f.key)
+    expect(fieldKeys).toContain('botToken')
+  })
+
+  it('Slack definition exposes botToken and appToken fields', () => {
+    const slack = getChannelDefinition('slack')
+    expect(slack).not.toBeNull()
+    const fieldKeys = slack!.fields.map((f) => f.key)
+    expect(fieldKeys).toContain('botToken')
+    expect(fieldKeys).toContain('appToken')
+  })
+
+  it('LINE has skipPairing enabled', () => {
+    const line = getChannelDefinition('line')
+    expect(line?.skipPairing).toBe(true)
+  })
+
+  it('Telegram has skipPairing enabled', () => {
+    const telegram = getChannelDefinition('telegram')
+    expect(telegram?.skipPairing).toBe(true)
+  })
+
+  it('Slack has skipPairing enabled', () => {
+    const slack = getChannelDefinition('slack')
+    expect(slack?.skipPairing).toBe(true)
   })
 })

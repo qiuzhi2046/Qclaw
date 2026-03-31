@@ -16,6 +16,9 @@ import wecomIcon from '../assets/channels/wecom.svg'
 import dingtalkIcon from '../assets/channels/dingtalk.svg'
 import qqIcon from '../assets/channels/qq.svg'
 import weixinIcon from '../assets/channels/weixin.svg'
+import lineIcon from '../assets/channels/line.svg'
+import telegramIcon from '../assets/channels/telegram.svg'
+import slackIcon from '../assets/channels/slack.svg'
 
 export { classifyOnboardFailure, isPluginAlreadyInstalledError } from '../shared/openclaw-cli-errors'
 export { applyDingtalkFallbackConfig } from '../shared/dingtalk-official-setup'
@@ -85,6 +88,9 @@ const WECOM_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('wecom')
 const DINGTALK_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('dingtalk')
 const QQBOT_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('qqbot')
 const WEIXIN_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('openclaw-weixin')
+const LINE_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('line')
+const TELEGRAM_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('telegram')
+const SLACK_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('slack')
 
 const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
   {
@@ -165,6 +171,59 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
       packageName: WEIXIN_MANAGED_PLUGIN?.packageName,
       allowId: WEIXIN_MANAGED_PLUGIN?.pluginId,
       cleanupPluginIds: WEIXIN_MANAGED_PLUGIN?.cleanupPluginIds,
+    },
+    skipPairing: true,
+  },
+  {
+    id: 'line',
+    name: 'LINE',
+    logo: lineIcon,
+    description: 'LINE Bot（官方插件）',
+    helpUrl: 'https://developers.line.biz/',
+    helpText: '在 LINE Developers Console 创建 Messaging API 频道，获取 Channel Access Token 和 Channel Secret',
+    fields: [
+      { key: 'channelAccessToken', label: 'Channel Access Token', placeholder: 'Channel Access Token', type: 'password', required: true },
+      { key: 'channelSecret', label: 'Channel Secret', placeholder: 'Channel Secret', type: 'password', required: true },
+    ],
+    plugin: {
+      packageName: LINE_MANAGED_PLUGIN?.packageName,
+      allowId: LINE_MANAGED_PLUGIN?.pluginId,
+      cleanupPluginIds: LINE_MANAGED_PLUGIN?.cleanupPluginIds,
+    },
+    skipPairing: true,
+  },
+  {
+    id: 'telegram',
+    name: 'Telegram',
+    logo: telegramIcon,
+    description: 'Telegram Bot（官方插件）',
+    helpUrl: 'https://core.telegram.org/bots/api',
+    helpText: '通过 @BotFather 创建 Telegram Bot，获取 Bot Token',
+    fields: [
+      { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11', type: 'password', required: true },
+    ],
+    plugin: {
+      packageName: TELEGRAM_MANAGED_PLUGIN?.packageName,
+      allowId: TELEGRAM_MANAGED_PLUGIN?.pluginId,
+      cleanupPluginIds: TELEGRAM_MANAGED_PLUGIN?.cleanupPluginIds,
+    },
+    skipPairing: true,
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    logo: slackIcon,
+    description: 'Slack Bot（官方插件）',
+    helpUrl: 'https://api.slack.com/docs',
+    helpText: '在 Slack App 管理页面创建 App，获取 Bot Token 和 App-Level Token',
+    fields: [
+      { key: 'botToken', label: 'Bot Token', placeholder: 'xoxb-...', type: 'password', required: true },
+      { key: 'appToken', label: 'App-Level Token', placeholder: 'xapp-...', type: 'password', required: true },
+    ],
+    plugin: {
+      packageName: SLACK_MANAGED_PLUGIN?.packageName,
+      allowId: SLACK_MANAGED_PLUGIN?.pluginId,
+      cleanupPluginIds: SLACK_MANAGED_PLUGIN?.cleanupPluginIds,
     },
     skipPairing: true,
   },
