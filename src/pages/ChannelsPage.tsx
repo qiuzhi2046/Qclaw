@@ -471,7 +471,7 @@ export default function ChannelsPage() {
       const writeResult = await window.api.applyConfigPatchGuarded({
         beforeConfig,
         afterConfig,
-        reason: 'channel-resource-config',
+        reason: 'unknown',
       })
 
       if (!writeResult.ok) {
