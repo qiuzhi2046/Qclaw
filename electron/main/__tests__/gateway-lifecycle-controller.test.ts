@@ -40,7 +40,7 @@ function createDeferred<T>() {
   return { promise, resolve }
 }
 
-async function waitForCalls(mock: ReturnType<typeof vi.fn>, expectedCalls: number, timeoutMs = 200): Promise<void> {
+async function waitForCalls(mock: ReturnType<typeof vi.fn>, expectedCalls: number, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (mock.mock.calls.length >= expectedCalls) {

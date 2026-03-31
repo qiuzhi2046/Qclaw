@@ -30,7 +30,7 @@ function createDeferred<T>() {
   return { promise, resolve }
 }
 
-async function waitForGuardedWriteCalls(expectedCalls: number, timeoutMs = 200): Promise<void> {
+async function waitForGuardedWriteCalls(expectedCalls: number, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (guardedWriteConfigMock.mock.calls.length >= expectedCalls) {

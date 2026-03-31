@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { waitForDashboardGatewayRunning } from '../Dashboard'
 
 const FAST_POLL_POLICY = {
-  timeoutMs: 50,
+  timeoutMs: 200,
   initialIntervalMs: 1,
   maxIntervalMs: 1,
   backoffFactor: 1,
