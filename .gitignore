@@ -52,4 +52,5 @@ skills-lock.json
 /index.js
 /electron-builder.local.json
 /local-tools/
-
+/docs/local-audits/
+/docs/plans/

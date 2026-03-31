@@ -21,6 +21,11 @@ import {
   readTooltipEnabled,
   writeTooltipEnabled,
 } from './lib/tooltip-preference'
+import {
+  readChatComposerEnterSendMode,
+  writeChatComposerEnterSendMode,
+} from './lib/chat-composer-enter-send-preference'
+import type { ChatComposerEnterSendMode } from './lib/chat-composer-enter-send-preference'
 import { shouldCompleteChannelConnect } from './pages/channels-page-utils'
 import type {
   EnvCheckReadyPayload,
@@ -271,6 +276,9 @@ function App() {
   const [pluginRepairRunning, setPluginRepairRunning] = useState(false)
   const [pluginRepairResult, setPluginRepairResult] = useState<PluginRepairResult | null>(null)
   const [tooltipEnabled, setTooltipEnabled] = useState(() => readTooltipEnabled())
+  const [chatComposerEnterSendMode, setChatComposerEnterSendMode] = useState(
+    () => readChatComposerEnterSendMode()
+  )
   const [entryCompatibilitySnapshot, setEntryCompatibilitySnapshot] = useState<OpenClawEntryCompatibilitySnapshot>({
     runtimeStore: null,
     capabilities: null,
@@ -484,6 +492,11 @@ function App() {
     })
   }, [])
 
+  const handleChangeChatComposerEnterSendMode = useCallback((nextMode: ChatComposerEnterSendMode) => {
+    setChatComposerEnterSendMode(nextMode)
+    writeChatComposerEnterSendMode(nextMode)
+  }, [])
+
   const tooltipThemeOverride = useMemo(() => ({
     components: {
       Tooltip: {
@@ -641,13 +654,13 @@ function App() {
     })
   }, [appState, entryCompatibilitySnapshot])
 
-  const renderFrame = (content: ReactNode) => (
+  const renderFrame = (content: ReactNode, scrollable = true) => (
     <div className="h-screen flex flex-col app-bg-primary app-text-primary">
       <div className="h-10 flex-shrink-0 flex items-center justify-center gap-1.5" style={{ WebkitAppRegion: 'drag' } as any}>
         <img src={logoSrc} alt="" className="w-6 h-6 select-none pointer-events-none" />
         <span className="text-xs app-text-faint select-none">Qclaw</span>
       </div>
-      <div className="flex-1 flex items-center justify-center px-6 pb-6 overflow-y-auto">{content}</div>
+      <div className={`flex-1 flex items-center justify-center px-6 pb-6 ${scrollable ? 'overflow-y-auto' : 'overflow-hidden'}`}>{content}</div>
     </div>
   )
 
@@ -665,7 +678,7 @@ function App() {
       <div className="w-full max-w-md px-2">
         <Welcome onAccept={() => setAppState('env-check')} />
       </div>
-    ))
+    , false))
   }
 
   if (appState === 'env-check') {
@@ -706,7 +719,10 @@ function App() {
                 pluginRepairResult={pluginRepairResult}
               />
             } />
-            <Route path="/chat" element={<ChatPage />} />
+            <Route
+              path="/chat"
+              element={<ChatPage enterSendMode={chatComposerEnterSendMode} />}
+            />
             <Route path="/channels" element={<ChannelsPage />} />
             <Route path="/models" element={<ModelsPage />} />
             <Route path="/skills" element={<SkillsPage />} />
@@ -717,6 +733,8 @@ function App() {
                   onReconfigure={handleReconfigure}
                   onToggleTooltip={handleToggleTooltip}
                   tooltipEnabled={tooltipEnabled}
+                  enterSendMode={chatComposerEnterSendMode}
+                  onChangeEnterSendMode={handleChangeChatComposerEnterSendMode}
                 />
               }
             />
