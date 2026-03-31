@@ -16,11 +16,11 @@ export function resolveNodeInstallStrategy(
   binDir: string | null | undefined,
   nvmDir: string | null | undefined
 ): 'nvm' | 'installer' {
-  const normalizedBinDir = String(binDir || '').trim()
+  const normalizedBinDir = String(binDir || '').trim().replace(/\\/g, '/')
   if (!normalizedBinDir) return 'installer'
   if (normalizedBinDir.includes('/.nvm/')) return 'nvm'
 
-  const normalizedNvmDir = String(nvmDir || '').trim().replace(/\/+$/, '')
+  const normalizedNvmDir = String(nvmDir || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
   if (!normalizedNvmDir) return 'installer'
   return normalizedBinDir.startsWith(`${normalizedNvmDir}/`) ? 'nvm' : 'installer'
 }

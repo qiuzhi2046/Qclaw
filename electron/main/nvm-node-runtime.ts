@@ -27,6 +27,20 @@ interface DetectNvmDirOptions {
   pathModule?: typeof import('node:path')
 }
 
+interface DetectNvmWindowsDirOptions {
+  env?: NodeJS.ProcessEnv
+  access?: (path: string) => Promise<void>
+  pathModule?: typeof import('node:path')
+}
+
+interface ListInstalledNvmWindowsNodeExePathsOptions {
+  readdir?: (
+    path: string,
+    options: { withFileTypes: true }
+  ) => Promise<Array<NvmDirentLike | import('node:fs').Dirent>>
+  pathModule?: typeof import('node:path')
+}
+
 function parseSemver(version: string): ParsedSemver | null {
   const matched = String(version || '').trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
   if (!matched) return null
@@ -105,6 +119,54 @@ export async function listInstalledNvmNodeBinDirs(
     .filter((entry) => entry.isDirectory() && parseSemver(entry.name))
     .sort((left, right) => compareSemverDescending(left.name, right.name))
     .map((entry) => pathModule.join(nvmDir, 'versions', 'node', entry.name, 'bin'))
+}
+
+export async function detectNvmWindowsDir(
+  options: DetectNvmWindowsDirOptions = {}
+): Promise<string | null> {
+  const env = options.env || process.env
+  const access =
+    options.access ||
+    (async (targetPath: string) => {
+      await fsPromises.access(targetPath)
+    })
+  const pathModule = options.pathModule || path
+
+  const nvmHome = String(env.NVM_HOME || '').trim()
+  if (nvmHome) return nvmHome
+
+  const appData = String(env.APPDATA || '').trim()
+  if (!appData) return null
+
+  const fallbackDir = pathModule.join(appData, 'nvm')
+  try {
+    await access(fallbackDir)
+    return fallbackDir
+  } catch {
+    return null
+  }
+}
+
+export async function listInstalledNvmWindowsNodeExePaths(
+  nvmWindowsDir: string,
+  options: ListInstalledNvmWindowsNodeExePathsOptions = {}
+): Promise<string[]> {
+  const readdir =
+    options.readdir ||
+    ((targetPath, readOptions) => fsPromises.readdir(targetPath, readOptions))
+  const pathModule = options.pathModule || path
+
+  let entries: Array<NvmDirentLike | import('node:fs').Dirent> = []
+  try {
+    entries = await readdir(nvmWindowsDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && parseSemver(entry.name))
+    .sort((left, right) => compareSemverDescending(left.name, right.name))
+    .map((entry) => pathModule.join(nvmWindowsDir, entry.name, 'node.exe'))
 }
 
 export async function detectNvmDir(

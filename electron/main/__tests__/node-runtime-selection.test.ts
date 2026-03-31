@@ -29,6 +29,24 @@ describe('resolveNodeInstallStrategy', () => {
       )
     ).toBe('installer')
   })
+
+  it('recognizes nvm-windows version directories on Windows', () => {
+    expect(
+      resolveNodeInstallStrategy(
+        'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v22.17.1',
+        'C:\\Users\\Jason\\AppData\\Roaming\\nvm'
+      )
+    ).toBe('nvm')
+  })
+
+  it('treats non-nvm Windows paths as installer-managed', () => {
+    expect(
+      resolveNodeInstallStrategy(
+        'C:\\Program Files\\nodejs',
+        'C:\\Users\\Jason\\AppData\\Roaming\\nvm'
+      )
+    ).toBe('installer')
+  })
 })
 
 describe('selectPreferredNodeRuntime', () => {

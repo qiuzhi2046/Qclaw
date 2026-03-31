@@ -4,7 +4,9 @@ import {
   buildNvmNodeBinDir,
   buildNvmUseCommand,
   detectNvmDir,
+  detectNvmWindowsDir,
   listInstalledNvmNodeBinDirs,
+  listInstalledNvmWindowsNodeExePaths,
 } from '../nvm-node-runtime'
 
 const TEST_ENV_BASE = {
@@ -56,6 +58,84 @@ describe('buildNvmNodeBinDir', () => {
     expect(buildNvmNodeBinDir('/Users/alice/.nvm', '24.14.0')).toBe(
       '/Users/alice/.nvm/versions/node/v24.14.0/bin'
     )
+  })
+})
+
+describe('detectNvmWindowsDir', () => {
+  it('prefers NVM_HOME from the environment', async () => {
+    await expect(
+      detectNvmWindowsDir({
+        env: {
+          ...TEST_ENV_BASE,
+          NVM_HOME: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm',
+        },
+      })
+    ).resolves.toBe('C:\\Users\\Jason\\AppData\\Roaming\\nvm')
+  })
+
+  it('falls back to %APPDATA%\\nvm when NVM_HOME is absent and the directory exists', async () => {
+    await expect(
+      detectNvmWindowsDir({
+        env: {
+          ...TEST_ENV_BASE,
+          APPDATA: 'C:\\Users\\Jason\\AppData\\Roaming',
+        },
+        access: async () => undefined,
+      })
+    ).resolves.toBe('C:\\Users\\Jason\\AppData\\Roaming\\nvm')
+  })
+
+  it('returns null when NVM_HOME is absent and %APPDATA%\\nvm does not exist', async () => {
+    await expect(
+      detectNvmWindowsDir({
+        env: {
+          ...TEST_ENV_BASE,
+          APPDATA: 'C:\\Users\\Jason\\AppData\\Roaming',
+        },
+        access: async () => {
+          throw new Error('ENOENT')
+        },
+      })
+    ).resolves.toBeNull()
+  })
+
+  it('returns null when both NVM_HOME and APPDATA are absent', async () => {
+    await expect(detectNvmWindowsDir({ env: TEST_ENV_BASE })).resolves.toBeNull()
+  })
+})
+
+describe('listInstalledNvmWindowsNodeExePaths', () => {
+  it('returns node.exe paths sorted from newest to oldest version', async () => {
+    const paths = await listInstalledNvmWindowsNodeExePaths(
+      'C:\\Users\\Jason\\AppData\\Roaming\\nvm',
+      {
+        readdir: async () => [
+          { name: 'v22.17.1', isDirectory: () => true },
+          { name: 'v18.20.8', isDirectory: () => true },
+          { name: 'v24.0.0', isDirectory: () => true },
+          { name: 'settings.txt', isDirectory: () => false },
+        ],
+      }
+    )
+
+    expect(paths).toEqual([
+      'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v24.0.0\\node.exe',
+      'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v22.17.1\\node.exe',
+      'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v18.20.8\\node.exe',
+    ])
+  })
+
+  it('returns an empty array when the directory cannot be read', async () => {
+    const paths = await listInstalledNvmWindowsNodeExePaths(
+      'C:\\Users\\Jason\\AppData\\Roaming\\nvm',
+      {
+        readdir: async () => {
+          throw new Error('ENOENT')
+        },
+      }
+    )
+
+    expect(paths).toEqual([])
   })
 })
 
