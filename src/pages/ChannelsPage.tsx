@@ -812,7 +812,7 @@ export default function ChannelsPage() {
         <div>
           <Text size="xl" fw={700}>IM 渠道管理</Text>
           <Text size="sm" c="dimmed" mt={4}>
-            配置和管理飞书、企微、钉钉、QQ 等 IM 渠道
+            配置和管理飞书、企微、钉钉、QQ、LINE、Telegram、Slack 等 IM 渠道
           </Text>
         </div>
         <Group gap="sm">
