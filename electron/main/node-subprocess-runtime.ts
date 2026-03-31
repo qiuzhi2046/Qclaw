@@ -14,6 +14,10 @@ import { buildCliPathWithCandidates, listExecutablePathCandidates } from './runt
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 
+function joinForPlatform(platform: NodeJS.Platform, ...parts: string[]): string {
+  return (platform === 'win32' ? path.win32 : path.posix).join(...parts)
+}
+
 export interface QualifiedNodeRuntime {
   executablePath: string
   version: string
@@ -239,14 +243,27 @@ export async function resolveQualifiedNodeRuntime(
     const candidateBins = Array.from(
       new Set(
         [
-          targetVersion ? path.join(nvmDir, 'versions', 'node', `v${targetVersion.replace(/^v/, '')}`, 'bin') : '',
+          targetVersion
+            ? joinForPlatform(
+                platform,
+                nvmDir,
+                'versions',
+                'node',
+                `v${targetVersion.replace(/^v/, '')}`,
+                'bin'
+              )
+            : '',
           ...(await listInstalledNvmNodeBinDirsImpl(nvmDir).catch(() => [])),
         ].filter(Boolean)
       )
     )
 
     for (const candidateBin of candidateBins) {
-      const executablePath = path.join(candidateBin, platform === 'win32' ? 'node.exe' : 'node')
+      const executablePath = joinForPlatform(
+        platform,
+        candidateBin,
+        platform === 'win32' ? 'node.exe' : 'node'
+      )
       nvmCandidate = await probeRuntimeCandidate(
         executablePath,
         { timeoutMs, env: lookupEnv, cwd },

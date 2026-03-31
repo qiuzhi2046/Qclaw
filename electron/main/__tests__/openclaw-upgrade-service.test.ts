@@ -400,7 +400,7 @@ describe('openclaw upgrade service', () => {
     expect(runShellMock).toHaveBeenCalledTimes(1)
     expect(runShellMock).toHaveBeenNthCalledWith(
       1,
-      'npm',
+      process.platform === 'win32' ? 'npm.cmd' : 'npm',
       expect.arrayContaining([
         'install',
         '-g',

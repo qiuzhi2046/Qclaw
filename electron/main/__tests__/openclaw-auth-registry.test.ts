@@ -30,6 +30,31 @@ function findDistFile(root: string, prefix: string): string {
   return path.join(distDir, matched)
 }
 
+function resolveLineBreakSeparator(text: string): string {
+  return text.match(/\r?\n\r?\n/)?.[0] || '\n\n'
+}
+
+function replaceFixtureBlock(
+  text: string,
+  marker: string,
+  replacement: string
+): string {
+  const separator = resolveLineBreakSeparator(text)
+  return text.replace(
+    marker.replaceAll('\n\n', separator),
+    replacement.replaceAll('\n\n', separator)
+  )
+}
+
+function replaceFixturePattern(
+  text: string,
+  pattern: RegExp,
+  replacement: string
+): string {
+  const separator = resolveLineBreakSeparator(text)
+  return text.replace(pattern, replacement.replaceAll('\n\n', separator))
+}
+
 function addUnsupportedAuthChoiceVariant(
   root: string,
   input: {
@@ -44,15 +69,15 @@ function addUnsupportedAuthChoiceVariant(
 ) {
   const optionsPath = findDistFile(root, 'auth-choice-options')
   const optionsText = fs.readFileSync(optionsPath, 'utf8')
-  const nextOptionsText = optionsText
-    .replace(
+  const nextOptionsText = replaceFixtureBlock(
+    replaceFixtureBlock(
+      optionsText,
       '];\n\nconst PROVIDER_AUTH_CHOICE_OPTION_HINTS = {',
       `,\n  {\n    value: "${input.providerId}",\n    label: "${input.providerLabel}",\n    hint: "${input.providerHint}",\n    choices: ["${input.authChoice}"]\n  }\n];\n\nconst PROVIDER_AUTH_CHOICE_OPTION_HINTS = {`
-    )
-    .replace(
-      '];\n\nfunction formatAuthChoiceChoicesForCli(params) {',
-      `,\n  {\n    value: "${input.authChoice}",\n    label: "${input.optionLabel}"\n  }\n];\n\nfunction formatAuthChoiceChoicesForCli(params) {`
-    )
+    ),
+    '];\n\nfunction formatAuthChoiceChoicesForCli(params) {',
+    `,\n  {\n    value: "${input.authChoice}",\n    label: "${input.optionLabel}"\n  }\n];\n\nfunction formatAuthChoiceChoicesForCli(params) {`
+  )
 
   if (nextOptionsText === optionsText) {
     throw new Error('Failed to patch auth-choice-options fixture text')
@@ -68,7 +93,8 @@ function addUnsupportedAuthChoiceVariant(
 
   const authChoicePath = findDistFile(root, 'auth-choice')
   const authChoiceText = fs.readFileSync(authChoicePath, 'utf8')
-  const nextAuthChoiceText = authChoiceText.replace(
+  const nextAuthChoiceText = replaceFixtureBlock(
+    authChoiceText,
     '};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {',
     `,\n  "${input.authChoice}": "${input.providerId}"\n};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {`
   )
@@ -98,8 +124,9 @@ function addProviderScopedOnboardApiKeyFlag(
   const flagsPath = findDistFile(root, 'onboard-provider-auth-flags')
   const flagsText = fs.readFileSync(flagsPath, 'utf8')
   const optionKey = `${input.providerId}ApiKey`
-  const nextFlagsText = flagsText.replace(
-    '];\nexport { AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI as n, ONBOARD_PROVIDER_AUTH_FLAGS as t };',
+  const nextFlagsText = replaceFixturePattern(
+    flagsText,
+    /\];\r?\nexport \{ AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI as n, ONBOARD_PROVIDER_AUTH_FLAGS as t \};/,
     `,\n  {\n    optionKey: "${optionKey}",\n    authChoice: "${input.authChoice}",\n    cliFlag: "${input.cliFlag}",\n    cliOption: "${input.cliFlag} <key>",\n    description: "${input.description}"\n  }\n];\nexport { AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI as n, ONBOARD_PROVIDER_AUTH_FLAGS as t };`
   )
   if (nextFlagsText === flagsText) {
@@ -111,7 +138,8 @@ function addProviderScopedOnboardApiKeyFlag(
   const authChoiceText = fs.readFileSync(authChoicePath, 'utf8')
   if (authChoiceText.includes(`"${input.authChoice}":`)) return
 
-  const nextAuthChoiceText = authChoiceText.replace(
+  const nextAuthChoiceText = replaceFixtureBlock(
+    authChoiceText,
     '};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {',
     `,\n  "${input.authChoice}": "${input.providerId}"\n};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {`
   )

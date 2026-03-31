@@ -30,7 +30,7 @@ describe('openclaw-elevated-lifecycle-transaction', () => {
     expect(snapshot.fallbackStateRootUsed).toBe(false)
     expect(snapshot.targets.map((target) => target.path)).toEqual([
       '/Users/test/Library/Application Support/OpenClaw/profiles/main',
-      '/Users/test/.npm',
+      path.join('/Users/test', '.npm'),
     ])
     expect(snapshot.targets.every((target) => target.createIfMissing === false)).toBe(true)
   })

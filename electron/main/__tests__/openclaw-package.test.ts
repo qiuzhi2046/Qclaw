@@ -164,10 +164,9 @@ describe('resolveOpenClawBinaryPath', () => {
       env: buildTestEnv({
         HOME: '/Users/alice',
       }),
-      fileExists: (candidate: string) => candidate === install.commandPath,
     })
 
-    expect(resolved).toBe(install.commandPath)
+    expect(resolved.replaceAll('/', path.sep)).toBe(install.commandPath)
   })
 })
 

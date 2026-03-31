@@ -4,6 +4,10 @@ const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const { dirname, join } = path
 const { homedir, userInfo } = os
 
+function joinForPlatform(platform: NodeJS.Platform, ...parts: string[]): string {
+  return (platform === 'win32' ? path.win32 : path.posix).join(...parts)
+}
+
 export interface OpenClawInstallPermissionResultLike {
   ok: boolean
   stdout?: string
@@ -40,7 +44,7 @@ export function resolveOpenClawGlobalInstallProbePath(
   if (!normalizedPrefix) return normalizedPrefix
   const segments =
     platform === 'win32' ? ['node_modules', 'openclaw'] : ['lib', 'node_modules', 'openclaw']
-  return join(normalizedPrefix, ...segments)
+  return joinForPlatform(platform, normalizedPrefix, ...segments)
 }
 
 export async function probeOpenClawInstallPath(pathname: string): Promise<OpenClawInstallPathProbe> {

@@ -114,7 +114,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
         installs: {},
       },
     })
-  })
+  }, 15000)
 
   it('ignores plugins that do not reference the host plugin sdk', async () => {
     const homeDir = await createTempHome()

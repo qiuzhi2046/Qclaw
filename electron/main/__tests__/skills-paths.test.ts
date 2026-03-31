@@ -11,10 +11,15 @@ const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 describe('skills paths helpers', () => {
   it('derives managed/workspace locations from skills list payload', () => {
-    const locations = resolveOpenClawSkillLocations({
-      workspaceDir: '/Users/demo/.openclaw/workspace-feishu-default',
-      managedSkillsDir: '/Users/demo/.openclaw/skills',
-    })
+    const locations = resolveOpenClawSkillLocations(
+      {
+        workspaceDir: '/Users/demo/.openclaw/workspace-feishu-default',
+        managedSkillsDir: '/Users/demo/.openclaw/skills',
+      },
+      {
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      }
+    )
 
     expect(locations).toEqual({
       workspaceDir: '/Users/demo/.openclaw/workspace-feishu-default',
@@ -26,7 +31,10 @@ describe('skills paths helpers', () => {
   })
 
   it('falls back to ~/.openclaw paths when payload is incomplete', () => {
-    const locations = resolveOpenClawSkillLocations({}, { homeDir: '/Users/fallback' })
+    const locations = resolveOpenClawSkillLocations({}, {
+      homeDir: '/Users/fallback',
+      pathModule: path.posix as unknown as typeof import('node:path'),
+    })
 
     expect(locations).toEqual({
       workspaceDir: '/Users/fallback/.openclaw/workspace',
@@ -65,7 +73,10 @@ describe('skills paths helpers', () => {
         managedSkillsDir: '/Users/demo/.openclaw/skills',
         skills: [{ name: 'token-optimizer' }],
       },
-      { homeDir: '/Users/demo' }
+      {
+        homeDir: '/Users/demo',
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      }
     )
 
     expect(payload).toMatchObject({
@@ -84,7 +95,10 @@ describe('skills paths helpers', () => {
         workspaceDir: '/Users/demo/.openclaw/workspace-feishu-default',
         managedSkillsDir: '/Users/demo/.openclaw/skills',
       },
-      { homeDir: '/Users/demo' }
+      {
+        homeDir: '/Users/demo',
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      }
     )
 
     expect(buildClawHubInstallArgs('token-optimizer', locations)).toEqual([
@@ -110,6 +124,10 @@ describe('skills paths helpers', () => {
       '--yes',
     ])
 
-    expect(resolveClawHubLockFilePath(locations)).toBe('/Users/demo/.openclaw/.clawhub/lock.json')
+    expect(
+      resolveClawHubLockFilePath(locations, {
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      })
+    ).toBe('/Users/demo/.openclaw/.clawhub/lock.json')
   })
 })

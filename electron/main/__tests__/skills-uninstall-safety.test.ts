@@ -6,6 +6,7 @@ import {
   resolveManagedSkillFallbackPath,
   resolveSkillPathUnderRoot,
 } from '../skills-uninstall-safety'
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 describe('skills uninstall safety', () => {
   const homeDir = '/Users/demo'
@@ -26,6 +27,7 @@ describe('skills uninstall safety', () => {
   it('resolves fallback path only under managed skills root', () => {
     const result = resolveManagedSkillFallbackPath('/Users/demo/.openclaw/skills', 'token-optimizer', {
       homeDir,
+      pathModule: path.posix as unknown as typeof import('node:path'),
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -39,13 +41,18 @@ describe('skills uninstall safety', () => {
       isAllowedOpenClawSkillsRoot('/Users/demo/.openclaw/workspace-feishu-default/skills', {
         homeDir,
         rootKind: 'workspace',
+        pathModule: path.posix as unknown as typeof import('node:path'),
       })
     ).toBe(true)
 
     const result = resolveSkillPathUnderRoot(
       '/Users/demo/.openclaw/workspace-feishu-default/skills',
       'token-manager',
-      { homeDir, rootKind: 'workspace' }
+      {
+        homeDir,
+        rootKind: 'workspace',
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      }
     )
     expect(result.ok).toBe(true)
   })
@@ -53,18 +60,23 @@ describe('skills uninstall safety', () => {
   it('rejects unsafe fallback names', () => {
     const result = resolveManagedSkillFallbackPath('/Users/demo/.openclaw/skills', '../../etc', {
       homeDir,
+      pathModule: path.posix as unknown as typeof import('node:path'),
     })
     expect(result.ok).toBe(false)
   })
 
   it('rejects non-standard skills roots outside .openclaw', () => {
     expect(
-      resolveManagedSkillFallbackPath('/tmp/openclaw/custom-skills', 'token-optimizer', { homeDir }).ok
+      resolveManagedSkillFallbackPath('/tmp/openclaw/custom-skills', 'token-optimizer', {
+        homeDir,
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      }).ok
     ).toBe(false)
     expect(
       resolveSkillPathUnderRoot('/Users/demo/.openclaw/custom-skills', 'token-manager', {
         homeDir,
         rootKind: 'workspace',
+        pathModule: path.posix as unknown as typeof import('node:path'),
       }).ok
     ).toBe(false)
   })

@@ -35,7 +35,7 @@ describe('resolveOpenClawPaths', () => {
 
 describe('formatDisplayPath', () => {
   it('converts absolute paths under the user home into display-safe ~/ paths', () => {
-    expect(formatDisplayPath('/Users/alice/.openclaw/openclaw.json', '/Users/alice')).toBe(
+    expect(formatDisplayPath('/Users/alice/.openclaw/openclaw.json', '/Users/alice', 'darwin')).toBe(
       '~/.openclaw/openclaw.json'
     )
   })
