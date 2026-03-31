@@ -15,6 +15,10 @@ import type {
   FeishuBotDiagnosticSendRequest,
   FeishuBotDiagnosticSendResult,
 } from '../shared/feishu-diagnostics'
+import type {
+  FeishuInstallerPendingPrompt,
+  FeishuInstallerPromptResolution,
+} from '../shared/feishu-installer-session'
 import type { OpenClawBackupRootInfo } from '../shared/openclaw-phase3'
 import type {
   OpenClawVersionEnforcement,
@@ -202,11 +206,12 @@ interface FeishuInstallerSessionSnapshot {
   ok: boolean
   canceled: boolean
   command: string[]
+  pendingPrompt: FeishuInstallerPendingPrompt | null
 }
 
 interface FeishuInstallerSessionEvent {
   sessionId: string
-  type: 'started' | 'output' | 'exit'
+  type: 'started' | 'output' | 'prompt' | 'exit'
   stream?: 'stdout' | 'stderr'
   chunk?: string
   phase?: FeishuInstallerSessionSnapshot['phase']
@@ -214,6 +219,7 @@ interface FeishuInstallerSessionEvent {
   ok?: boolean
   canceled?: boolean
   command?: string[]
+  pendingPrompt?: FeishuInstallerPendingPrompt | null
 }
 
 interface WeixinInstallerSessionSnapshot {
@@ -1721,6 +1727,11 @@ interface ElectronApi {
   cancelFeishuBotDiagnosticListen: (requestId: string) => Promise<{ ok: boolean }>
   sendFeishuDiagnosticMessage: (request: FeishuBotDiagnosticSendRequest) => Promise<FeishuBotDiagnosticSendResult>
   sendFeishuInstallerInput: (sessionId: string, input: string) => Promise<{ ok: boolean; message?: string }>
+  answerFeishuInstallerPrompt: (
+    sessionId: string,
+    promptId: string,
+    resolution: FeishuInstallerPromptResolution
+  ) => Promise<{ ok: boolean; message?: string }>
   stopFeishuInstaller: () => Promise<{ ok: boolean }>
   onFeishuInstallerEvent: (listener: (payload: FeishuInstallerSessionEvent) => void) => () => void
   getWeixinInstallerState: () => Promise<WeixinInstallerSessionSnapshot>
