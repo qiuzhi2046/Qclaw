@@ -36,6 +36,11 @@ import { runManagedChannelRepairFlow } from '../shared/managed-channel-repair'
 import { resolveManagedChannelIdentity } from '../shared/managed-channel-identity'
 import { getManagedChannelPluginByChannelId } from '../shared/managed-channel-plugin-registry'
 import { readOpenClawUpstreamModelState } from '../shared/upstream-model-state'
+import {
+  readChannelResourceConfig,
+  buildChannelResourcePatch,
+  getChannelResourceDisplayLabel,
+} from './channel-resource-config'
 
 interface ChannelInfo {
   id: string
@@ -108,6 +113,17 @@ export function shouldReuseModelOptionsCache(options?: {
   return !options?.forceRefresh && options?.mode !== 'all'
 }
 
+const RESOURCE_CONFIG_CHANNEL_IDS = new Set(['line', 'telegram', 'slack'])
+
+export function shouldShowChannelResourceConfig(
+  channel: Pick<ChannelInfo, 'channelId' | 'agentId'>
+): boolean {
+  if (channel.channelId === 'feishu' && channel.agentId) {
+    return true
+  }
+  return RESOURCE_CONFIG_CHANNEL_IDS.has(channel.channelId)
+}
+
 const CHANNELS_PAGE_CACHE_TTL_MS = 60 * 1000
 const channelsPageCache = createPageDataCache<ChannelsPageSnapshot>({ ttlMs: CHANNELS_PAGE_CACHE_TTL_MS })
 
@@ -137,6 +153,14 @@ export default function ChannelsPage() {
   const [modelModalError, setModelModalError] = useState('')
   const [loadingModelContext, setLoadingModelContext] = useState(false)
   const [savingModel, setSavingModel] = useState(false)
+  const [showResourceModal, setShowResourceModal] = useState(false)
+  const [selectedResourceChannel, setSelectedResourceChannel] = useState<ChannelInfo | null>(null)
+  const [resourceModelOptions, setResourceModelOptions] = useState<ModelSelectOption[]>([])
+  const [selectedResourceModelValue, setSelectedResourceModelValue] = useState<string | null>(null)
+  const [currentResourceModel, setCurrentResourceModel] = useState('')
+  const [resourceModalError, setResourceModalError] = useState('')
+  const [loadingResourceContext, setLoadingResourceContext] = useState(false)
+  const [savingResourceModel, setSavingResourceModel] = useState(false)
   const modelOptionsCacheRef = useRef<ModelSelectOption[]>([])
   const pairingIntro = getPairingIntroCopy(selectedConfigTarget)
 
@@ -366,6 +390,101 @@ export default function ChannelsPage() {
     setCurrentRuntimeModel('')
     setModelModalError('')
     setLoadingModelContext(false)
+  }
+
+  const closeResourceModal = (options?: { force?: boolean }) => {
+    if (savingResourceModel && !options?.force) return
+    setShowResourceModal(false)
+    setSelectedResourceChannel(null)
+    setResourceModelOptions([])
+    setSelectedResourceModelValue(null)
+    setCurrentResourceModel('')
+    setResourceModalError('')
+    setLoadingResourceContext(false)
+  }
+
+  const handleOpenResourceConfig = async (channel: ChannelInfo) => {
+    if (!shouldShowChannelResourceConfig(channel)) return
+
+    setSelectedResourceChannel(channel)
+    setShowResourceModal(true)
+    setResourceModalError('')
+    setLoadingResourceContext(true)
+    setCurrentResourceModel('')
+    setSelectedResourceModelValue(null)
+
+    try {
+      const [config, envVars] = await Promise.all([
+        window.api.readConfig().catch(() => null),
+        window.api.readEnvFile().catch(() => null),
+      ])
+
+      const resourceConfig = readChannelResourceConfig(config, channel.configChannelId)
+      setCurrentResourceModel(resourceConfig.model)
+
+      let nextOptions = modelOptionsCacheRef.current
+      try {
+        nextOptions = await loadModelOptions({
+          mode: 'all',
+          envVars,
+          configData: config,
+          preferredModelKey: resourceConfig.model,
+        })
+      } catch {
+        // Fall through with cached options
+      }
+
+      nextOptions = ensureModelSelectOption(nextOptions, resourceConfig.model)
+      setResourceModelOptions(nextOptions)
+      setSelectedResourceModelValue(resourceConfig.model || nextOptions[0]?.value || null)
+    } catch (e) {
+      setResourceModalError('读取资源配置失败: ' + (e as Error).message)
+    } finally {
+      setLoadingResourceContext(false)
+    }
+  }
+
+  const handleSaveResourceModel = async () => {
+    if (!selectedResourceChannel) return
+
+    const model = String(selectedResourceModelValue || '').trim()
+    if (!model) {
+      setResourceModalError('请选择模型')
+      return
+    }
+
+    setSavingResourceModel(true)
+    setResourceModalError('')
+    try {
+      const config = await window.api.readConfig()
+      if (!config) {
+        throw new Error('未找到可更新的配置')
+      }
+
+      const beforeConfig = JSON.parse(JSON.stringify(config)) as Record<string, any>
+      const afterConfig = buildChannelResourcePatch({
+        config,
+        channelId: selectedResourceChannel.configChannelId,
+        model,
+      })
+
+      const writeResult = await window.api.applyConfigPatchGuarded({
+        beforeConfig,
+        afterConfig,
+        reason: 'unknown',
+      })
+
+      if (!writeResult.ok) {
+        throw new Error(writeResult.message || '配置写入失败')
+      }
+
+      closeResourceModal({ force: true })
+      await fetchChannels({ background: true })
+    } catch (e) {
+      setResourceModalError('保存资源配置失败: ' + (e as Error).message)
+    } finally {
+      setSavingResourceModel(false)
+    }
   }
 
   const handleOpenModelConfig = async (channel: ChannelInfo) => {
@@ -693,7 +812,7 @@ export default function ChannelsPage() {
         <div>
           <Text size="xl" fw={700}>IM 渠道管理</Text>
           <Text size="sm" c="dimmed" mt={4}>
-            配置和管理飞书、企微、钉钉、QQ 等 IM 渠道
+            配置和管理飞书、企微、钉钉、QQ、LINE、Telegram、Slack 等 IM 渠道
           </Text>
         </div>
         <Group gap="sm">
@@ -854,6 +973,20 @@ export default function ChannelsPage() {
                           className="cursor-pointer"
                         >
                           配置模型
+                        </Button>
+                      )}
+                      {shouldShowChannelResourceConfig(channel) && !(channel.channelId === 'feishu' && channel.agentId) && (
+                        <Button
+                          variant="light"
+                          size="sm"
+                          disabled={togglingAnyChannel}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleOpenResourceConfig(channel)
+                          }}
+                          className="cursor-pointer"
+                        >
+                          资源配置
                         </Button>
                       )}
                       <Button
@@ -1105,6 +1238,54 @@ export default function ChannelsPage() {
               取消
             </Button>
             <Button onClick={() => void handleSaveBotModel()} loading={savingModel} disabled={loadingModelContext}>
+              保存
+            </Button>
+          </Group>
+        </div>
+      </Modal>
+
+      <Modal
+        opened={showResourceModal}
+        onClose={closeResourceModal}
+        title={selectedResourceChannel
+          ? getChannelResourceDisplayLabel(selectedResourceChannel.channelId)
+          : '资源配置'}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {currentResourceModel && (
+            <Alert color="blue" variant="light" title="当前模型">
+              {currentResourceModel}
+            </Alert>
+          )}
+
+          {resourceModalError && (
+            <Alert color="red" variant="light" title="资源配置提示">
+              {resourceModalError}
+            </Alert>
+          )}
+
+          {loadingResourceContext ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader size="md" />
+            </div>
+          ) : (
+            <Select
+              label="主模型"
+              placeholder="选择要绑定到这个渠道的模型"
+              data={resourceModelOptions}
+              value={selectedResourceModelValue}
+              onChange={setSelectedResourceModelValue}
+              searchable
+              nothingFoundMessage="没有匹配的模型"
+            />
+          )}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => closeResourceModal()} disabled={savingResourceModel}>
+              取消
+            </Button>
+            <Button onClick={() => void handleSaveResourceModel()} loading={savingResourceModel} disabled={loadingResourceContext}>
               保存
             </Button>
           </Group>

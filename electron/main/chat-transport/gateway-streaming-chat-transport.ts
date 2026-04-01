@@ -473,6 +473,11 @@ function toGatewayRequestFrame(id: string, method: string, params: unknown): str
   })
 }
 
+function getSocketOpenState(socket: WebSocket): number {
+  const constructorOpen = (socket as { constructor?: { OPEN?: unknown } }).constructor?.OPEN
+  return typeof constructorOpen === 'number' ? constructorOpen : 1
+}
+
 class MinimalGatewaySocketClient {
   private socket: WebSocket | null = null
   private connectRequestId: string | null = null
@@ -531,7 +536,7 @@ class MinimalGatewaySocketClient {
   async request(method: string, params: unknown, timeoutMs = GATEWAY_REQUEST_TIMEOUT_MS): Promise<unknown> {
     await this.connect()
     const socket = this.socket
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== getSocketOpenState(socket)) {
       throw new Error('gateway not connected')
     }
 
@@ -563,7 +568,7 @@ class MinimalGatewaySocketClient {
       clearTimeout(this.cleanupConnectTimeout)
       this.cleanupConnectTimeout = null
     }
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === getSocketOpenState(socket)) {
       socket.close()
     }
     this.rejectAllPending(new Error('gateway client closed'))
@@ -627,7 +632,7 @@ class MinimalGatewaySocketClient {
 
   private sendConnect(): void {
     const socket = this.socket
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== getSocketOpenState(socket)) {
       throw new Error('gateway socket is not open')
     }
 

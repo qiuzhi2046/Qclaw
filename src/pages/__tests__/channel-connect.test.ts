@@ -21,10 +21,12 @@ import {
   isSafeAlreadyInstalledManagedPluginInstallError,
   resolveManagedPluginInstallPreflight,
   resolveManagedPluginInstallStrategy,
+  retryPluginInstallWithOfficialConfigRepair,
   restoreCapturedFeishuBotConfig,
+  shouldAttemptOfficialConfigRepairForPluginInstall,
   shouldValidateFeishuManualCredentials,
 } from '../ChannelConnect'
-import { getChannelDefinition } from '../../lib/openclaw-channel-registry'
+import { getChannelDefinition, listChannelDefinitions, applyChannelConfig } from '../../lib/openclaw-channel-registry'
 
 describe('shouldShowChannelConnectSkipButton', () => {
   it('stays hidden by default when the channel has not earned skip availability yet', () => {
@@ -663,10 +665,121 @@ describe('QQ channel connect flow', () => {
     expect(result.pluginInstalledOnDisk).toBe(false)
   })
 
+  it('skips managed plugin preflight entirely for direct-config channels like LINE', async () => {
+    const prepareManagedChannelPluginForSetup = vi.fn()
+
+    const result = await resolveManagedPluginInstallPreflight(
+      {
+        prepareManagedChannelPluginForSetup,
+      } as Pick<typeof window.api, 'prepareManagedChannelPluginForSetup'>,
+      {
+        channel: getChannelDefinition('line'),
+        pluginConfigured: false,
+      }
+    )
+
+    expect(prepareManagedChannelPluginForSetup).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      pluginInstalledOnDisk: false,
+      pluginInstallStrategy: 'install-plugin',
+      prepareResult: null,
+    })
+  })
+
+  it('skips managed plugin preflight entirely for bundled direct-config channels like Telegram and Slack', async () => {
+    const prepareManagedChannelPluginForSetup = vi.fn()
+
+    const telegramResult = await resolveManagedPluginInstallPreflight(
+      {
+        prepareManagedChannelPluginForSetup,
+      } as Pick<typeof window.api, 'prepareManagedChannelPluginForSetup'>,
+      {
+        channel: getChannelDefinition('telegram'),
+        pluginConfigured: false,
+      }
+    )
+
+    const slackResult = await resolveManagedPluginInstallPreflight(
+      {
+        prepareManagedChannelPluginForSetup,
+      } as Pick<typeof window.api, 'prepareManagedChannelPluginForSetup'>,
+      {
+        channel: getChannelDefinition('slack'),
+        pluginConfigured: false,
+      }
+    )
+
+    expect(prepareManagedChannelPluginForSetup).not.toHaveBeenCalled()
+    expect(telegramResult.prepareResult).toBeNull()
+    expect(slackResult.prepareResult).toBeNull()
+  })
+
   it('treats plain already-exists plugin errors as safe reuse but not when safety repair also failed', () => {
     expect(isSafeAlreadyInstalledManagedPluginInstallError('plugin already exists')).toBe(true)
     expect(isSafeAlreadyInstalledManagedPluginInstallError('plugin already exists\n已自动隔离')).toBe(false)
     expect(isSafeAlreadyInstalledManagedPluginInstallError('plugin already exists\n安全修复失败')).toBe(false)
+  })
+
+  it('detects config-invalid plugin install failures that should trigger one official doctor repair', () => {
+    expect(
+      shouldAttemptOfficialConfigRepairForPluginInstall({
+        ok: false,
+        stdout: 'Config invalid',
+        stderr: [
+          'Invalid config at ~/.openclaw/openclaw.json',
+          '  - channels.openclaw-weixin: unknown channel id: openclaw-weixin',
+          'Run: openclaw doctor --fix',
+        ].join('\n'),
+      })
+    ).toBe(true)
+
+    expect(
+      shouldAttemptOfficialConfigRepairForPluginInstall({
+        ok: false,
+        stderr: 'fetch failed',
+      })
+    ).toBe(false)
+  })
+
+  it('runs one official doctor repair and retries plugin install when stale channel config blocks the first attempt', async () => {
+    const install = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        stdout: 'Config invalid',
+        stderr: [
+          'Invalid config at ~/.openclaw/openclaw.json:',
+          '- channels.openclaw-weixin: unknown channel id: openclaw-weixin',
+          'Run: openclaw doctor --fix',
+        ].join('\n'),
+        code: 1,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: 'installed',
+        stderr: '',
+        code: 0,
+      })
+    const runDoctor = vi.fn().mockResolvedValue({
+      ok: true,
+      stdout: 'fixed',
+      stderr: '',
+      code: 0,
+    })
+    const appendLog = vi.fn()
+
+    const result = await retryPluginInstallWithOfficialConfigRepair(
+      { runDoctor } as Pick<typeof window.api, 'runDoctor'>,
+      install,
+      appendLog
+    )
+
+    expect(runDoctor).toHaveBeenCalledWith({ fix: true, nonInteractive: true })
+    expect(install).toHaveBeenCalledTimes(2)
+    expect(result.officialRepairApplied).toBe(true)
+    expect(result.result.ok).toBe(true)
+    expect(appendLog).toHaveBeenCalledWith('⚠️ 检测到 OpenClaw 配置与当前版本不兼容，正在执行官方修复...\n')
+    expect(appendLog).toHaveBeenCalledWith('✅ 官方配置修复完成，正在重试插件安装...\n\n')
   })
 })
 
@@ -686,6 +799,36 @@ describe('buildChannelConnectCompletionCopy', () => {
       buildChannelConnectCompletionCopy({
         id: 'feishu',
         name: '飞书',
+        skipPairing: false,
+      })
+    ).toContain('获取配对码')
+  })
+
+  it('keeps LINE on the pairing completion copy instead of marking it ready immediately', () => {
+    expect(
+      buildChannelConnectCompletionCopy({
+        id: 'line',
+        name: 'LINE',
+        skipPairing: false,
+      })
+    ).toContain('获取配对码')
+  })
+
+  it('keeps Telegram on the pairing completion copy instead of marking it ready immediately', () => {
+    expect(
+      buildChannelConnectCompletionCopy({
+        id: 'telegram',
+        name: 'Telegram',
+        skipPairing: false,
+      })
+    ).toContain('获取配对码')
+  })
+
+  it('keeps Slack on the pairing completion copy instead of marking it ready immediately', () => {
+    expect(
+      buildChannelConnectCompletionCopy({
+        id: 'slack',
+        name: 'Slack',
         skipPairing: false,
       })
     ).toContain('获取配对码')
@@ -1148,5 +1291,136 @@ describe('mergeFeishuCreateModeBots', () => {
 
     expect(result.addedBots).toEqual([])
     expect(result.nextConfig).toEqual(currentConfig)
+  })
+})
+
+// ─── Task 1: LINE / Telegram / Slack channel definitions ───
+
+describe('new IM channel definitions (LINE, Telegram, Slack)', () => {
+  it('listChannelDefinitions contains line, telegram, and slack', () => {
+    const definitions = listChannelDefinitions()
+    const ids = definitions.map((d) => d.id)
+    expect(ids).toContain('line')
+    expect(ids).toContain('telegram')
+    expect(ids).toContain('slack')
+  })
+
+  it('LINE definition exposes channelAccessToken and channelSecret fields', () => {
+    const line = getChannelDefinition('line')
+    expect(line).not.toBeNull()
+    const fieldKeys = line!.fields.map((f) => f.key)
+    expect(fieldKeys).toContain('channelAccessToken')
+    expect(fieldKeys).toContain('channelSecret')
+  })
+
+  it('Telegram definition exposes botToken field', () => {
+    const telegram = getChannelDefinition('telegram')
+    expect(telegram).not.toBeNull()
+    const fieldKeys = telegram!.fields.map((f) => f.key)
+    expect(fieldKeys).toContain('botToken')
+  })
+
+  it('Slack definition exposes botToken and appToken fields', () => {
+    const slack = getChannelDefinition('slack')
+    expect(slack).not.toBeNull()
+    const fieldKeys = slack!.fields.map((f) => f.key)
+    expect(fieldKeys).toContain('botToken')
+    expect(fieldKeys).toContain('appToken')
+  })
+
+  it('LINE requires pairing after config is written', () => {
+    const line = getChannelDefinition('line')
+    expect(line?.skipPairing).toBe(false)
+  })
+
+  it('Telegram requires pairing after config is written', () => {
+    const telegram = getChannelDefinition('telegram')
+    expect(telegram?.skipPairing).toBe(false)
+  })
+
+  it('Slack requires pairing after config is written', () => {
+    const slack = getChannelDefinition('slack')
+    expect(slack?.skipPairing).toBe(false)
+  })
+})
+
+// ─── Task 2: Config writes for LINE / Telegram / Slack ───
+
+describe('applyChannelConfig for new IM channels', () => {
+  it('LINE writes channels.line.enabled, channelAccessToken, channelSecret, and default dmPolicy', () => {
+    const result = applyChannelConfig({}, 'line', {
+      channelAccessToken: 'line_token_123',
+      channelSecret: 'line_secret_abc',
+    })
+
+    expect(result.channels.line.enabled).toBe(true)
+    expect(result.channels.line.channelAccessToken).toBe('line_token_123')
+    expect(result.channels.line.channelSecret).toBe('line_secret_abc')
+    expect(result.channels.line.dmPolicy).toBe('pairing')
+  })
+
+  it('Telegram writes channels.telegram.enabled, botToken, and default dmPolicy', () => {
+    const result = applyChannelConfig({}, 'telegram', {
+      botToken: '123456:ABC-DEF',
+    })
+
+    expect(result.channels.telegram.enabled).toBe(true)
+    expect(result.channels.telegram.botToken).toBe('123456:ABC-DEF')
+    expect(result.channels.telegram.dmPolicy).toBe('pairing')
+  })
+
+  it('Slack writes channels.slack.enabled, botToken, appToken, and default dmPolicy', () => {
+    const result = applyChannelConfig({}, 'slack', {
+      botToken: 'xoxb-test',
+      appToken: 'xapp-test',
+    })
+
+    expect(result.channels.slack.enabled).toBe(true)
+    expect(result.channels.slack.botToken).toBe('xoxb-test')
+    expect(result.channels.slack.appToken).toBe('xapp-test')
+    expect(result.channels.slack.dmPolicy).toBe('pairing')
+  })
+
+  it('LINE config write does not add a managed plugin allowlist entry', () => {
+    const result = applyChannelConfig({}, 'line', {
+      channelAccessToken: 'token',
+      channelSecret: 'secret',
+    })
+
+    expect(result.plugins?.allow || []).not.toContain('openclaw-line')
+  })
+
+  it('Telegram config write does not add a managed plugin allowlist entry', () => {
+    const result = applyChannelConfig({}, 'telegram', {
+      botToken: 'token',
+    })
+
+    expect(result.plugins?.allow || []).not.toContain('openclaw-telegram')
+  })
+
+  it('Slack config write does not add a managed plugin allowlist entry', () => {
+    const result = applyChannelConfig({}, 'slack', {
+      botToken: 'xoxb-test',
+      appToken: 'xapp-test',
+    })
+
+    expect(result.plugins?.allow || []).not.toContain('openclaw-slack')
+  })
+
+  it('LINE config write preserves existing unrelated channel config', () => {
+    const existing = {
+      channels: {
+        feishu: { enabled: true, appId: 'cli_test', appSecret: 'secret' },
+      },
+    }
+
+    const result = applyChannelConfig(existing, 'line', {
+      channelAccessToken: 'line_token',
+      channelSecret: 'line_secret',
+    })
+
+    expect(result.channels.feishu.enabled).toBe(true)
+    expect(result.channels.feishu.appId).toBe('cli_test')
+    expect(result.channels.line.enabled).toBe(true)
   })
 })

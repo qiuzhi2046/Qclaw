@@ -56,6 +56,9 @@ type ManagedPluginInstallPreflightApi =
 type ChannelConnectGatewayReadyApi =
   Pick<typeof window.api, 'reloadGatewayAfterChannelChange'>
   & Partial<Pick<typeof window.api, 'repairManagedChannelPlugin' | 'getManagedChannelPluginStatus' | 'ensureGatewayRunning'>>
+type ChannelConnectDoctorApi =
+  Pick<typeof window.api, 'runDoctor'>
+type ChannelConnectCliResult = Awaited<ReturnType<typeof window.api.installPlugin>>
 
 const CHANNELS = listChannelDefinitions()
 
@@ -85,6 +88,76 @@ export function isSafeAlreadyInstalledManagedPluginInstallError(detail: string):
   return isPluginAlreadyInstalledError(detail)
     && !String(detail || '').includes('已自动隔离')
     && !String(detail || '').includes('安全修复失败')
+}
+
+function buildCliCorpus(result: Partial<{ stdout: string; stderr: string }> | null | undefined): string {
+  return [String(result?.stderr || '').trim(), String(result?.stdout || '').trim()]
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
+export function shouldAttemptOfficialConfigRepairForPluginInstall(
+  result: Partial<ChannelConnectCliResult> | null | undefined
+): boolean {
+  const corpus = buildCliCorpus(result).toLowerCase()
+  if (!corpus) return false
+  const configInvalid = corpus.includes('config invalid') || corpus.includes('invalid config')
+  const doctorSuggested =
+    corpus.includes('doctor --fix') ||
+    corpus.includes('doctor --repair') ||
+    corpus.includes('unknown channel id') ||
+    corpus.includes('unknown config keys') ||
+    corpus.includes('unrecognized key')
+  return configInvalid && doctorSuggested
+}
+
+function mergeCliResultOutput(
+  base: Partial<ChannelConnectCliResult> | null | undefined,
+  extra: Partial<ChannelConnectCliResult> | null | undefined
+): Pick<ChannelConnectCliResult, 'stdout' | 'stderr'> {
+  return {
+    stdout: [String(base?.stdout || '').trim(), String(extra?.stdout || '').trim()].filter(Boolean).join('\n\n'),
+    stderr: [String(base?.stderr || '').trim(), String(extra?.stderr || '').trim()].filter(Boolean).join('\n\n'),
+  }
+}
+
+export async function retryPluginInstallWithOfficialConfigRepair(
+  api: ChannelConnectDoctorApi,
+  install: () => Promise<ChannelConnectCliResult>,
+  appendLog: (message: string) => void
+): Promise<{
+  result: ChannelConnectCliResult
+  officialRepairApplied: boolean
+}> {
+  const firstResult = await install()
+  if (firstResult.ok || !shouldAttemptOfficialConfigRepairForPluginInstall(firstResult)) {
+    return {
+      result: firstResult,
+      officialRepairApplied: false,
+    }
+  }
+
+  appendLog('⚠️ 检测到 OpenClaw 配置与当前版本不兼容，正在执行官方修复...\n')
+  const doctorResult = await api.runDoctor({ fix: true, nonInteractive: true })
+  if (!doctorResult.ok) {
+    const mergedOutput = mergeCliResultOutput(firstResult, doctorResult)
+    return {
+      result: {
+        ok: false,
+        stdout: mergedOutput.stdout,
+        stderr: mergedOutput.stderr,
+        code: doctorResult.code,
+      },
+      officialRepairApplied: true,
+    }
+  }
+
+  appendLog('✅ 官方配置修复完成，正在重试插件安装...\n\n')
+  return {
+    result: await install(),
+    officialRepairApplied: true,
+  }
 }
 
 export function buildManagedPluginScopedRepairOptions(
@@ -174,6 +247,14 @@ export async function resolveManagedPluginInstallPreflight(
   pluginInstallStrategy: ManagedPluginInstallStrategy
   prepareResult: ManagedPluginPrepareResult | null
 }> {
+  if (!params.channel?.plugin) {
+    return {
+      pluginInstalledOnDisk: false,
+      pluginInstallStrategy: 'install-plugin',
+      prepareResult: null,
+    }
+  }
+
   const prepareResult = params.channel
     ? await api.prepareManagedChannelPluginForSetup(params.channel.id)
     : null
@@ -1887,6 +1968,13 @@ export default function ChannelConnect({
       } else if (selectedChannel.plugin?.packageName) {
         // 插件通过 openclaw plugins install 安装
         setStatus('installing')
+        const plugin = selectedChannel.plugin
+        const pluginPackageName = plugin.packageName
+        if (!pluginPackageName) {
+          setError('插件安装信息不完整，请返回修改后重试。')
+          setStatus('error')
+          return
+        }
         const pluginAllowId = resolveChannelPluginAllowId(selectedChannel)
         const pluginInstalledOnDisk = managedPluginInstallPreflight?.pluginInstalledOnDisk || false
         const pluginInstallStrategy =
@@ -1902,7 +1990,7 @@ export default function ChannelConnect({
         } else if (pluginAlreadyConfigured) {
           setLog(`检测到 ${selectedChannel.name} 配置中已有安装记录，但磁盘插件缺失，准备重新安装...\n`)
         } else {
-          setLog(`正在安装插件 ${selectedChannel.plugin.packageName}...\n`)
+          setLog(`正在安装插件 ${pluginPackageName}...\n`)
         }
         try {
           if (pluginInstallStrategy === 'install-plugin') {
@@ -1919,10 +2007,17 @@ export default function ChannelConnect({
               setLog(prev => prev + '✅ 历史插件检查完成\n\n')
             }
 
-            const result = await window.api.installPlugin(
-              selectedChannel.plugin.packageName,
-              selectedChannel.plugin.allowId ? [selectedChannel.plugin.allowId] : undefined
-            )
+            const result = (
+              await retryPluginInstallWithOfficialConfigRepair(
+                window.api,
+                () =>
+                  window.api.installPlugin(
+                    pluginPackageName,
+                    plugin.allowId ? [plugin.allowId] : undefined
+                  ),
+                (message) => setLog((prev) => prev + message)
+              )
+            ).result
             if (!result.ok) {
               // 如果是"已存在"错误，跳过安装继续
               if (isSafeAlreadyInstalledManagedPluginInstallError(result.stderr || '')) {

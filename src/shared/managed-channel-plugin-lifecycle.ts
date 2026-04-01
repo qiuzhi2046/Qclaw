@@ -479,29 +479,50 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
     }
   }
 
+  if (channelId === 'openclaw-weixin') {
+    return {
+      channelId,
+      pluginScope: 'channel',
+      entityScope: 'account',
+      canonicalPluginId: record.pluginId,
+      cleanupPluginIds: record.cleanupPluginIds,
+      cleanupChannelIds: record.cleanupChannelIds,
+      installStrategy: 'interactive-installer',
+      packageName: record.packageName,
+      npxSpecifier: record.npxSpecifier,
+      supportsBackgroundRestore: false,
+      supportsInteractiveRepairUi: true,
+      detectConfigured: ({ referenceConfig, currentConfig }) =>
+        hasConfiguredWeixinChannel(referenceConfig) || hasConfiguredWeixinChannel(currentConfig),
+      normalizeConfig: (config, runtime) => {
+        if (!runtime.installedOnDisk) {
+          return {
+            config: cloneConfig(config),
+            changed: false,
+          }
+        }
+        return normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds)
+      },
+    }
+  }
+
   return {
-    channelId: 'openclaw-weixin',
+    channelId,
     pluginScope: 'channel',
-    entityScope: 'account',
+    entityScope: 'channel',
     canonicalPluginId: record.pluginId,
     cleanupPluginIds: record.cleanupPluginIds,
     cleanupChannelIds: record.cleanupChannelIds,
-    installStrategy: 'interactive-installer',
+    installStrategy: 'package',
     packageName: record.packageName,
     npxSpecifier: record.npxSpecifier,
-    supportsBackgroundRestore: false,
+    supportsBackgroundRestore: true,
     supportsInteractiveRepairUi: true,
-    detectConfigured: ({ referenceConfig, currentConfig }) =>
-      hasConfiguredWeixinChannel(referenceConfig) || hasConfiguredWeixinChannel(currentConfig),
-    normalizeConfig: (config, runtime) => {
-      if (!runtime.installedOnDisk) {
-        return {
-          config: cloneConfig(config),
-          changed: false,
-        }
-      }
-      return normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds)
+    detectConfigured: ({ referenceConfig, currentConfig }) => {
+      const channelConfig = referenceConfig?.channels?.[channelId] || currentConfig?.channels?.[channelId]
+      return hasOwnRecord(channelConfig)
     },
+    normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
   }
 }
 

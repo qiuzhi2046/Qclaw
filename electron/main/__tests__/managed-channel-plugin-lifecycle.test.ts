@@ -99,6 +99,8 @@ describe('managed channel lifecycle specs', () => {
       canonicalPluginId: 'openclaw-weixin',
       installStrategy: 'interactive-installer',
     })
+    expect(getManagedChannelLifecycleSpec('telegram')).toBeNull()
+    expect(getManagedChannelLifecycleSpec('slack')).toBeNull()
   })
 })
 

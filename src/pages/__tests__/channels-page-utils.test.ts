@@ -65,6 +65,22 @@ describe('shouldCompleteChannelConnect', () => {
       })
     ).toBe(false)
   })
+
+  it('keeps Telegram in the pairing path because dmPolicy defaults to pairing', () => {
+    expect(
+      shouldCompleteChannelConnect({
+        channelId: 'telegram',
+      })
+    ).toBe(false)
+  })
+
+  it('keeps Slack in the pairing path because dmPolicy defaults to pairing', () => {
+    expect(
+      shouldCompleteChannelConnect({
+        channelId: 'slack',
+      })
+    ).toBe(false)
+  })
 })
 
 describe('getConfigModalTitle', () => {

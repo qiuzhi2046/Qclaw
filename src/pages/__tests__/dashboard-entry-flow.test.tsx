@@ -140,7 +140,7 @@ describe('dashboard entry bootstrap flow', () => {
     )
 
     expect(html).toContain('飞书')
-    expect(html).toContain('Telegram 机器人')
+    expect(html).toContain('Telegram')
     expect(html).toContain('openai/gpt-5.4-pro')
     expect(api.getModelStatus).not.toHaveBeenCalled()
   })

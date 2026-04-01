@@ -16,6 +16,9 @@ import wecomIcon from '../assets/channels/wecom.svg'
 import dingtalkIcon from '../assets/channels/dingtalk.svg'
 import qqIcon from '../assets/channels/qq.svg'
 import weixinIcon from '../assets/channels/weixin.svg'
+import lineIcon from '../assets/channels/line.svg'
+import telegramIcon from '../assets/channels/telegram.svg'
+import slackIcon from '../assets/channels/slack.svg'
 
 export { classifyOnboardFailure, isPluginAlreadyInstalledError } from '../shared/openclaw-cli-errors'
 export { applyDingtalkFallbackConfig } from '../shared/dingtalk-official-setup'
@@ -167,6 +170,44 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
       cleanupPluginIds: WEIXIN_MANAGED_PLUGIN?.cleanupPluginIds,
     },
     skipPairing: true,
+  },
+  {
+    id: 'line',
+    name: 'LINE',
+    logo: lineIcon,
+    description: 'LINE Bot',
+    helpUrl: 'https://developers.line.biz/',
+    helpText: '在 LINE Developers Console 的 Basic settings 查看 Channel ID / Channel secret，并在 Messaging API 相关页面另行签发 Channel Access Token',
+    fields: [
+      { key: 'channelAccessToken', label: 'Channel Access Token', placeholder: 'Channel Access Token', type: 'password', required: true },
+      { key: 'channelSecret', label: 'Channel Secret', placeholder: 'Channel Secret', type: 'password', required: true },
+    ],
+    skipPairing: false,
+  },
+  {
+    id: 'telegram',
+    name: 'Telegram',
+    logo: telegramIcon,
+    description: 'Telegram Bot（官方插件）',
+    helpUrl: 'https://core.telegram.org/bots/api',
+    helpText: '通过 @BotFather 创建 Telegram Bot，获取 Bot Token',
+    fields: [
+      { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11', type: 'password', required: true },
+    ],
+    skipPairing: false,
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    logo: slackIcon,
+    description: 'Slack Bot（官方插件）',
+    helpUrl: 'https://api.slack.com/docs',
+    helpText: '在 Slack App 管理页面创建 App，获取 Bot Token 和 App-Level Token',
+    fields: [
+      { key: 'botToken', label: 'Bot Token', placeholder: 'xoxb-...', type: 'password', required: true },
+      { key: 'appToken', label: 'App-Level Token', placeholder: 'xapp-...', type: 'password', required: true },
+    ],
+    skipPairing: false,
   },
 ]
 
@@ -454,6 +495,38 @@ export function applyChannelConfig(
         existingChannel.accounts && typeof existingChannel.accounts === 'object' && !Array.isArray(existingChannel.accounts)
           ? existingChannel.accounts
           : {},
+    }
+  } else if (channel.id === 'line') {
+    const existingChannel = (nextConfig.channels.line || {}) as Record<string, any>
+    nextConfig.channels.line = {
+      ...existingChannel,
+      enabled: true,
+      channelAccessToken: values.channelAccessToken,
+      channelSecret: values.channelSecret,
+      dmPolicy: typeof existingChannel.dmPolicy === 'string' && existingChannel.dmPolicy.trim()
+        ? existingChannel.dmPolicy.trim()
+        : 'pairing',
+    }
+  } else if (channel.id === 'telegram') {
+    const existingChannel = (nextConfig.channels.telegram || {}) as Record<string, any>
+    nextConfig.channels.telegram = {
+      ...existingChannel,
+      enabled: true,
+      botToken: values.botToken,
+      dmPolicy: typeof existingChannel.dmPolicy === 'string' && existingChannel.dmPolicy.trim()
+        ? existingChannel.dmPolicy.trim()
+        : 'pairing',
+    }
+  } else if (channel.id === 'slack') {
+    const existingChannel = (nextConfig.channels.slack || {}) as Record<string, any>
+    nextConfig.channels.slack = {
+      ...existingChannel,
+      enabled: true,
+      botToken: values.botToken,
+      appToken: values.appToken,
+      dmPolicy: typeof existingChannel.dmPolicy === 'string' && existingChannel.dmPolicy.trim()
+        ? existingChannel.dmPolicy.trim()
+        : 'pairing',
     }
   }
 
