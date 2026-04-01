@@ -318,6 +318,10 @@ export interface ValidateProviderCredentialResult {
 
 const NO_MODELS_FOUND_OUTPUT_REGEX = /(?:^|\n)\s*(?:error:\s*)?no(?:\s+\w+){0,3}\s+models?\s+found\.?\s*(?:\n|$)/i
 
+function isCustomOpenAiProvider(provider: string): boolean {
+  return String(provider || '').trim() === 'custom-openai'
+}
+
 function readLocalScanEntries(payload: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(payload)) {
     return payload.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
@@ -358,6 +362,36 @@ function normalizeLocalScanPayload(payload: unknown, provider: string): { count:
   return {
     count: models.length,
     models,
+  }
+}
+
+async function tryDiscoverCustomOpenAiModelsViaHttp(
+  input: LocalModelScanInput
+): Promise<{ count: number; models: Array<{ key: string; name: string }> } | null> {
+  if (!isCustomOpenAiProvider(input.provider)) return null
+
+  const normalizedBaseUrl = String(input.baseUrl || '').trim().replace(/\/+$/, '')
+  if (!normalizedBaseUrl) return null
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  }
+  const normalizedApiKey = String(input.apiKey || '').trim()
+  if (normalizedApiKey) {
+    headers.Authorization = `Bearer ${normalizedApiKey}`
+  }
+
+  try {
+    const response = await fetch(`${normalizedBaseUrl}/models`, {
+      method: 'GET',
+      headers,
+    })
+    if (!response.ok) return null
+
+    const payload = await response.json()
+    return normalizeLocalScanPayload(payload, input.provider)
+  } catch {
+    return null
   }
 }
 
@@ -576,9 +610,20 @@ export async function scanLocalModels(
 
   const parsed = parseJsonResult<Record<string, unknown>>('scan-models', command, result)
   if (parsed.ok) {
+    const normalizedPayload = normalizeLocalScanPayload(parsed.data, provider)
+    if (normalizedPayload.count === 0) {
+      const httpFallback = await tryDiscoverCustomOpenAiModelsViaHttp(input)
+      if (httpFallback) {
+        return {
+          ...parsed,
+          data: httpFallback,
+        }
+      }
+    }
+
     return {
       ...parsed,
-      data: normalizeLocalScanPayload(parsed.data, provider),
+      data: normalizedPayload,
     }
   }
 
@@ -589,6 +634,19 @@ export async function scanLocalModels(
   // Some local provider bridges return a plain-text success message when no models are loaded.
   // Treat it as an empty model list so the UI can guide the user to pull/load models.
   if (parsed.errorCode === 'parse_error' && NO_MODELS_FOUND_OUTPUT_REGEX.test(normalizedStdout)) {
+    const httpFallback = await tryDiscoverCustomOpenAiModelsViaHttp(input)
+    if (httpFallback) {
+      return {
+        ok: true,
+        action: 'scan-models',
+        command,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        code: result.code,
+        data: httpFallback,
+      }
+    }
+
     return {
       ok: true,
       action: 'scan-models',

@@ -5,6 +5,7 @@ import {
   appendRetryRefreshHint,
   type OpenClawCapabilities,
   buildLocalProviderEnvUpdatesForSubmit,
+  buildNextConfigWithLocalProviderSnapshot,
   buildCapabilitiesLoadingDisplay,
   refreshModelCapabilitiesData,
   buildSkipSetupContext,
@@ -251,6 +252,35 @@ describe('buildProviderOptions', () => {
 
     expect(apiKeyMethod?.supported).toBe(false)
     expect(apiKeyMethod?.disabledReason).toContain('CLI flag')
+  })
+})
+
+describe('buildNextConfigWithLocalProviderSnapshot', () => {
+  it('persists local custom-openai provider details and scanned models into models.providers', () => {
+    expect(
+      buildNextConfigWithLocalProviderSnapshot({
+        currentConfig: null,
+        providerId: 'custom-openai',
+        baseUrl: 'http://192.168.31.139:12995/v1',
+        selectedModelKey: 'custom-openai/gpt-4',
+        discoveredModels: [
+          { key: 'custom-openai/gpt-4', name: 'gpt-4' },
+          { key: 'custom-openai/gpt-4.1', name: 'gpt-4.1' },
+        ],
+      })
+    ).toEqual({
+      models: {
+        providers: {
+          'custom-openai': {
+            baseUrl: 'http://192.168.31.139:12995/v1',
+            models: [
+              { id: 'gpt-4', name: 'gpt-4' },
+              { id: 'gpt-4.1', name: 'gpt-4.1' },
+            ],
+          },
+        },
+      },
+    })
   })
 })
 
