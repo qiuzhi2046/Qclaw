@@ -62,8 +62,9 @@ describe('resolveQualifiedNodeRuntime', () => {
       {
         probeCapability: vi.fn(async () => makeNodeCapability()),
         probeVersion: vi.fn(async (executablePath: string) => {
-          if (executablePath === '/usr/local/bin/node') return 'v20.11.1'
-          if (executablePath === '/Users/alice/.nvm/versions/node/v24.14.0/bin/node') return 'v24.14.0'
+          const p = executablePath.replace(/\\/g, '/')
+          if (p === '/usr/local/bin/node') return 'v20.11.1'
+          if (p === '/Users/alice/.nvm/versions/node/v24.14.0/bin/node') return 'v24.14.0'
           return null
         }),
         resolveRequirement: vi.fn(async () => ({
@@ -80,7 +81,7 @@ describe('resolveQualifiedNodeRuntime', () => {
     expect(result).toEqual({
       ok: true,
       runtime: expect.objectContaining({
-        executablePath: '/Users/alice/.nvm/versions/node/v24.14.0/bin/node',
+        executablePath: expect.stringMatching(/nvm[/\\]versions[/\\]node[/\\]v24\.14\.0[/\\]bin[/\\]node$/),
         version: 'v24.14.0',
         installStrategy: 'nvm',
         source: 'nvm',

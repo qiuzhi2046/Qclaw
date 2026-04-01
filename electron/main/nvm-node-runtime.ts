@@ -86,7 +86,7 @@ export function buildNvmNodeBinDir(
 }
 
 export function buildNvmShellPrefix(nvmDir: string): string {
-  return `export NVM_DIR=${quotePosixShellArg(nvmDir)} && source ${quotePosixShellArg(path.join(nvmDir, 'nvm.sh'))}`
+  return `export NVM_DIR=${quotePosixShellArg(nvmDir)} && source ${quotePosixShellArg(`${nvmDir}/nvm.sh`)}`
 }
 
 export function buildNvmInstallCommand(nvmDir: string, targetVersion: string): string {

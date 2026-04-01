@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 import {
   buildNvmInstallCommand,
   buildNvmNodeBinDir,
@@ -23,6 +25,7 @@ describe('listInstalledNvmNodeBinDirs', () => {
         { name: 'v24.14.0', isDirectory: () => true },
         { name: 'v18.20.8', isDirectory: () => true },
       ],
+      pathModule: path.posix,
     })
 
     expect(dirs).toEqual([
@@ -55,7 +58,7 @@ describe('buildNvmUseCommand', () => {
 
 describe('buildNvmNodeBinDir', () => {
   it('normalizes versions to the nvm directory layout', () => {
-    expect(buildNvmNodeBinDir('/Users/alice/.nvm', '24.14.0')).toBe(
+    expect(buildNvmNodeBinDir('/Users/alice/.nvm', '24.14.0', path.posix)).toBe(
       '/Users/alice/.nvm/versions/node/v24.14.0/bin'
     )
   })
@@ -168,6 +171,7 @@ describe('detectNvmDir', () => {
         env: TEST_ENV_BASE,
         homedir: () => '/Users/alice',
         access: async () => undefined,
+        pathModule: path.posix,
       })
     ).resolves.toBe('/Users/alice/.nvm')
   })
