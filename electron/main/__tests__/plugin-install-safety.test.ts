@@ -451,6 +451,34 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     })
   })
 
+  it('does not quarantine diagnostic-only official managed plugins during global repair sweeps', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'openclaw-weixin',
+      '@tencent-weixin/openclaw-weixin',
+      'index.ts',
+      'import { buildChannelConfigSchema } from "openclaw/plugin-sdk"\nexport default {}'
+    )
+
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      quarantineOfficialManagedPlugins: true,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['openclaw-weixin'],
+        },
+      }),
+      writeConfig: async () => {},
+    })
+
+    expect(result).toEqual({
+      incompatiblePlugins: [],
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+    })
+  })
+
   it('quarantines official managed plugins during explicit targeted repair', async () => {
     const homeDir = await createTempHome()
     await writePluginPackage(

@@ -61,6 +61,28 @@ function normalizePluginIds(values: string[] | undefined): string[] {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))]
 }
 
+function getManagedPluginRecord(pluginId: string) {
+  const normalizedPluginId = String(pluginId || '').trim().toLowerCase()
+  return MANAGED_CHANNEL_PLUGIN_RECORDS.find((record) => record.pluginId.toLowerCase() === normalizedPluginId)
+}
+
+function shouldQuarantineOfficialManagedPlugin(
+  pluginId: string,
+  options: Pick<PluginInstallSafetyOptions, 'scopePluginIds' | 'quarantineOfficialManagedPlugins'>
+): boolean {
+  if (!isOfficialManagedPluginId(pluginId)) return true
+  if (options.quarantineOfficialManagedPlugins !== true) return false
+
+  const record = getManagedPluginRecord(pluginId)
+  if (!record) return true
+
+  const scopedPluginIds = normalizePluginIds(options.scopePluginIds)
+  const isScopedRepair = scopedPluginIds.length > 0
+  if (isScopedRepair) return true
+
+  return record.smokeTestPolicy === 'strict'
+}
+
 function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -245,7 +267,7 @@ async function findIncompatibleExtensionPlugins(
       if (!pluginSdkResolutionFailure && !pluginSdkCompatibilityFailure) {
         continue
       }
-      if (isOfficialManagedPluginId(entry.name) && options.quarantineOfficialManagedPlugins !== true) {
+      if (!shouldQuarantineOfficialManagedPlugin(entry.name, options)) {
         break
       }
       if (shouldSkipManagedPluginQuarantine(entry.name)) {
