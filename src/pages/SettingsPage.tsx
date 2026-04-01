@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Text, Button, Group, Collapse, Modal, Tooltip } from '@mantine/core'
+import { Text, Button, Group, Collapse, Modal, Tooltip, SegmentedControl } from '@mantine/core'
 import { useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { IconChevronRight } from '@tabler/icons-react'
 import BackupCenter from '../components/BackupCenter'
@@ -9,6 +9,7 @@ import OpenClawDataCleanupDialog from '../components/OpenClawDataCleanupDialog'
 import UpdateCenter from '../components/UpdateCenter'
 import AboutModal from '../components/AboutModal'
 import tooltips from '@/constants/tooltips.json'
+import type { ChatComposerEnterSendMode } from '@/lib/chat-composer-enter-send-preference'
 
 function Section({
   title,
@@ -70,12 +71,16 @@ interface SettingsPageProps {
   onReconfigure?: () => void
   onToggleTooltip: () => void
   tooltipEnabled: boolean
+  enterSendMode: ChatComposerEnterSendMode
+  onChangeEnterSendMode: (mode: ChatComposerEnterSendMode) => void
 }
 
 export default function SettingsPage({
   onReconfigure,
   onToggleTooltip,
   tooltipEnabled,
+  enterSendMode,
+  onChangeEnterSendMode,
 }: SettingsPageProps) {
   const { setColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('dark')
@@ -128,6 +133,28 @@ export default function SettingsPage({
             </Button>
           </Tooltip>
         </Group>
+      </Section>
+
+      {/* 聊天输入 */}
+      <Section
+        title="聊天输入"
+        titleTooltip={tooltips.settingsPage.chatComposerEnterSendMode}
+      >
+        <SegmentedControl
+          value={enterSendMode}
+          onChange={(value) => {
+            if (!value) return
+            onChangeEnterSendMode(value as ChatComposerEnterSendMode)
+          }}
+          data={[
+            { value: 'enter', label: 'Enter 发送（默认）' },
+            { value: 'shiftEnter', label: 'Shift+Enter 发送' },
+            { value: 'altEnter', label: 'Alt+Enter 发送' },
+          ]}
+        />
+        <Text size="xs" c="dimmed" mt={8}>
+          提示：切换后将影响聊天输入框的快捷键行为。
+        </Text>
       </Section>
 
       {/* 卸载清除 */}
