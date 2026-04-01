@@ -61,30 +61,6 @@ const MANAGED_CHANNEL_PLUGIN_RECORDS: ManagedChannelPluginRecord[] = [
     cleanupChannelIds: ['openclaw-weixin'],
     smokeTestPolicy: 'diagnostic-only',
   },
-  {
-    channelId: 'line',
-    pluginId: 'openclaw-line',
-    packageName: '@line/openclaw-line',
-    cleanupPluginIds: ['openclaw-line', 'line'],
-    cleanupChannelIds: ['line'],
-    smokeTestPolicy: 'diagnostic-only',
-  },
-  {
-    channelId: 'telegram',
-    pluginId: 'openclaw-telegram',
-    packageName: '@telegram/openclaw-telegram',
-    cleanupPluginIds: ['openclaw-telegram', 'telegram'],
-    cleanupChannelIds: ['telegram'],
-    smokeTestPolicy: 'diagnostic-only',
-  },
-  {
-    channelId: 'slack',
-    pluginId: 'openclaw-slack',
-    packageName: '@slack/openclaw-slack',
-    cleanupPluginIds: ['openclaw-slack', 'slack'],
-    cleanupChannelIds: ['slack'],
-    smokeTestPolicy: 'diagnostic-only',
-  },
 ]
 
 function normalizeId(value: unknown): string {

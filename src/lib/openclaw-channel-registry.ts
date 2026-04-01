@@ -88,9 +88,6 @@ const WECOM_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('wecom')
 const DINGTALK_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('dingtalk')
 const QQBOT_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('qqbot')
 const WEIXIN_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('openclaw-weixin')
-const LINE_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('line')
-const TELEGRAM_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('telegram')
-const SLACK_MANAGED_PLUGIN = getManagedChannelPluginByChannelId('slack')
 
 const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
   {
@@ -178,19 +175,14 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
     id: 'line',
     name: 'LINE',
     logo: lineIcon,
-    description: 'LINE Bot（官方插件）',
+    description: 'LINE Bot',
     helpUrl: 'https://developers.line.biz/',
-    helpText: '在 LINE Developers Console 创建 Messaging API 频道，获取 Channel Access Token 和 Channel Secret',
+    helpText: '在 LINE Developers Console 的 Basic settings 查看 Channel ID / Channel secret，并在 Messaging API 相关页面另行签发 Channel Access Token',
     fields: [
       { key: 'channelAccessToken', label: 'Channel Access Token', placeholder: 'Channel Access Token', type: 'password', required: true },
       { key: 'channelSecret', label: 'Channel Secret', placeholder: 'Channel Secret', type: 'password', required: true },
     ],
-    plugin: {
-      packageName: LINE_MANAGED_PLUGIN?.packageName,
-      allowId: LINE_MANAGED_PLUGIN?.pluginId,
-      cleanupPluginIds: LINE_MANAGED_PLUGIN?.cleanupPluginIds,
-    },
-    skipPairing: true,
+    skipPairing: false,
   },
   {
     id: 'telegram',
@@ -202,12 +194,7 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
     fields: [
       { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11', type: 'password', required: true },
     ],
-    plugin: {
-      packageName: TELEGRAM_MANAGED_PLUGIN?.packageName,
-      allowId: TELEGRAM_MANAGED_PLUGIN?.pluginId,
-      cleanupPluginIds: TELEGRAM_MANAGED_PLUGIN?.cleanupPluginIds,
-    },
-    skipPairing: true,
+    skipPairing: false,
   },
   {
     id: 'slack',
@@ -220,12 +207,7 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
       { key: 'botToken', label: 'Bot Token', placeholder: 'xoxb-...', type: 'password', required: true },
       { key: 'appToken', label: 'App-Level Token', placeholder: 'xapp-...', type: 'password', required: true },
     ],
-    plugin: {
-      packageName: SLACK_MANAGED_PLUGIN?.packageName,
-      allowId: SLACK_MANAGED_PLUGIN?.pluginId,
-      cleanupPluginIds: SLACK_MANAGED_PLUGIN?.cleanupPluginIds,
-    },
-    skipPairing: true,
+    skipPairing: false,
   },
 ]
 

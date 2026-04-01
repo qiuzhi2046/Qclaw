@@ -44,6 +44,27 @@ describe('openclaw-channel-registry', () => {
     expect(channel?.plugin?.packageName).toBe('@tencent-weixin/openclaw-weixin')
   })
 
+  it('treats LINE as a direct config channel instead of a managed plugin install', () => {
+    const channel = getChannelDefinition('line')
+    expect(channel).toBeTruthy()
+    expect(channel?.skipPairing).toBe(false)
+    expect(channel?.plugin).toBeUndefined()
+  })
+
+  it('treats Telegram as a bundled direct config channel instead of a managed plugin install', () => {
+    const channel = getChannelDefinition('telegram')
+    expect(channel).toBeTruthy()
+    expect(channel?.skipPairing).toBe(false)
+    expect(channel?.plugin).toBeUndefined()
+  })
+
+  it('treats Slack as a bundled direct config channel instead of a managed plugin install', () => {
+    const channel = getChannelDefinition('slack')
+    expect(channel).toBeTruthy()
+    expect(channel?.skipPairing).toBe(false)
+    expect(channel?.plugin).toBeUndefined()
+  })
+
   it('pins QQ plugin allow id to the manifest id instead of the npm versioned specifier', () => {
     const channel = getChannelDefinition('qqbot')
     expect(channel).toBeTruthy()

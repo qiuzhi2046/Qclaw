@@ -6,9 +6,6 @@ export type ManagedChannelLifecycleId =
   | 'dingtalk'
   | 'qqbot'
   | 'openclaw-weixin'
-  | 'line'
-  | 'telegram'
-  | 'slack'
 
 export type ManagedChannelInstallStrategy =
   | 'official-adapter'

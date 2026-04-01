@@ -61,6 +61,32 @@ describe('user-facing-cli-feedback', () => {
     expect(message).toBe('ClawHub 当前请求过于频繁，已被限流，请稍后再试。')
   })
 
+  it('surfaces OpenClaw config compatibility failures before falling back to generic plugin install wording', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: [
+        'Invalid config at ~/.openclaw/openclaw.json:',
+        '- channels.openclaw-weixin: unknown channel id: openclaw-weixin',
+        'Run: openclaw doctor --fix',
+      ].join('\n'),
+      fallback: '插件安装失败，请检查网络与权限后重试。',
+    })
+
+    expect(message).toBe('当前 OpenClaw 配置与版本契约不兼容，请先执行官方配置修复后重试。')
+  })
+
+  it('surfaces missing plugin package failures before falling back to generic install wording', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: [
+        'Resolving clawhub:@line/openclaw-line…',
+        'Downloading @line/openclaw-line…',
+        'Package not found on npm: @line/openclaw-line.',
+      ].join('\n'),
+      fallback: '插件安装失败，请检查网络与权限后重试。',
+    })
+
+    expect(message).toBe('插件包不存在或尚未发布，请确认插件名称正确，或等待对应插件发布后再试。')
+  })
+
   it('surfaces the busy skill mutation hint emitted by the main process marker', () => {
     const message = toUserFacingCliFailureMessage({
       stderr: [

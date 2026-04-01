@@ -8,6 +8,9 @@ import wecomIcon from '../assets/channels/wecom.svg'
 import dingtalkIcon from '../assets/channels/dingtalk.svg'
 import qqIcon from '../assets/channels/qq.svg'
 import weixinIcon from '../assets/channels/weixin.svg'
+import lineIcon from '../assets/channels/line.svg'
+import telegramIcon from '../assets/channels/telegram.svg'
+import slackIcon from '../assets/channels/slack.svg'
 import logoUrl from '@/assets/logo.png'
 
 type Status = 'input' | 'pairing' | 'success' | 'error'
@@ -18,6 +21,13 @@ const CHANNEL_INFO: Record<string, { name: string; icon: string }> = {
   dingtalk: { name: '钉钉', icon: dingtalkIcon },
   qqbot: { name: 'QQ', icon: qqIcon },
   'openclaw-weixin': { name: '个人微信', icon: weixinIcon },
+  line: { name: 'LINE', icon: lineIcon },
+  telegram: { name: 'Telegram', icon: telegramIcon },
+  slack: { name: 'Slack', icon: slackIcon },
+}
+
+export function getPairingChannelInfo(channel: string): { name: string; icon: string } {
+  return CHANNEL_INFO[channel] || CHANNEL_INFO.feishu
 }
 
 export default function PairingCode({
@@ -69,7 +79,7 @@ export default function PairingCode({
     })
   }, [])
 
-  const channelInfo = CHANNEL_INFO[channel] || CHANNEL_INFO.feishu
+  const channelInfo = getPairingChannelInfo(channel)
   const feishuBotLabel =
     channel === 'feishu'
       ? accountName || (accountId === 'default' ? '默认 Bot' : accountId ? `Bot ${accountId}` : '')

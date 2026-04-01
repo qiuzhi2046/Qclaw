@@ -11,6 +11,10 @@ const GATEWAY_UNREADY_REGEX =
 const CLAWHUB_RATE_LIMIT_REGEX =
   /\bclawhub\b[\s\S]*\b(?:429|rate limit exceeded|too many requests)\b/i
 const CLAWHUB_RESOLUTION_FAILED_REGEX = /resolving clawhub:[\s\S]*fetch failed/i
+const PLUGIN_PACKAGE_NOT_FOUND_REGEX =
+  /\b(?:package not found on npm|not found - get https:\/\/registry\.npmjs\.org\/|also not a valid hook pack)\b/i
+const OPENCLAW_CONFIG_COMPATIBILITY_REGEX =
+  /\b(?:config invalid|unknown channel id|unknown config keys|unrecognized key|doctor --fix|doctor --repair)\b/i
 const NETWORK_BLOCKED_REGEX =
   /\b(timeout|timed out|network|dns|proxy|certificate|tls|ssl|socket hang up|econnreset|enotfound|fetch failed)\b/i
 const PLUGIN_INSTALL_PERMISSION_MARKER = 'QCLAW_PLUGIN_INSTALL_PERMISSION_DENIED'
@@ -102,6 +106,12 @@ export function toUserFacingCliFailureMessage(params: {
   }
   if (CLAWHUB_RESOLUTION_FAILED_REGEX.test(corpus)) {
     return '插件源解析失败，请稍后重试。若该插件此前已安装，可直接继续绑定渠道。'
+  }
+  if (PLUGIN_PACKAGE_NOT_FOUND_REGEX.test(corpus)) {
+    return '插件包不存在或尚未发布，请确认插件名称正确，或等待对应插件发布后再试。'
+  }
+  if (OPENCLAW_CONFIG_COMPATIBILITY_REGEX.test(corpus)) {
+    return '当前 OpenClaw 配置与版本契约不兼容，请先执行官方配置修复后重试。'
   }
   if (NETWORK_BLOCKED_REGEX.test(corpus)) {
     return '网络连接异常，请检查网络或代理配置后重试。'
