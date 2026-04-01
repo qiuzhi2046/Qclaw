@@ -153,6 +153,14 @@ describe('openclaw skills compatibility helpers', () => {
         stderr: 'network timeout while contacting registry',
       })
     ).toBe(false)
+
+    expect(
+      isUnsupportedSkillsCommand({
+        ok: false,
+        stdout: '',
+        stderr: 'Config invalid\nProblem:\n  - channels.openclaw-weixin: unknown channel id: openclaw-weixin',
+      })
+    ).toBe(false)
   })
 
   it('accepts human-readable config keys but rejects control characters', () => {

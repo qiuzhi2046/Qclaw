@@ -500,6 +500,46 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     expect(quarantinedEntry).toContain('@larksuite/openclaw-lark')
   })
 
+  it('does not quarantine the interactive-installer weixin plugin on Node smoke-test false positives', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'openclaw-weixin',
+      '@tencent-weixin/openclaw-weixin',
+      'index.ts',
+      'import { buildChannelConfigSchema } from "openclaw/plugin-sdk"\nexport default {}'
+    )
+
+    const writeConfig = vi.fn(async () => {})
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      now: () => 0,
+      scopePluginIds: ['openclaw-weixin'],
+      quarantineOfficialManagedPlugins: true,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['openclaw-weixin'],
+          entries: {
+            'openclaw-weixin': { enabled: true },
+          },
+          installs: {
+            'openclaw-weixin': {
+              installPath: path.join(homeDir, 'extensions', 'openclaw-weixin'),
+            },
+          },
+        },
+      }),
+      writeConfig,
+    })
+
+    expect(result.quarantinedPluginIds).toEqual([])
+    expect(result.prunedPluginIds).toEqual([])
+    expect(writeConfig).not.toHaveBeenCalled()
+    await expect(
+      readFile(path.join(homeDir, 'extensions', 'openclaw-weixin', 'package.json'), 'utf8')
+    ).resolves.toContain('@tencent-weixin/openclaw-weixin')
+  })
+
   it('returns a repair summary when incompatible plugins are fixed', async () => {
     const homeDir = await createTempHome()
     await writePluginPackage(

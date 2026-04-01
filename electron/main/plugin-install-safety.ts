@@ -2,6 +2,7 @@ import { pruneStalePluginConfigEntries } from './openclaw-config-warnings'
 import { runNodeEvalWithQualifiedRuntime } from './node-subprocess-runtime'
 import { formatDisplayPath } from './openclaw-paths'
 import {
+  getManagedChannelPluginByPluginId,
   isOfficialManagedPluginId,
   listManagedChannelPluginRecords,
 } from '../../src/shared/managed-channel-plugin-registry'
@@ -84,6 +85,17 @@ function looksLikePluginSdkCompatibilityFailure(detail: string): boolean {
     || /named export .* not found/.test(text)
     || /cannot read (?:properties|property) of undefined/.test(text)
   )
+}
+
+function shouldSkipManagedPluginQuarantine(pluginId: string): boolean {
+  const managedPlugin = getManagedChannelPluginByPluginId(pluginId)
+  if (!managedPlugin) return false
+
+  // Personal Weixin is shipped as an interactive-installer plugin whose entry imports
+  // host-only OpenClaw runtime helpers. The generic Node smoke test in this file is not
+  // a reliable compatibility signal for that package, so quarantining it causes false
+  // positives and breaks unrelated features such as skills listing/install.
+  return managedPlugin.channelId === 'openclaw-weixin'
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -234,6 +246,9 @@ async function findIncompatibleExtensionPlugins(
         continue
       }
       if (isOfficialManagedPluginId(entry.name) && options.quarantineOfficialManagedPlugins !== true) {
+        break
+      }
+      if (shouldSkipManagedPluginQuarantine(entry.name)) {
         break
       }
       incompatible.push({
