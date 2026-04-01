@@ -24,4 +24,14 @@ describe('Welcome', () => {
     expect(html).toContain('当前Openclaw 要求 Node.js 版本高于22.16')
     expect(html).toContain('Qclaw 会自动安装最新版node，可能造成node版本覆盖')
   })
+
+  it('does not render list markup inside paragraph tags', () => {
+    const html = renderToStaticMarkup(
+      <MantineProvider>
+        <Welcome onAccept={vi.fn()} />
+      </MantineProvider>
+    )
+
+    expect(html).not.toMatch(/<p[^>]*>\s*<ul/)
+  })
 })
