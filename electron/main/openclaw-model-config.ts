@@ -366,7 +366,8 @@ function normalizeLocalScanPayload(payload: unknown, provider: string): { count:
 }
 
 async function tryDiscoverCustomOpenAiModelsViaHttp(
-  input: LocalModelScanInput
+  input: LocalModelScanInput,
+  timeoutMs: number
 ): Promise<{ count: number; models: Array<{ key: string; name: string }> } | null> {
   if (!isCustomOpenAiProvider(input.provider)) return null
 
@@ -381,10 +382,18 @@ async function tryDiscoverCustomOpenAiModelsViaHttp(
     headers.Authorization = `Bearer ${normalizedApiKey}`
   }
 
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  const timeoutId = controller
+    ? setTimeout(() => {
+        controller.abort()
+      }, timeoutMs)
+    : null
+
   try {
     const response = await fetch(`${normalizedBaseUrl}/models`, {
       method: 'GET',
       headers,
+      ...(controller ? { signal: controller.signal } : {}),
     })
     if (!response.ok) return null
 
@@ -392,6 +401,10 @@ async function tryDiscoverCustomOpenAiModelsViaHttp(
     return normalizeLocalScanPayload(payload, input.provider)
   } catch {
     return null
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
   }
 }
 
@@ -612,7 +625,7 @@ export async function scanLocalModels(
   if (parsed.ok) {
     const normalizedPayload = normalizeLocalScanPayload(parsed.data, provider)
     if (normalizedPayload.count === 0) {
-      const httpFallback = await tryDiscoverCustomOpenAiModelsViaHttp(input)
+      const httpFallback = await tryDiscoverCustomOpenAiModelsViaHttp(input, effectiveTimeout)
       if (httpFallback) {
         return {
           ...parsed,
@@ -634,7 +647,7 @@ export async function scanLocalModels(
   // Some local provider bridges return a plain-text success message when no models are loaded.
   // Treat it as an empty model list so the UI can guide the user to pull/load models.
   if (parsed.errorCode === 'parse_error' && NO_MODELS_FOUND_OUTPUT_REGEX.test(normalizedStdout)) {
-    const httpFallback = await tryDiscoverCustomOpenAiModelsViaHttp(input)
+    const httpFallback = await tryDiscoverCustomOpenAiModelsViaHttp(input, effectiveTimeout)
     if (httpFallback) {
       return {
         ok: true,

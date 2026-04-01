@@ -898,6 +898,28 @@ describe('findConfiguredCustomProviderId', () => {
 
     expect(configuredProviderId).toBe('')
   })
+
+  it('ignores local custom-openai snapshots when resolving manual custom providers', () => {
+    const configuredProviderId = findConfiguredCustomProviderId(
+      {
+        models: {
+          providers: {
+            'custom-openai': {
+              baseUrl: 'https://gateway.example.com/v1',
+              models: ['acme-chat'],
+            },
+          },
+        },
+      },
+      {
+        baseUrl: 'https://gateway.example.com/v1',
+        modelId: 'acme-chat',
+        compatibility: 'openai',
+      }
+    )
+
+    expect(configuredProviderId).toBe('')
+  })
 })
 
 describe('buildVerificationProviderCandidates', () => {

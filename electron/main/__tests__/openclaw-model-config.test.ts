@@ -645,4 +645,46 @@ describe('scanLocalModels', () => {
     ])
     expect((result.data as any).count).toBe(2)
   })
+
+  it('applies timeoutMs to the custom-openai /models HTTP fallback', async () => {
+    vi.useFakeTimers()
+    try {
+      const runCommand = vi.fn(async () => ok('No models found.'))
+      const fetchMock = vi.fn((_: string, init?: RequestInit) =>
+        new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            ;(error as Error & { name: string }).name = 'AbortError'
+            reject(error)
+          })
+        })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const resultPromise = scanLocalModels(
+        {
+          provider: 'custom-openai',
+          baseUrl: 'http://127.0.0.1:1234/v1',
+          apiKey: 'sk-test',
+          timeoutMs: 25,
+        },
+        { runCommand }
+      )
+
+      await vi.advanceTimersByTimeAsync(25)
+      const result = await resultPromise
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1234/v1/models',
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        })
+      )
+      expect(result.ok).toBe(true)
+      expect((result.data as any).count).toBe(0)
+      expect((result.data as any).models).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
