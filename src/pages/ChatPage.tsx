@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DashboardChatPanel from '../components/dashboard/DashboardChatPanel'
+import type { ChatComposerEnterSendMode } from '../lib/chat-composer-enter-send-preference'
 import {
   resolveChatPageAvailabilityState,
   type ChatPageAvailabilityState,
@@ -17,7 +18,11 @@ const INITIAL_AVAILABILITY_STATE: ChatPageAvailabilityState = {
   availabilityMessage: '正在读取聊天状态...',
 }
 
-export default function ChatPage() {
+export default function ChatPage({
+  enterSendMode,
+}: {
+  enterSendMode: ChatComposerEnterSendMode
+}) {
   const navigate = useNavigate()
   const [chatAvailability, setChatAvailability] = useState<ChatPageAvailabilityState>(
     INITIAL_AVAILABILITY_STATE
@@ -104,6 +109,7 @@ export default function ChatPage() {
         availabilityMessage={availabilityMessage}
         onOpenSettings={() => navigate('/models')}
         onEnsureGatewayRunning={handleEnsureGateway}
+        enterSendMode={enterSendMode}
       />
     </div>
   )

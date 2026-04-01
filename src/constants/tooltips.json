@@ -92,6 +92,7 @@
     "backupCenter": "打开备份中心，查看或创建本地备份。",
     "feishuBotManager": "打开飞书 Bot 管理，配置和维护飞书机器人。",
     "reconfigure": "重新进入配置引导，按步骤配置模型和IM渠道。",
+    "chatComposerEnterSendMode": "选择聊天输入框中 Enter 的发送/换行行为。",
     "toggleThemeToLight": "当前为暗色模式，点击切换到亮色模式。",
     "toggleThemeToDark": "当前为亮色模式，点击切换到暗色模式。",
     "enableGlobalTooltip": "当前已关闭全局悬浮提示，点击后重新开启所有 Tooltip 提示。",
