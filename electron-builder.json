@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.qclawai.qclaw",
   "asar": true,
-  "forceCodeSigning": true,
+  "forceCodeSigning": false,
   "afterSign": "scripts/after-sign-notarize.cjs",
   "afterAllArtifactBuild": "scripts/after-all-artifact-build.cjs",
   "directories": {
@@ -62,6 +62,31 @@
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false
+  },
+  "linux": {
+    "icon": "build/icon.png",
+    "category": "Development",
+    "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}.${ext}",
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "deb",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "rpm",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
   },
   "publish": {
     "provider": "generic",
