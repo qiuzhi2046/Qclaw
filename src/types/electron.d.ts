@@ -1018,6 +1018,7 @@ type OpenClawGuardedWriteReason =
   | 'managed-channel-plugin-repair'
   | 'pairing-allowfrom-sync'
   | 'gateway-port-recovery'
+  | 'knowledge-base-sync'
   | 'unknown'
 
 interface OpenClawGuardPrepareResult {
@@ -1591,6 +1592,33 @@ type ChatStreamEvent =
       messageText: string
     }
 
+interface KnowledgeBaseEntry {
+  id: string
+  name: string
+  localPath: string
+  gitRemote: string
+  createdAt: string
+}
+
+interface KnowledgeBaseStatus {
+  id: string
+  name: string
+  localPath: string
+  exists: boolean
+  gitRemote: string
+  gitInitialized: boolean
+  hasRemote: boolean
+  mdFileCount: number
+  lastSyncMessage: string
+}
+
+interface KnowledgeBaseSyncResult {
+  ok: boolean
+  pullOutput: string
+  pushOutput: string
+  message: string
+}
+
 interface ElectronApi {
   // Platform
   platform: string
@@ -1970,6 +1998,15 @@ interface ElectronApi {
   onDepsInstallLog: (listener: (msg: string) => void) => () => void
   depsCheckBrew: () => Promise<{ installed: boolean }>
   depsInstallBrew: () => Promise<CliResult>
+
+  // Knowledge Base
+  knowledgeSelectFolder: () => Promise<string | null>
+  knowledgeList: () => Promise<KnowledgeBaseEntry[]>
+  knowledgeStatuses: () => Promise<KnowledgeBaseStatus[]>
+  knowledgeAdd: (localPath: string) => Promise<{ ok: boolean; entry?: KnowledgeBaseEntry; message: string }>
+  knowledgeRemove: (id: string) => Promise<{ ok: boolean; message: string }>
+  knowledgeSetGit: (id: string, gitUrl: string) => Promise<{ ok: boolean; message: string }>
+  knowledgeSync: (id: string) => Promise<KnowledgeBaseSyncResult>
 }
 
 declare global {

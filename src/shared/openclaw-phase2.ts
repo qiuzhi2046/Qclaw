@@ -109,6 +109,7 @@ export type OpenClawGuardedWriteReason =
   | 'managed-channel-plugin-repair'
   | 'pairing-allowfrom-sync'
   | 'gateway-port-recovery'
+  | 'knowledge-base-sync'
   | 'unknown'
 
 export interface OpenClawGuardPrepareResult {

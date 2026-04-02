@@ -208,6 +208,15 @@ import {
 } from './skills-uninstall-safety'
 import { removeManagedSkillLocally, removeSkillDirectoryLocally } from './skills-managed-uninstall'
 import { withExclusiveSkillMutation } from './skill-mutation-guard'
+import {
+  listKnowledgeBases,
+  addKnowledgeBase,
+  removeKnowledgeBase,
+  setKnowledgeBaseGitRemote,
+  syncKnowledgeBase,
+  getAllKnowledgeBaseStatuses,
+  selectKnowledgeBaseFolder,
+} from './knowledge-base'
 
 const { randomUUID } = process.getBuiltinModule('node:crypto') as typeof import('node:crypto')
 const { appendFile, readFile, rm } = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
@@ -1246,4 +1255,22 @@ export function registerIpcHandlers() {
       'env-setup'
     )
   })
+
+  // ── Knowledge Base ──────────────────────────────────────────────
+
+  ipcMain.handle('knowledge:select-folder', () => selectKnowledgeBaseFolder())
+
+  ipcMain.handle('knowledge:list', () => listKnowledgeBases())
+
+  ipcMain.handle('knowledge:statuses', () => getAllKnowledgeBaseStatuses())
+
+  ipcMain.handle('knowledge:add', (_e, localPath: string) => addKnowledgeBase(localPath))
+
+  ipcMain.handle('knowledge:remove', (_e, id: string) => removeKnowledgeBase(id))
+
+  ipcMain.handle('knowledge:set-git', (_e, id: string, gitUrl: string) =>
+    setKnowledgeBaseGitRemote(id, gitUrl)
+  )
+
+  ipcMain.handle('knowledge:sync', (_e, id: string) => syncKnowledgeBase(id))
 }

@@ -290,6 +290,15 @@ export const api = {
   onDepsInstallLog: (listener: (msg: string) => void) => subscribeToChannel('deps:install:log', listener),
   depsCheckBrew: () => ipcRenderer.invoke('deps:checkBrew'),
   depsInstallBrew: () => ipcRenderer.invoke('deps:installBrew'),
+
+  // Knowledge Base
+  knowledgeSelectFolder: () => ipcRenderer.invoke('knowledge:select-folder'),
+  knowledgeList: () => ipcRenderer.invoke('knowledge:list'),
+  knowledgeStatuses: () => ipcRenderer.invoke('knowledge:statuses'),
+  knowledgeAdd: (localPath: string) => ipcRenderer.invoke('knowledge:add', localPath),
+  knowledgeRemove: (id: string) => ipcRenderer.invoke('knowledge:remove', id),
+  knowledgeSetGit: (id: string, gitUrl: string) => ipcRenderer.invoke('knowledge:set-git', id, gitUrl),
+  knowledgeSync: (id: string) => ipcRenderer.invoke('knowledge:sync', id),
 }
 
 contextBridge.exposeInMainWorld('api', api)
