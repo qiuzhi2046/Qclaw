@@ -63,6 +63,19 @@
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false
   },
+  "linux": {
+    "icon": "build/icon.png",
+    "category": "Development",
+    "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}.${ext}",
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  },
   "publish": {
     "provider": "generic",
     "channel": "latest",
