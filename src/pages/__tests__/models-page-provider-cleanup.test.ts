@@ -329,7 +329,7 @@ describe('models-page provider cleanup', () => {
 
     expect(verification).toEqual({
       ok: false,
-      message: '服务商「OpenAI」的环境变量密钥仍未清空',
+      message: 'AI 提供商「OpenAI」的环境变量密钥仍未清空',
     })
   })
 
@@ -546,7 +546,7 @@ describe('models-page provider cleanup', () => {
 
     expect(verification.ok).toBe(false)
     expect(verification.authStorePath).toBe('/Users/example/.openclaw/agents/main/agent/auth-profiles.json')
-    expect(verification.message).toContain('无法确认运行态')
+    expect(verification.message).toContain('无法确认运行状态')
   })
 
   it('keeps auth store hints when upstream still reports the provider but omits storePath', async () => {
@@ -608,18 +608,18 @@ describe('models-page provider cleanup', () => {
 
     expect(verification).toEqual({
       ok: false,
-      message: '服务商「OpenAI」的本地配置已删除，但运行态仍检测到认证信息',
+      message: 'AI 提供商「OpenAI」的本地配置已删除，但运行状态仍检测到认证信息',
       authStorePath: '/Users/example/.openclaw/agents/main/agent/auth-profiles.json',
     })
   })
 
   it('removes resolved non-blocking cleanup errors while preserving unrelated issues', () => {
     const nextError = removeResolvedErrorMessages(
-      '服务商配置已删除，但认证配置清理失败：请稍后重试；Gateway 重载失败：请手动处理',
-      ['服务商配置已删除，但认证配置清理失败：请稍后重试']
+      'AI 提供商配置已删除，但认证配置清理失败：请稍后重试；网关重载失败：请手动处理',
+      ['AI 提供商配置已删除，但认证配置清理失败：请稍后重试']
     )
 
-    expect(nextError).toBe('Gateway 重载失败：请手动处理')
+    expect(nextError).toBe('网关重载失败：请手动处理')
   })
 
   it('builds an optimistic configured snapshot so a newly added provider stays visible during refresh', async () => {

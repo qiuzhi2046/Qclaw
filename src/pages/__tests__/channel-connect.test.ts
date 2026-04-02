@@ -108,7 +108,7 @@ describe('ensureGatewayReadyForChannelConnect', () => {
 
     expect(result.ok).toBe(true)
     expect(appendLog).toHaveBeenCalledWith(
-      '⚠️ Gateway 端口已自动切换到 19876，程序会继续使用新端口。\n\n'
+      '⚠️ 网关端口已自动切换到 19876，程序会继续使用新端口。\n\n'
     )
   })
 
@@ -126,7 +126,7 @@ describe('ensureGatewayReadyForChannelConnect', () => {
       appendLog
     )
 
-    expect(result).toEqual({ ok: false, message: 'Gateway 启动失败' })
+    expect(result).toEqual({ ok: false, message: '网关启动失败' })
     expect(reloadGatewayAfterChannelChange).toHaveBeenCalledTimes(1)
     expect(appendLog).not.toHaveBeenCalled()
   })

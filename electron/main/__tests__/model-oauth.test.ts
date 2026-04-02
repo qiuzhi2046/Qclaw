@@ -561,8 +561,8 @@ describe('startModelOAuthFlow', () => {
           ready: false,
           action: {
             dependencyId: 'gemini-cli',
-            title: '安装 Gemini CLI',
-            message: '未检测到 Gemini CLI。',
+            title: '安装 Gemini 命令行工具',
+            message: '未检测到 Gemini 命令行工具。',
             commandName: 'gemini',
             recommendedMethod: 'npm',
             installOptions: [
@@ -578,7 +578,7 @@ describe('startModelOAuthFlow', () => {
     )
 
     expect(result.ok).toBe(false)
-    expect(result.message).toContain('未检测到 Gemini CLI')
+    expect(result.message).toContain('未检测到 Gemini 命令行工具')
     expect(result.preflightAction?.dependencyId).toBe('gemini-cli')
     expect(runCommand).not.toHaveBeenCalled()
     expect(runStreamingCommand).not.toHaveBeenCalled()
@@ -627,9 +627,9 @@ describe('startModelOAuthFlow', () => {
       expect.objectContaining({ autoOpenOAuth: true, onOAuthUrl: expect.any(Function) })
     )
     expect(result.ok).toBe(false)
-    expect(result.message).toContain('未检测到 Gemini CLI')
+    expect(result.message).toContain('未检测到 Gemini 命令行工具')
     expect(result.message).not.toContain('[?25h')
-    expect(emitted.find((entry) => entry.channel === 'oauth:error')?.payload.stderr).toContain('未检测到 Gemini CLI')
+    expect(emitted.find((entry) => entry.channel === 'oauth:error')?.payload.stderr).toContain('未检测到 Gemini 命令行工具')
   })
 
   it('upgrades generic Gemini OAuth failures into a project-env specific message when preflight warned about GOOGLE_CLOUD_PROJECT', async () => {

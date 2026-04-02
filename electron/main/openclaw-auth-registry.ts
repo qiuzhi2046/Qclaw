@@ -1013,7 +1013,7 @@ function buildMethodHint(authChoice: string, hint?: string): string | undefined 
   }
 
   const requirementHint =
-    'Requires local Gemini CLI or GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET.'
+    '需要先在本机安装 Gemini 命令行工具，或显式设置 GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET。'
   if (!baseHint) return requirementHint
   if (/gemini cli|gemini_cli_oauth_client_id/i.test(baseHint)) return baseHint
   return `${baseHint}; ${requirementHint}`

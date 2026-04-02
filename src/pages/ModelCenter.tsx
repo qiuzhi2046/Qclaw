@@ -23,7 +23,7 @@ import {
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
 
 const LOCAL_PROVIDER_IDS = new Set(['ollama', 'vllm', 'custom-openai'])
-const CUSTOM_PROVIDER_AMBIGUOUS_ERROR_MESSAGE = '检测到多个同 endpoint/model 的自定义 Provider，请填写 Provider ID 后重试。'
+const CUSTOM_PROVIDER_AMBIGUOUS_ERROR_MESSAGE = '检测到多个同 endpoint/model 的自定义提供商，请填写提供商 ID 后重试。'
 
 function isLocalProvider(providerId: string): boolean {
   return LOCAL_PROVIDER_IDS.has(providerId)
@@ -227,7 +227,7 @@ export function resolveModelCenterProviderDisplayCopy(params: {
   if (providerId === 'custom') {
     return {
       name: '手动配置兼容 API',
-      hint: '手动填写 Base URL、Model ID 和认证信息，适合通用 OpenAI / Anthropic 兼容接口。',
+      hint: '手动填写接口地址、Model ID 和认证信息，适合通用 OpenAI / Anthropic 兼容接口。',
     }
   }
 
@@ -255,7 +255,7 @@ export function resolveModelCenterMethodDisplayCopy(params: {
   if (providerId === 'custom' && methodId === 'custom-api-key') {
     return {
       label: '手动填写接口信息',
-      hint: '填写 Base URL、Model ID 和认证信息后，按兼容协议写入 OpenClaw。',
+      hint: '填写接口地址、Model ID 和认证信息后，按兼容协议写入 OpenClaw。',
     }
   }
 
@@ -411,7 +411,7 @@ function buildCapabilityMismatchReason(
     method.route.cliFlag &&
     !capabilities.onboardFlags.includes(method.route.cliFlag)
   ) {
-    return '当前 OpenClaw 版本未暴露该认证所需的 CLI flag，Qclaw 无法安全执行该认证方式。'
+    return '当前 OpenClaw 版本未暴露该认证所需的命令行参数，Qclaw 无法安全执行该认证方式。'
   }
 
   if (method.route.kind === 'models-auth-login' && !capabilities.supports.modelsAuthLogin) {
@@ -419,7 +419,7 @@ function buildCapabilityMismatchReason(
   }
 
   if (method.route.kind === 'models-auth-login' && method.route.pluginId && !capabilities.supports.pluginsEnable) {
-    return '当前 OpenClaw 版本不支持 plugins enable，无法使用该插件 OAuth 认证方式。'
+    return '当前 OpenClaw 版本不支持 plugins enable，无法使用该插件浏览器授权登录方式。'
   }
 
   if (method.route.kind === 'models-auth-login-github-copilot' && !capabilities.supports.modelsAuthLoginGitHubCopilot) {
@@ -574,7 +574,7 @@ export function getLocalDiscoveryDisplay(
 
   return {
     buttonColor: 'brand',
-    message: hasBaseUrl ? '点击右侧按钮可连接并发现本地模型' : '填写 Base URL 后可获取本地模型',
+    message: hasBaseUrl ? '点击右侧按钮可连接并发现本地模型' : '填写接口地址后可获取本地模型',
     messageColor: 'dimmed',
   }
 }
@@ -812,7 +812,7 @@ export function buildBusyStateDisplay(input: BusyStateInput): BusyStateDisplay {
 
   if (input.phase === 'authing' && methodRequiresBrowser(input.method)) {
     return {
-      title: '正在执行 OAuth 认证',
+      title: '正在执行浏览器授权登录',
       detail: '可能会拉起浏览器并等待你完成授权回调，网络慢时耗时会更长。',
       elapsed: formatElapsedSeconds(input.elapsedSeconds),
     }
@@ -1781,7 +1781,7 @@ export default function ModelCenter({
       setError(
         toUserFacingCliFailureMessage({
           stderr: loaded.authRegistry.message,
-          fallback: '未发现可用认证方式，请确认 OpenClaw CLI 已正确安装。',
+          fallback: '未发现可用认证方式，请确认 OpenClaw 命令行工具已正确安装。',
         })
       )
       return false
@@ -1968,7 +1968,7 @@ export default function ModelCenter({
     const offState = window.api.onOAuthState((payload: OAuthStateEventPayload) => {
       if (!payload) return
       if (payload.state === 'preparing') {
-        setStatusText('正在准备 OAuth 认证...')
+        setStatusText('正在准备浏览器授权登录...')
         return
       }
       if (payload.state === 'plugin-ready') {
@@ -1994,7 +1994,7 @@ export default function ModelCenter({
       setStatusText('已获取授权链接。若浏览器未自动拉起，请使用下方链接和验证码继续授权。')
     })
     const offSuccess = window.api.onOAuthSuccess(() => {
-      setStatusText('OAuth 授权已完成，正在保存配置...')
+      setStatusText('浏览器授权登录已完成，正在保存配置...')
     })
     const offError = window.api.onOAuthError((payload: { stderr?: string; stdout?: string }) => {
       setError(
@@ -2002,7 +2002,7 @@ export default function ModelCenter({
           toUserFacingCliFailureMessage({
             stderr: payload?.stderr,
             stdout: payload?.stdout,
-            fallback: 'OAuth 认证失败，请重试。',
+            fallback: '浏览器授权登录失败，请重试。',
           })
         )
       )
@@ -2253,7 +2253,7 @@ export default function ModelCenter({
 
     try {
       setStatusText(
-        requiresBrowser ? '正在准备 OAuth 认证...' : requiresCustomConfig ? '正在写入自定义 Provider 配置...' : '正在执行认证...'
+        requiresBrowser ? '正在准备浏览器授权登录...' : requiresCustomConfig ? '正在写入自定义提供商配置...' : '正在执行认证...'
       )
       const authResult = await executeRemoteModelAuthSubmission(
         {
@@ -2312,7 +2312,7 @@ export default function ModelCenter({
             {
               shouldAbort: () => cancelRequestedRef.current,
               onAttempt: (attempt) => {
-                setStatusText(`正在验证自定义 Provider 配置（第 ${attempt} 次检查）...`)
+                setStatusText(`正在验证自定义提供商配置（第 ${attempt} 次检查）...`)
               },
             }
           )
@@ -2672,7 +2672,7 @@ export default function ModelCenter({
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                       <div className="min-w-0 flex-1">
                         <TextInput
-                          label="Base URL"
+                          label="接口地址"
                           value={localBaseUrl}
                           onChange={(e) => {
                             setLocalBaseUrl(e.currentTarget.value)
@@ -2861,7 +2861,7 @@ export default function ModelCenter({
                 <>
                   <div className="mb-4">
                     <TextInput
-                      label="Base URL"
+                      label="接口地址"
                       value={customBaseUrl}
                       onChange={(e) => setCustomBaseUrl(e.currentTarget.value)}
                       placeholder="https://gateway.example.com/v1"
@@ -2883,12 +2883,12 @@ export default function ModelCenter({
 
                   <div className="mb-4">
                     <Select
-                      label="Compatibility"
+                      label="兼容协议"
                       value={customCompatibility}
                       onChange={(value) => setCustomCompatibility(value === 'anthropic' ? 'anthropic' : 'openai')}
                       data={[
-                        { value: 'openai', label: 'OpenAI Compatible' },
-                        { value: 'anthropic', label: 'Anthropic Compatible' },
+                        { value: 'openai', label: 'OpenAI 兼容' },
+                        { value: 'anthropic', label: 'Anthropic 兼容' },
                       ]}
                       disabled={interactionLocked}
                       size="sm"
@@ -2897,7 +2897,7 @@ export default function ModelCenter({
 
                   <div className="mb-4">
                     <TextInput
-                      label="Provider ID（可选）"
+                      label="提供商 ID（可选）"
                       value={customProviderId}
                       onChange={(e) => setCustomProviderId(e.currentTarget.value)}
                       placeholder="custom-acme"

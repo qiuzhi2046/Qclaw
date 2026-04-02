@@ -128,7 +128,7 @@ export default function OpenClawClassify({
           <Text size="sm" lh="1.625" mt="xs" style={{ color: 'rgba(167, 243, 208, 0.85)' }}>
             {freshManagedInstall
               ? '当前环境是本次启动中新安装的 OpenClaw，下一步将进入首次配置流程。'
-              : '当前机器已有 OpenClaw CLI，但还没有生成可直接启动 Gateway 的共享配置。下一步必须先进入配置向导执行初始化。'}
+              : '当前机器已有 OpenClaw 命令行工具，但还没有生成可直接启动网关的当前配置。下一步必须先进入配置引导执行初始化。'}
           </Text>
           <Button
             onClick={() => onProceed('setup')}

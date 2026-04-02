@@ -51,7 +51,7 @@ function resolveExplicitSummary(input: GatewayRuntimeLike): string {
     String(input.summary || '').trim() ||
     String(reasonDetail?.message || '').trim() ||
     String(input.diagnostics?.lastHealth?.summary || '').trim() ||
-    'Gateway 运行状态已结构化识别'
+    '网关运行状态已结构化识别'
   )
 }
 
@@ -136,7 +136,7 @@ function buildEvidence(
   if (input.portOwner) {
     evidence.push({
       source: 'port-owner',
-      message: '检测到 Gateway 端口占用进程',
+      message: '检测到网关端口占用进程',
       detail: joinNonEmpty([
         input.portOwner.processName,
         input.portOwner.command,
@@ -188,7 +188,7 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
   }
 
   if (typed.ok && (typed.running ?? true)) {
-    return buildClassification(typed, 'healthy', 'Gateway 已确认可用', true, reasonDetail)
+    return buildClassification(typed, 'healthy', '网关已确认可用', true, reasonDetail)
   }
 
   const corpus = buildCorpus(typed)
@@ -203,7 +203,7 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
       return buildClassification(
         typed,
         'port_conflict_same_gateway',
-        'Gateway 端口被现有 OpenClaw/Gateway 进程占用',
+        '网关端口被现有 OpenClaw/网关进程占用',
         true
       )
     }
@@ -211,21 +211,21 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
     return buildClassification(
       typed,
       'port_conflict_foreign_process',
-      'Gateway 端口被其他进程占用',
+      '网关端口被其他进程占用',
       true
     )
   }
 
   if (/gateway service not loaded/i.test(corpus)) {
-    return buildClassification(typed, 'service_missing', 'Gateway 后台服务未安装或未加载', true)
+    return buildClassification(typed, 'service_missing', '网关后台服务未安装或未加载', true)
   }
 
   if (/service install failed|failed to install gateway service/i.test(corpus)) {
-    return buildClassification(typed, 'service_install_failed', 'Gateway 后台服务补装失败', true)
+    return buildClassification(typed, 'service_install_failed', '网关后台服务补装失败', true)
   }
 
   if (/service appears loaded|service failed|launchctl|daemon/i.test(corpus)) {
-    return buildClassification(typed, 'service_loaded_but_stale', 'Gateway 后台服务存在但状态异常', true, reasonDetail)
+    return buildClassification(typed, 'service_loaded_but_stale', '网关后台服务存在但状态异常', true, reasonDetail)
   }
 
   if (reasonDetail?.source === 'control-ui-app') {
@@ -237,7 +237,7 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
   }
 
   if (/gateway token mismatch|token mismatch/i.test(corpus)) {
-    return buildClassification(typed, 'token_mismatch', 'Gateway 正在使用的 token 与当前配置不一致', true, reasonDetail)
+    return buildClassification(typed, 'token_mismatch', '网关正在使用的 token 与当前配置不一致', true, reasonDetail)
   }
 
   if (hasFilesystemPermissionSignal(corpus)) {
@@ -245,11 +245,11 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
   }
 
   if (hasHighConfidenceConfigInvalidSignal(corpus)) {
-    return buildClassification(typed, 'config_invalid', 'Gateway 配置不完整或格式无效', false, reasonDetail)
+    return buildClassification(typed, 'config_invalid', '网关配置不完整或格式无效', false, reasonDetail)
   }
 
   if (/\b1006\b|abnormal closure|gateway closed|websocket/i.test(corpus)) {
-    return buildClassification(typed, 'websocket_1006', 'Gateway 与上游的握手连接被异常关闭', true, reasonDetail)
+    return buildClassification(typed, 'websocket_1006', '网关与上游的握手连接被异常关闭', true, reasonDetail)
   }
 
   if (
@@ -264,18 +264,18 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
     return buildClassification(
       typed,
       'plugin_allowlist_warning',
-      'Gateway 检测到未显式放行的外部插件，已记录 allowlist 警告',
+      '网关检测到未显式放行的外部插件，已记录 allowlist 警告',
       true,
       reasonDetail
     )
   }
 
   if (/plugins?\.allow|plugin not found|failed to load plugin|manifest|export id/i.test(corpus)) {
-    return buildClassification(typed, 'plugin_load_failure', 'Gateway 依赖的插件没有正常加载', false, reasonDetail)
+    return buildClassification(typed, 'plugin_load_failure', '网关依赖的插件没有正常加载', false, reasonDetail)
   }
 
   if (/config|openclaw\.json|provider|model|missing required|invalid|parse|json/i.test(corpus)) {
-    return buildClassification(typed, 'config_invalid', 'Gateway 配置不完整或格式无效', false, reasonDetail)
+    return buildClassification(typed, 'config_invalid', '网关配置不完整或格式无效', false, reasonDetail)
   }
 
   if (
@@ -283,12 +283,12 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
       corpus
     )
   ) {
-    return buildClassification(typed, 'network_blocked', 'Gateway 当前被网络或代理环境阻断', true, reasonDetail)
+    return buildClassification(typed, 'network_blocked', '网关当前被网络或代理环境阻断', true, reasonDetail)
   }
 
   if (/not running|gateway not running|connection refused/i.test(corpus)) {
-    return buildClassification(typed, 'gateway_not_running', 'Gateway 当前没有在本机运行', true, reasonDetail)
+    return buildClassification(typed, 'gateway_not_running', '网关当前没有在本机运行', true, reasonDetail)
   }
 
-  return buildClassification(typed, 'unknown_runtime_failure', 'Gateway 尚未完成就绪确认', true, reasonDetail)
+  return buildClassification(typed, 'unknown_runtime_failure', '网关尚未完成就绪确认', true, reasonDetail)
 }

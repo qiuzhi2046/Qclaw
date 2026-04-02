@@ -338,7 +338,7 @@ export function buildOpenClawGateState(
 
   const needsTakeoverNotice = shouldShowTakeoverNotice(activeCandidate)
   const withTakeoverSuffix = (message: string): string =>
-    needsTakeoverNotice ? `${message} 原配置数据不会被覆盖，并会额外进行备份接管。` : message
+    needsTakeoverNotice ? `${message} 原配置数据不会被覆盖，并会额外备份后继续使用。` : message
 
   switch (upgradeCheck.enforcement) {
     case 'optional_upgrade':
@@ -397,7 +397,7 @@ export function buildOpenClawGateState(
         statusLabel: `需手动调整到 ${upgradeCheck.targetVersion || PINNED_OPENCLAW_VERSION}`,
         message:
           upgradeCheck.manualHint ||
-          `当前 OpenClaw 版本不在支持范围内，且当前安装来源暂不支持程序内自动纠偏，请先手动调整到 ${upgradeCheck.targetVersion || PINNED_OPENCLAW_VERSION}`,
+          `当前 OpenClaw 版本不在支持范围内，且当前安装来源暂不支持程序内自动修复，请先手动调整到 ${upgradeCheck.targetVersion || PINNED_OPENCLAW_VERSION}`,
         manualHint: upgradeCheck.manualHint,
       }
     case 'none':
@@ -477,9 +477,9 @@ function formatCancelDomainSummary(domains: string[]): string {
 }
 
 const INITIAL_STEPS: Step[] = [
-  { id: 'node', label: 'Node.js 运行时', description: '检查 Node.js 是否已安装', status: 'pending' },
-  { id: 'openclaw', label: 'OpenClaw CLI', description: '检查或安装命令行工具', status: 'pending' },
-  { id: 'gateway', label: 'Gateway 服务', description: '记录后续 Gateway 可用性确认时机', status: 'pending' },
+  { id: 'node', label: 'Node.js', description: '检查 Node.js 是否已安装', status: 'pending' },
+  { id: 'openclaw', label: 'OpenClaw 命令行工具', description: '检查或安装命令行工具', status: 'pending' },
+  { id: 'gateway', label: '网关服务', description: '记录后续网关可用性确认时机', status: 'pending' },
 ]
 
 function createInitialSteps(): Step[] {
@@ -490,7 +490,7 @@ function buildDeferredGatewayStepState(): Pick<Step, 'status' | 'version' | 'des
   return {
     status: 'ok',
     version: '后续确认',
-    description: '认证和渠道配置完成后再确认 Gateway 可用性',
+    description: '认证和渠道配置完成后再确认网关可用性',
     progress: 100,
   }
 }
@@ -894,7 +894,7 @@ export default function EnvCheck({
         updateStep('openclaw', {
           status: 'pending-install',
           version: nextGateState.activeCandidate?.version || activeCandidate.version,
-          description: '你未接受 OpenClaw 自动版本处理，Qclaw 即将退出。',
+          description: '你未接受 OpenClaw 自动版本调整，Qclaw 即将退出。',
           progress: 100,
         })
         void window.api.quitApp().catch(() => null)
@@ -909,7 +909,7 @@ export default function EnvCheck({
 
       const correctionResult = await window.api.runOpenClawUpgrade()
       if (!correctionResult.ok) {
-        const failureMessage = correctionResult.message || 'OpenClaw 版本自动纠偏失败'
+        const failureMessage = correctionResult.message || 'OpenClaw 版本自动修复失败'
         setOpenClawUpgradeError(failureMessage)
         setOpenClawGateState(nextGateState)
         setIsRefreshingOpenClawVersion(false)
@@ -1058,7 +1058,7 @@ export default function EnvCheck({
       setHistoryOnlyRecoveryConfirmOpened(false)
       notifications.show({
         title: '已记录手动备份确认',
-        message: '将重新执行环境检查，并继续恢复历史 OpenClaw 运行环境。',
+        message: '将重新执行环境检查，并继续恢复历史 OpenClaw 环境。',
         color: 'brand',
         autoClose: 5000,
       })
@@ -1079,7 +1079,7 @@ export default function EnvCheck({
     if (isRunning || isRefreshingOpenClawVersion || isUpgradingOpenClaw || activeTakeoverBackupBlocked) return
     setIsUpgradingOpenClaw(true)
     setOpenClawUpgradeError('')
-    updateStep('openclaw', { status: 'installing', description: '正在升级 OpenClaw CLI...', progress: 92 })
+    updateStep('openclaw', { status: 'installing', description: '正在升级 OpenClaw 命令行工具...', progress: 92 })
 
     try {
       const upgradeResult = await window.api.runOpenClawUpgrade()
@@ -1114,7 +1114,7 @@ export default function EnvCheck({
     const recoveredDiscovery = await window.api.discoverOpenClaw().catch(() => null)
     const recoveredCandidate = resolveActiveOpenClawCandidate(recoveredDiscovery)
     if (!recoveredDiscovery || !recoveredCandidate) {
-      showFatalMessage('历史 OpenClaw 运行环境补装后，仍无法识别可接管的安装。请重试或检查旧数据目录是否完整。')
+      showFatalMessage('历史 OpenClaw 环境补装后，仍无法识别可接管的安装。请重试或检查旧数据目录是否完整。')
       return null
     }
 
@@ -1161,7 +1161,7 @@ export default function EnvCheck({
     updateStep('openclaw', {
       status: 'ok',
       version: managedCandidate.version,
-      description: '已恢复历史 OpenClaw 运行环境并完成备份接管',
+      description: '已恢复历史 OpenClaw 环境，并完成备份后继续使用',
       progress: 100,
     })
     setCurrentStep(2)
@@ -1289,7 +1289,7 @@ export default function EnvCheck({
       return
     }
     if (!window.api) {
-      setFatalIssue({ message: '桌面运行环境初始化失败（window.api 不可用），请重启应用重试。' })
+      setFatalIssue({ message: '桌面环境初始化失败（window.api 不可用），请重启应用重试。' })
       return
     }
     setIsRunning(true)
@@ -1390,8 +1390,8 @@ export default function EnvCheck({
       setCurrentStep(1)
     }
 
-    // 第二步：检测 OpenClaw CLI
-    updateStep('openclaw', { status: 'checking', description: '正在检查 OpenClaw CLI...', progress: needNode ? 25 : 20 })
+    // 第二步：检测 OpenClaw 命令行工具
+    updateStep('openclaw', { status: 'checking', description: '正在检查 OpenClaw 命令行工具...', progress: needNode ? 25 : 20 })
     await delay(envCheckTiming.transitionShortMs)
     const openclawResult = await window.api.checkOpenClaw()
     const initialDiscovery = await window.api.discoverOpenClaw().catch(() => null)
@@ -1420,13 +1420,13 @@ export default function EnvCheck({
     if (installDecision.requiresRecovery) {
       updateStep('openclaw', {
         status: 'pending-install',
-        description: '检测到历史 OpenClaw 数据，待恢复运行环境',
+        description: '检测到历史 OpenClaw 数据，待恢复 OpenClaw 环境',
         progress: needNode ? 30 : 25,
       })
     } else if (needOpenClawInstall) {
       updateStep('openclaw', {
         status: 'pending-install',
-        description: '未检测到 OpenClaw CLI，待安装',
+        description: '未检测到 OpenClaw 命令行工具，待安装',
         progress: needNode ? 30 : 25,
       })
     } else {
@@ -1434,13 +1434,13 @@ export default function EnvCheck({
       setCurrentStep(2)
     }
 
-    // 如果都已安装，直接记录 Gateway 会在后续配置完成后再确认
+    // 如果都已安装，直接记录网关会在后续配置完成后再确认
     if (!needNode && !shouldInstallOpenClawRuntime) {
       const gateState = await inspectExistingOpenClaw(55)
       await delay(envCheckTiming.transitionStandardMs)
       updateStep('gateway', {
         status: 'checking',
-        description: '当前阶段跳过 Gateway 运行态检查，后续流程会自动确认...',
+        description: '当前阶段跳过网关运行状态检查，后续流程会自动确认...',
         progress: 0,
       })
       await delay(envCheckTiming.transitionStandardMs)
@@ -1505,7 +1505,7 @@ export default function EnvCheck({
     if (shouldInstallOpenClawRuntime) {
       updateStep('openclaw', {
         status: 'installing',
-        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 运行环境...' : '等待安装...',
+        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 环境...' : '等待安装...',
         progress: needNode ? 55 : 45,
       })
     }
@@ -1516,7 +1516,7 @@ export default function EnvCheck({
     } else if (installProgressStepId === 'openclaw') {
       updateStep('openclaw', {
         status: 'installing',
-        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 运行环境...' : '正在安装 OpenClaw CLI...',
+        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 环境...' : '正在安装 OpenClaw 命令行工具...',
         progress: 60,
       })
     }
@@ -1585,13 +1585,13 @@ export default function EnvCheck({
 
       updateStep('openclaw', {
         status: 'checking',
-        description: needOpenClawRuntimeRecovery ? '正在验证 OpenClaw 运行环境...' : '重新检测 OpenClaw CLI...',
+        description: needOpenClawRuntimeRecovery ? '正在验证 OpenClaw 环境...' : '重新检测 OpenClaw 命令行工具...',
         progress: 90,
       })
       const newOpenclawResult = await window.api.checkOpenClaw()
       if (!newOpenclawResult.installed) {
         updateStep('openclaw', { status: 'error', error: '安装后仍无法检测到' })
-        showFatalMessage('OpenClaw CLI 安装异常，请重启应用重试')
+        showFatalMessage('OpenClaw 命令行工具安装异常，请重启应用重试')
         setIsRunning(false)
         return
       }
@@ -1616,10 +1616,10 @@ export default function EnvCheck({
 
     await delay(envCheckTiming.transitionShortMs)
 
-    // 第三步：记录 Gateway 会在后续配置完成后再确认
+    // 第三步：记录网关会在后续配置完成后再确认
     updateStep('gateway', {
       status: 'checking',
-      description: '当前阶段跳过 Gateway 运行态检查，后续流程会自动确认...',
+      description: '当前阶段跳过网关运行状态检查，后续流程会自动确认...',
       progress: 0,
     })
     await delay(envCheckTiming.transitionStandardMs)
@@ -1718,7 +1718,7 @@ export default function EnvCheck({
               loading={pluginRepairRunning}
               onClick={() => { void onRepairPlugins?.() }}
             >
-              修复坏插件环境
+              修复损坏插件环境
             </Button>
           </Tooltip>
         </div>
@@ -1729,7 +1729,7 @@ export default function EnvCheck({
           color="yellow"
           variant="light"
           mb="sm"
-          title="已自动隔离坏插件"
+          title="已自动隔离损坏插件"
           withCloseButton
           onClose={() => setPluginRepairNoticeVisible(false)}
         >
@@ -1744,7 +1744,7 @@ export default function EnvCheck({
           color="red"
           variant="light"
           mb="sm"
-          title="坏插件环境修复失败"
+          title="损坏插件环境修复失败"
           withCloseButton
           onClose={() => setPluginRepairErrorVisible(false)}
         >
@@ -1867,7 +1867,7 @@ export default function EnvCheck({
                       disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
                       loading={isUpgradingOpenClaw}
                     >
-                      {openClawGateState.canAutoCorrect ? '重试修正' : '一键升级'}
+                      {openClawGateState.canAutoCorrect ? '重试修复' : '一键升级'}
                     </Button>
                   )}
                 </>
@@ -2006,7 +2006,7 @@ export default function EnvCheck({
         >
           <div className="space-y-4">
             <Text size="sm">
-              请确认你已经完成手动备份，再继续恢复历史 OpenClaw 运行环境。
+              请确认你已经完成手动备份，再继续恢复历史 OpenClaw 环境。
             </Text>
             <Text size="xs" c="dimmed">
               {formatTakeoverFailureManualBackupWarning(historyOnlyRecoveryFailure.failure)}

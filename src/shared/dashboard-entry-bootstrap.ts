@@ -43,18 +43,18 @@ export interface DashboardEntrySnapshot {
 export const DASHBOARD_ENTRY_TASKS: DashboardEntryBootstrapTaskDefinition[] = [
   {
     key: 'gateway',
-    label: '读取 Gateway 状态',
-    pendingDescription: '读取当前 Gateway 运行快照，运行态问题会在控制面板内继续处理。',
+    label: '读取网关状态',
+    pendingDescription: '读取当前网关状态，运行状态问题会在控制面板内继续处理。',
   },
   {
     key: 'config',
-    label: '读取共享配置',
-    pendingDescription: '读取控制面板首屏所需的共享配置快照。',
+    label: '读取当前配置',
+    pendingDescription: '读取控制面板首屏所需的配置快照。',
   },
   {
     key: 'pairing',
     label: '整理配对状态',
-    pendingDescription: '汇总渠道接通、飞书运行态和配对摘要。',
+    pendingDescription: '汇总渠道接通、飞书运行状态和配对状态。',
   },
 ]
 
@@ -97,21 +97,21 @@ export function resolveDashboardEntryBootstrapCopy(
   if (state.pairing === 'active') {
     return {
       title: '整理配对状态',
-      detail: '正在汇总飞书接通情况、运行态和配对摘要。',
+      detail: '正在汇总飞书接通情况、运行状态和配对状态。',
     }
   }
 
   if (state.config === 'active') {
     return {
-      title: '读取共享配置',
-      detail: '正在加载当前控制面板首屏依赖的共享配置。',
+      title: '读取当前配置',
+      detail: '正在加载当前控制面板首屏依赖的配置。',
     }
   }
 
   if (state.gateway === 'active') {
     return {
-      title: '读取 Gateway 状态',
-      detail: '正在读取当前 Gateway 运行快照，运行态问题会在控制面板内继续处理。',
+      title: '读取网关状态',
+      detail: '正在读取当前网关状态，运行状态问题会在控制面板内继续处理。',
     }
   }
 
@@ -122,12 +122,12 @@ export function resolveDashboardEntryBootstrapCopy(
   ) {
     return {
       title: '控制面板准备完成',
-      detail: '最终检查已经完成，正在进入控制面板并渲染首屏。',
+      detail: '进入前检查已经完成，正在进入控制面板并渲染首屏。',
     }
   }
 
   return {
     title: '正在进入控制面板',
-    detail: '正在完成本次进入的最终检查，并同步控制面板首屏所需状态。',
+    detail: '正在完成本次进入前检查，并同步控制面板首屏所需状态。',
   }
 }

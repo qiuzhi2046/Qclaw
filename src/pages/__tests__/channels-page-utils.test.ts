@@ -75,7 +75,7 @@ describe('getConfigModalTitle', () => {
         accountId: 'work',
         accountName: '工作机器人',
       })
-    ).toBe('飞书 Bot「工作机器人」接入成功')
+    ).toBe('飞书机器人「工作机器人」接入成功')
   })
 
   it('falls back to the default title for the connect step', () => {
@@ -92,9 +92,9 @@ describe('getPairingIntroCopy', () => {
         accountName: '工作机器人',
       })
     ).toEqual({
-      title: '飞书 Bot「工作机器人」已接入',
+      title: '飞书机器人「工作机器人」已接入',
       message:
-        '已完成飞书 Bot「工作机器人」的接入配置。接下来请在对应的飞书机器人里发送一条消息，获取配对码后粘贴到下方，完成这个 Bot 的用户配对。',
+        '已完成飞书机器人「工作机器人」的接入配置。接下来请在对应的飞书机器人里发送一条消息，获取配对码后粘贴到下方，完成这个机器人的用户配对。',
     })
   })
 

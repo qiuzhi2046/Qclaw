@@ -314,7 +314,7 @@ describe('applyDefaultModelWithGatewayReload', () => {
     expect(result.ok).toBe(false)
     expect(result.modelApplied).toBe(true)
     expect(result.gatewayReloaded).toBe(false)
-    expect(result.message).toContain('运行时尚未确认生效')
+    expect(result.message).toContain('运行状态尚未确认生效')
   })
 
   it('does not report success when runtime already matches but config never updates', async () => {

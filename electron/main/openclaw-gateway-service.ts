@@ -212,7 +212,7 @@ function createEmptyHealthCheck(): GatewayHealthCheckResult {
     stderr: '',
     code: null,
     stateCode: 'gateway_not_running',
-    summary: 'Gateway 当前没有在本机运行',
+    summary: '网关当前没有在本机运行',
   }
 }
 
@@ -318,8 +318,8 @@ function buildGatewayEnsureResult(
   const stateCode = flags.running && base.ok ? 'healthy' : extras.stateCode || classified.stateCode
   const summary =
     flags.running && base.ok
-      ? 'Gateway 已确认可用'
-      : String(extras.summary || classified.summary || 'Gateway 尚未完成就绪确认')
+      ? '网关已确认可用'
+      : String(extras.summary || classified.summary || '网关尚未完成就绪确认')
   return {
     ok: Boolean(base.ok),
     stdout: String(base.stdout || ''),
@@ -590,8 +590,8 @@ async function tryRepairUnknownManagedChannels(
       appendGatewayEvidence(context, {
         source: 'config',
         message: repairedHealth.running
-          ? '个人微信插件已补装并确认 Gateway 恢复可用'
-          : '个人微信插件已补装，系统将继续按正常启动链路复检 Gateway',
+          ? '个人微信插件已补装并确认网关恢复可用'
+          : '个人微信插件已补装，系统将继续按正常启动链路复检网关',
         detail: repairedHealth.summary,
       })
 
@@ -601,7 +601,7 @@ async function tryRepairUnknownManagedChannels(
           recovered: true,
           blockingFailure: false,
           health: repairedHealth,
-          summary: '已补装个人微信插件并确认 Gateway 恢复可用。',
+          summary: '已补装个人微信插件并确认网关恢复可用。',
         }
       }
 
@@ -611,7 +611,7 @@ async function tryRepairUnknownManagedChannels(
           recovered: false,
           blockingFailure: false,
           health: repairedHealth,
-          summary: '已补装个人微信插件，Gateway 将继续尝试启动。',
+          summary: '已补装个人微信插件，网关将继续尝试启动。',
         }
       }
     }
@@ -651,8 +651,8 @@ async function tryRepairUnknownManagedChannels(
   appendGatewayEvidence(context, {
     source: 'config',
     message: repairedHealth.running
-      ? '受管渠道插件已修复并确认 Gateway 恢复可用'
-      : '受管渠道插件已修复，Gateway 将继续尝试启动',
+      ? '受管渠道插件已修复并确认网关恢复可用'
+      : '受管渠道插件已修复，网关将继续尝试启动',
     detail: [
       repairedHealth.summary,
     ].filter(Boolean).join('\n').slice(0, 2000),
@@ -664,8 +664,8 @@ async function tryRepairUnknownManagedChannels(
     blockingFailure: false,
     health: repairedHealth,
     summary: repairedHealth.running
-      ? '已完成受管渠道插件修复并确认 Gateway 恢复可用。'
-      : '已完成受管渠道插件修复，Gateway 将继续尝试启动。',
+      ? '已完成受管渠道插件修复并确认网关恢复可用。'
+      : '已完成受管渠道插件修复，网关将继续尝试启动。',
   }
 }
 
@@ -741,7 +741,7 @@ async function runOfficialGatewayRepairFlow(
       health: finalHealth,
       doctorDiagnostics: diagnoseResult,
       summary: finalHealth.running
-        ? '官方自检未发现需要迁移的配置，Gateway 已在复检期间恢复可用。'
+        ? '官方自检未发现需要迁移的配置，网关已在复检期间恢复可用。'
         : params.triggerSummary,
     }
   }
@@ -818,8 +818,8 @@ async function runOfficialGatewayRepairFlow(
     health: finalHealth,
     doctorDiagnostics: repairResult,
     summary: finalHealth.running
-      ? '已执行 OpenClaw 官方迁移并确认 Gateway 恢复可用。'
-      : '已执行 OpenClaw 官方迁移，但 Gateway 仍未完成就绪确认。',
+      ? '已执行 OpenClaw 官方迁移并确认网关恢复可用。'
+      : '已执行 OpenClaw 官方迁移，但网关仍未完成就绪确认。',
   }
 }
 
@@ -872,7 +872,7 @@ async function waitForGatewayReady(
     execute: async (context) => {
       emitGatewayBootstrapState(options, {
         phase: 'waiting-ready',
-        title: '正在等待 Gateway 就绪',
+        title: '正在等待网关就绪',
         detail:
           context.attempt > 1
             ? `正在进行第 ${context.attempt} 次就绪确认，请稍候。`
@@ -907,7 +907,7 @@ function normalizeGatewayPortOwner(port: number, owner?: GatewayPortOwner | null
 async function restartGatewayAndWait(
   options: EnsureGatewayRunningOptions,
   context: GatewayRecoveryContext,
-  detail = '检测到 token 或连接握手异常，系统正在重载 Gateway 以尝试恢复。'
+  detail = '检测到 token 或连接握手异常，系统正在重载网关以尝试恢复。'
 ): Promise<{
   ok: boolean
   result: CliResult
@@ -915,7 +915,7 @@ async function restartGatewayAndWait(
 }> {
   emitGatewayBootstrapState(options, {
     phase: 'restart',
-    title: '正在重载 Gateway',
+    title: '正在重载网关',
     detail,
     progress: 72,
   })
@@ -924,7 +924,7 @@ async function restartGatewayAndWait(
   if (!restartResult.ok) {
     appendGatewayEvidence(context, {
       source: 'restart',
-      message: 'Gateway 重载失败',
+      message: '网关重载失败',
       detail: combineCliOutput(restartResult),
     })
     return {
@@ -961,7 +961,7 @@ async function tryRecoverPortConflict(
   context.portOwner = portOwner
   appendGatewayEvidence(context, {
     source: 'port-owner',
-    message: '检测到 Gateway 端口占用进程',
+    message: '检测到网关端口占用进程',
     detail: [portOwner.processName, portOwner.command, portOwner.pid ? `pid=${portOwner.pid}` : '']
       .filter(Boolean)
       .join(' / '),
@@ -972,8 +972,8 @@ async function tryRecoverPortConflict(
   if (portOwner.kind === 'gateway' || portOwner.kind === 'openclaw') {
     emitGatewayBootstrapState(options, {
       phase: 'port-recovery',
-      title: '正在回收旧的 Gateway 端口',
-      detail: '检测到旧的 OpenClaw/Gateway 进程仍占用端口，系统正在先停止旧实例再重试启动。',
+      title: '正在回收旧的网关端口',
+      detail: '检测到旧的 OpenClaw/网关进程仍占用端口，系统正在先停止旧实例再重试启动。',
       progress: 50,
     })
     recordGatewayAction(context, 'stop-gateway', ['gateway', 'stop'])
@@ -989,8 +989,8 @@ async function tryRecoverPortConflict(
     if (stopResult.ok) {
       emitGatewayBootstrapState(options, {
         phase: 'start-command',
-        title: '正在重新启动 Gateway',
-        detail: '旧实例已经停止，系统正在重新拉起 Gateway。',
+        title: '正在重新启动网关',
+        detail: '旧实例已经停止，系统正在重新拉起网关。',
         progress: 56,
       })
       recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
@@ -1022,7 +1022,7 @@ async function tryRecoverPortConflict(
 
   emitGatewayBootstrapState(options, {
     phase: 'port-recovery',
-    title: '正在切换 Gateway 端口',
+    title: '正在切换网关端口',
     detail: `检测到默认端口 ${currentPort} 已被占用，系统正在自动迁移到新的本地端口 ${nextPort}。`,
     progress: 52,
   })
@@ -1039,7 +1039,7 @@ async function tryRecoverPortConflict(
   if (!writeResult.ok) {
     appendGatewayEvidence(context, {
       source: 'config',
-      message: 'Gateway 端口迁移写入失败',
+      message: '网关端口迁移写入失败',
       detail: writeResult.message,
       port: currentPort,
       owner: portOwner,
@@ -1055,15 +1055,15 @@ async function tryRecoverPortConflict(
   recordGatewayAction(context, 'migrate-port')
   appendGatewayEvidence(context, {
     source: 'config',
-    message: `Gateway 已从端口 ${currentPort} 迁移到 ${nextPort}`,
+    message: `网关已从端口 ${currentPort} 迁移到 ${nextPort}`,
     detail: writeResult.message,
     port: nextPort,
   })
 
   emitGatewayBootstrapState(options, {
     phase: 'start-command',
-    title: '正在使用新端口启动 Gateway',
-    detail: `配置已更新到 ${nextPort}，系统正在重新启动 Gateway。`,
+    title: '正在使用新端口启动网关',
+    detail: `配置已更新到 ${nextPort}，系统正在重新启动网关。`,
     progress: 58,
   })
   recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
@@ -1086,7 +1086,7 @@ async function tryRecoverPortConflict(
   context.effectivePort = currentPort
   appendGatewayEvidence(context, {
     source: 'config',
-    message: '新端口启动失败，已回滚 Gateway 配置',
+    message: '新端口启动失败，已回滚网关配置',
     detail: combineCliOutput(retryStart),
     port: currentPort,
   })
@@ -1141,7 +1141,7 @@ async function ensureRuntimeReady(
         },
         context,
         {
-          summary: 'Node.js 版本过低，Gateway 暂时无法继续启动，请先手动升级 Node.js',
+          summary: 'Node.js 版本过低，网关暂时无法继续启动，请先手动升级 Node.js',
           safeToRetry: false,
         }
       ),
@@ -1164,7 +1164,7 @@ async function ensureRuntimeReady(
   emitGatewayBootstrapState(options, {
     phase: 'runtime-check',
     title: '正在准备运行组件',
-    detail: `检测到当前机器还缺少${[needNode ? ' Node.js' : '', needOpenClaw ? ' OpenClaw CLI' : '']
+    detail: `检测到当前机器还缺少${[needNode ? ' Node.js' : '', needOpenClaw ? ' OpenClaw 命令行工具' : '']
       .filter(Boolean)
       .join(' 和')}，系统正在自动补齐。`,
     progress: 16,
@@ -1194,7 +1194,7 @@ async function ensureRuntimeReady(
 
   emitGatewayBootstrapState(options, {
     phase: 'runtime-check',
-    title: '正在刷新运行环境',
+    title: '正在刷新本机环境',
     detail: '运行组件安装完成，系统正在刷新 PATH 和命令探测结果。',
     progress: 24,
   })
@@ -1233,7 +1233,7 @@ async function ensureRuntimeReady(
         {
           ok: false,
           stdout: installResult.stdout,
-          stderr: 'OpenClaw CLI 安装后仍不可用',
+          stderr: 'OpenClaw 命令行工具安装后仍不可用',
           code: 1,
         },
         {
@@ -1292,7 +1292,7 @@ async function ensureGatewayModeConfig(
     reason: 'unknown',
   }, undefined, { applyGatewayPolicy: false })
   if (!writeResult.ok) {
-    throw new Error(writeResult.message || 'Gateway mode 配置写入失败')
+    throw new Error(writeResult.message || '网关 mode 配置写入失败')
   }
   return true
 }
@@ -1362,8 +1362,8 @@ async function ensureGatewayRunningImpl(
   if (!options.skipRuntimePrecheck) {
     emitGatewayBootstrapState(options, {
       phase: 'runtime-check',
-      title: '正在确认 Gateway 运行前置条件',
-      detail: '正在确认 Node.js、OpenClaw CLI 和基础命令都已就绪。',
+      title: '正在确认网关运行前置条件',
+      detail: '正在确认 Node.js、OpenClaw 命令行工具和基础命令都已就绪。',
       progress: 8,
     })
     const runtimeResult = await ensureRuntimeReady(options, context)
@@ -1377,8 +1377,8 @@ async function ensureGatewayRunningImpl(
   } else {
     emitGatewayBootstrapState(options, {
       phase: 'probe',
-      title: '正在确认 Gateway 可放行',
-      detail: '当前页将直接复用 EnvCheck 的运行环境结果，只检查本次进入控制面板所需的 Gateway 状态。',
+      title: '正在确认网关可放行',
+      detail: '当前页将直接复用 EnvCheck 的环境检查结果，只检查本次进入控制面板所需的网关状态。',
       progress: 12,
     })
   }
@@ -1410,20 +1410,20 @@ async function ensureGatewayRunningImpl(
   if (configRuntimeApplyRequired) {
     await ensureGatewayRuntimeRevision(
       'gateway_config_changed',
-      '检测到 Gateway 启动前配置已修补，正在等待运行时确认消费最新配置。'
+      '检测到网关启动前配置已修补，正在等待运行状态确认消费最新配置。'
     )
   }
 
   emitGatewayBootstrapState(options, {
     phase: 'probe',
-    title: '正在检查 Gateway 当前状态',
+    title: '正在检查网关当前状态',
     detail: '如果网关已经在运行，会直接放行到控制面板。',
     progress: 18,
   })
   const initialHealth = await safeGatewayHealth()
   appendGatewayEvidence(context, {
     source: 'health',
-    message: String(initialHealth.summary || 'Gateway 初始健康检查未通过'),
+    message: String(initialHealth.summary || '网关初始健康检查未通过'),
     detail: joinNonEmpty([initialHealth.stderr, initialHealth.raw]).slice(0, 2000),
   })
   const initialClassification = classifyGatewayRuntimeState({
@@ -1442,7 +1442,7 @@ async function ensureGatewayRunningImpl(
       const restartAfterConfigPatch = await restartGatewayAndWait(
         options,
         context,
-        'Gateway 已在运行，但启动前配置刚刚被修补，系统正在重载并确认其已消费最新配置。'
+        '网关已在运行，但启动前配置刚刚被修补，系统正在重载并确认其已消费最新配置。'
       )
       if (restartAfterConfigPatch.ok && restartAfterConfigPatch.ready) {
         const result = buildGatewayEnsureResult(
@@ -1461,12 +1461,12 @@ async function ensureGatewayRunningImpl(
         )
         await persistGatewayRuntimeReconcile({
           result,
-          summary: 'Gateway 已确认消费启动前修补的最新配置。',
+          summary: '网关已确认消费启动前修补的最新配置。',
         })
         emitGatewayBootstrapState(options, {
           phase: 'done',
-          title: 'Gateway 已确认可用',
-          detail: '系统已重载 Gateway 并确认最新配置生效，正在进入控制面板。',
+          title: '网关已确认可用',
+          detail: '系统已重载网关并确认最新配置生效，正在进入控制面板。',
           progress: 100,
         })
         return result
@@ -1490,7 +1490,7 @@ async function ensureGatewayRunningImpl(
       )
       await persistGatewayRuntimeReconcile({
         result: failedResult,
-        summary: 'Gateway 重载后仍未确认消费启动前修补的配置。',
+        summary: '网关重载后仍未确认消费启动前修补的配置。',
       })
       return failedResult
     }
@@ -1508,12 +1508,12 @@ async function ensureGatewayRunningImpl(
       result,
       summary:
         openClawVersion && openClawVersion.includes('2026.3.22')
-          ? 'Gateway 已确认可用，当前 3.22 主链路的运行时状态已通过健康探针确认。'
-          : 'Gateway 已确认可用，运行时状态已通过健康探针确认。',
+          ? '网关已确认可用，当前 3.22 主链路的运行状态已通过健康探针确认。'
+          : '网关已确认可用，运行状态已通过健康探针确认。',
     })
     emitGatewayBootstrapState(options, {
       phase: 'done',
-      title: 'Gateway 已确认可用',
+      title: '网关已确认可用',
       detail: '系统检测到网关已经在运行，正在进入控制面板。',
       progress: 100,
     })
@@ -1529,13 +1529,13 @@ async function ensureGatewayRunningImpl(
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
       prunedPluginIds: [],
-      summary: '坏插件环境修复失败',
+      summary: '损坏插件环境修复失败',
       stderr: error instanceof Error ? error.message : String(error || ''),
     }))
 
     appendGatewayEvidence(context, {
       source: 'config',
-      message: pluginRepair.summary || '已尝试隔离坏插件环境',
+      message: pluginRepair.summary || '已尝试隔离损坏插件环境',
       detail: joinNonEmpty([
         pluginRepair.stderr,
         pluginRepair.quarantinedPluginIds.length > 0
@@ -1561,7 +1561,7 @@ async function ensureGatewayRunningImpl(
     appendGatewayEvidence(context, startupProbeClassification.evidence)
 
     if (startupProbeHealth.running) {
-      const recoverySummary = pluginRepair.summary || '已隔离坏插件并确认 Gateway 恢复可用。'
+      const recoverySummary = pluginRepair.summary || '已隔离损坏插件并确认网关恢复可用。'
       const result = buildGatewayEnsureResult(
         {
           ok: true,
@@ -1582,7 +1582,7 @@ async function ensureGatewayRunningImpl(
       })
       emitGatewayBootstrapState(options, {
         phase: 'done',
-        title: 'Gateway 已确认可用',
+        title: '网关已确认可用',
         detail: recoverySummary,
         progress: 100,
       })
@@ -1617,7 +1617,7 @@ async function ensureGatewayRunningImpl(
       })
       emitGatewayBootstrapState(options, {
         phase: 'done',
-        title: 'Gateway 已确认可用',
+        title: '网关已确认可用',
         detail: managedChannelRepair.summary,
         progress: 100,
       })
@@ -1680,10 +1680,10 @@ async function ensureGatewayRunningImpl(
     } else {
       await ensureGatewayRuntimeRevision(
         'gateway_official_repair_required',
-        'Gateway 初始健康检查命中了配置不兼容，正在优先执行 OpenClaw 官方修复路径。'
+        '网关初始健康检查命中了配置不兼容，正在优先执行 OpenClaw 官方修复路径。'
       )
       const officialRepair = await runOfficialGatewayRepairFlow(options, context, {
-        triggerSummary: 'Gateway 配置不兼容，正在优先执行 OpenClaw 官方修复路径。',
+        triggerSummary: '网关配置不兼容，正在优先执行 OpenClaw 官方修复路径。',
         triggerDetail: '健康检查已识别到配置与当前 OpenClaw 契约不兼容，系统将先执行 doctor --fix 再复检。',
       })
       if (officialRepair.recovered) {
@@ -1707,7 +1707,7 @@ async function ensureGatewayRunningImpl(
         })
         emitGatewayBootstrapState(options, {
           phase: 'done',
-          title: 'Gateway 已确认可用',
+          title: '网关已确认可用',
           detail: officialRepair.summary,
           progress: 100,
         })
@@ -1780,12 +1780,12 @@ async function ensureGatewayRunningImpl(
   await ensureGatewayRuntimeRevision(
     configRuntimeApplyRequired ? 'gateway_runtime_apply' : 'gateway_start_required',
     configRuntimeApplyRequired
-      ? 'Gateway 正在应用启动前修补后的配置并确认运行时状态。'
-      : 'Gateway 正在启动并确认当前配置已被运行时消费。'
+      ? '网关正在应用启动前修补后的配置并确认运行状态。'
+      : '网关正在启动并确认当前配置已被运行状态消费。'
   )
   emitGatewayBootstrapState(options, {
     phase: 'start-command',
-    title: '正在启动 Gateway',
+    title: '正在启动网关',
     detail: '如果后台服务尚未安装，系统会先自动补装。',
     progress: 36,
   })
@@ -1796,7 +1796,7 @@ async function ensureGatewayRunningImpl(
   if (isGatewayServiceNotLoaded(startResult)) {
     emitGatewayBootstrapState(options, {
       phase: 'service-install',
-      title: '正在补装 Gateway 服务',
+      title: '正在补装网关服务',
       detail: '检测到当前机器还没加载后台服务，正在自动补装。',
       progress: 48,
     })
@@ -1808,7 +1808,7 @@ async function ensureGatewayRunningImpl(
     if (!installGatewayResult.ok) {
       appendGatewayEvidence(context, {
         source: 'service',
-        message: 'Gateway 服务补装失败',
+        message: '网关服务补装失败',
         detail: combineCliOutput(installGatewayResult),
       })
       const result = buildGatewayEnsureResult(
@@ -1821,7 +1821,7 @@ async function ensureGatewayRunningImpl(
         context,
         {
           stateCode: 'service_install_failed',
-          summary: 'Gateway 后台服务补装失败',
+          summary: '网关后台服务补装失败',
         }
       )
       await persistGatewayRuntimeReconcile({ result })
@@ -1835,7 +1835,7 @@ async function ensureGatewayRunningImpl(
     await ensureGatewayModeConfig(postInstallConfig)
     emitGatewayBootstrapState(options, {
       phase: 'start-command',
-      title: '正在重新启动 Gateway',
+      title: '正在重新启动网关',
       detail: '后台服务补装完成，正在再次启动网关。',
       progress: 56,
     })
@@ -1878,11 +1878,11 @@ async function ensureGatewayRunningImpl(
 	    if (startClassification.stateCode === 'config_invalid') {
 	      await ensureGatewayRuntimeRevision(
 	        'gateway_official_repair_required',
-	        'Gateway 启动命令命中了配置不兼容，正在优先执行 OpenClaw 官方修复路径。'
+	        '网关启动命令命中了配置不兼容，正在优先执行 OpenClaw 官方修复路径。'
 	      )
 	      const doctorFlow = await runOfficialGatewayRepairFlow(options, context, {
-	        triggerSummary: 'Gateway 启动时检测到配置不兼容，系统正在优先执行 OpenClaw 官方修复路径。',
-	        triggerDetail: 'Gateway 启动命令已识别到配置与当前 OpenClaw 契约不兼容，系统将先执行 doctor --fix 再复检。',
+	        triggerSummary: '网关启动时检测到配置不兼容，系统正在优先执行 OpenClaw 官方修复路径。',
+	        triggerDetail: '网关启动命令已识别到配置与当前 OpenClaw 契约不兼容，系统将先执行 doctor --fix 再复检。',
 	      })
 	      if (doctorFlow.recovered) {
 	        const result = buildGatewayEnsureResult(
@@ -1905,7 +1905,7 @@ async function ensureGatewayRunningImpl(
 	        })
 	        emitGatewayBootstrapState(options, {
 	          phase: 'done',
-	          title: 'Gateway 已确认可用',
+	          title: '网关已确认可用',
 	          detail: doctorFlow.summary,
 	          progress: 100,
 	        })
@@ -2031,7 +2031,7 @@ async function ensureGatewayRunningImpl(
       portOwner: context.portOwner,
     }
     let readyClassification = classifyGatewayRuntimeState({
-      stderr: 'Gateway 启动命令已执行，但系统仍未确认网关已经准备完成',
+      stderr: '网关启动命令已执行，但系统仍未确认网关已经准备完成',
       stdout: combineCliOutput(startResult),
       diagnostics: {
         lastHealth: readyDiagnosticsBase.lastHealth,
@@ -2044,7 +2044,7 @@ async function ensureGatewayRunningImpl(
     const readyDiagnostics = buildGatewayDiagnosticsWithControlUi(readyDiagnosticsBase, readyControlUiApp)
     if (readyControlUiApp) {
       readyClassification = classifyGatewayRuntimeState({
-        stderr: 'Gateway 启动命令已执行，但系统仍未确认网关已经准备完成',
+        stderr: '网关启动命令已执行，但系统仍未确认网关已经准备完成',
         stdout: combineCliOutput(startResult),
         diagnostics: readyDiagnostics,
         portOwner: context.portOwner,
@@ -2077,12 +2077,12 @@ async function ensureGatewayRunningImpl(
         )
         await persistGatewayRuntimeReconcile({
           result,
-          summary: 'Gateway 已通过自动重载确认消费当前运行时配置。',
+          summary: '网关已通过自动重载确认消费当前运行状态配置。',
         })
         emitGatewayBootstrapState(options, {
           phase: 'done',
-          title: 'Gateway 已确认可用',
-          detail: '系统已经通过自动重载恢复 Gateway，正在进入控制面板。',
+          title: '网关已确认可用',
+          detail: '系统已经通过自动重载恢复网关，正在进入控制面板。',
           progress: 100,
           elapsedMs: restartRepair.ready.elapsedMs,
         })
@@ -2120,7 +2120,7 @@ async function ensureGatewayRunningImpl(
       })
       emitGatewayBootstrapState(options, {
         phase: 'done',
-        title: 'Gateway 已确认可用',
+        title: '网关已确认可用',
         detail: doctorFlow.summary,
         progress: 100,
       })
@@ -2134,7 +2134,7 @@ async function ensureGatewayRunningImpl(
       portOwner: context.portOwner,
     }
     let finalClassification = classifyGatewayRuntimeState({
-      stderr: 'Gateway 启动命令已执行，但系统仍未确认网关已经准备完成',
+      stderr: '网关启动命令已执行，但系统仍未确认网关已经准备完成',
       stdout: combineCliOutput(startResult),
       diagnostics: {
         lastHealth: finalDiagnosticsBase.lastHealth,
@@ -2147,7 +2147,7 @@ async function ensureGatewayRunningImpl(
     const finalDiagnostics = buildGatewayDiagnosticsWithControlUi(finalDiagnosticsBase, finalControlUiApp)
     if (finalControlUiApp) {
       finalClassification = classifyGatewayRuntimeState({
-        stderr: 'Gateway 启动命令已执行，但系统仍未确认网关已经准备完成',
+        stderr: '网关启动命令已执行，但系统仍未确认网关已经准备完成',
         stdout: combineCliOutput(startResult),
         diagnostics: finalDiagnostics,
         portOwner: context.portOwner,
@@ -2163,7 +2163,7 @@ async function ensureGatewayRunningImpl(
       }).catch(() => undefined)
       appendGatewayEvidence(context, {
         source: 'config',
-        message: 'Gateway 新端口未验证通过，已回滚到原端口配置',
+        message: '网关新端口未验证通过，已回滚到原端口配置',
         port: resolveGatewayConfiguredPort(rollbackConfig),
       })
       context.autoPortMigrated = false
@@ -2174,7 +2174,7 @@ async function ensureGatewayRunningImpl(
       {
         ok: false,
         stdout: combineCliOutput(startResult),
-        stderr: doctorFlow.summary || 'Gateway 启动命令已执行，但系统仍未确认网关已经准备完成',
+        stderr: doctorFlow.summary || '网关启动命令已执行，但系统仍未确认网关已经准备完成',
         code: 1,
       },
       {
@@ -2201,7 +2201,7 @@ async function ensureGatewayRunningImpl(
 
   emitGatewayBootstrapState(options, {
     phase: 'done',
-    title: 'Gateway 已确认可用',
+    title: '网关已确认可用',
     detail: '网关已经准备完成，正在进入控制面板。',
     progress: 100,
     elapsedMs: ready.elapsedMs,
@@ -2222,7 +2222,7 @@ async function ensureGatewayRunningImpl(
   )
   await persistGatewayRuntimeReconcile({
     result,
-    summary: 'Gateway 已确认消费当前配置并完成就绪。',
+    summary: '网关已确认消费当前配置并完成就绪。',
   })
   return result
 }

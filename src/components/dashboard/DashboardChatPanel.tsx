@@ -1536,8 +1536,8 @@ export default function DashboardChatPanel({
                 </Text>
                 <Text size="xs" c="dimmed" mt={4}>
                   {activeSession
-                    ? '您可以继续发送消息，确认 provider、模型和网关都已经打通。'
-                    : '您可以先发一句简单问题，确认 provider、模型和网关都已经打通。'}
+                    ? '您可以继续发送消息，确认 AI 提供商、模型和网关都已经打通。'
+                    : '您可以先发一句简单问题，确认 AI 提供商、模型和网关都已经打通。'}
                 </Text>
                 {!activeSession && (
                   <Group mt="sm" gap="xs">

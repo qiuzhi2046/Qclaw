@@ -50,9 +50,9 @@ type TaskDetailState = Record<DashboardEntryBootstrapTaskKey, string>
 const INITIAL_TASK_STATE = createDashboardEntryBootstrapState()
 
 const INITIAL_TASK_DETAILS: TaskDetailState = {
-  gateway: '读取当前 Gateway 运行快照，运行态问题会在控制面板内继续处理。',
-  config: '读取控制面板首屏所需的共享配置快照。',
-  pairing: '汇总渠道接通、飞书运行态和配对摘要。',
+  gateway: '读取当前网关状态，运行状态问题会在控制面板内继续处理。',
+  config: '读取控制面板首屏所需的配置快照。',
+  pairing: '汇总渠道接通、飞书运行状态和配对状态。',
 }
 
 function createTaskDetailState(): TaskDetailState {
@@ -69,12 +69,12 @@ function createGenericFailureView(
 
 function summarizeConfig(config: Record<string, any> | null): string {
   if (!config || typeof config !== 'object') {
-    return '共享配置为空，已按空配置快照继续。'
+    return '当前配置为空，已按空配置快照继续。'
   }
 
   const channelCount = Object.keys(config.channels || {}).length
   const providerCount = Object.keys(config.models || {}).length
-  return `已读取共享配置，发现 ${channelCount} 个渠道配置、${providerCount} 个模型提供商配置。`
+  return `已读取当前配置，发现 ${channelCount} 个渠道配置、${providerCount} 个模型提供商配置。`
 }
 
 function formatProbeErrorMessage(prefix: string, error: unknown): string {
@@ -97,7 +97,7 @@ async function summarizePairing(
     return {
       summary:
         otherChannelCount > 0
-          ? `已整理 ${otherChannelCount} 个非飞书渠道状态，当前没有飞书 Bot 需要配对摘要。`
+          ? `已整理 ${otherChannelCount} 个非飞书渠道状态，当前没有飞书机器人需要汇总配对状态。`
           : '当前没有需要汇总的渠道配对状态。',
       data: {
         feishuBotCount: 0,
@@ -118,14 +118,14 @@ async function summarizePairing(
       return null
     }),
     api.getFeishuRuntimeStatus().catch((error) => {
-      warnings.push(formatProbeErrorMessage('飞书运行态读取失败', error))
+      warnings.push(formatProbeErrorMessage('飞书运行状态读取失败', error))
       return null
     }),
   ])
 
   if (!pairingStatus || !runtimeStatus) {
     return {
-      summary: `已读取 ${feishuBots.length} 个飞书 Bot 的基础配置，但配对或运行态快照暂不可用。`,
+      summary: `已读取 ${feishuBots.length} 个飞书机器人的基础配置，但配对状态或运行状态暂不可用。`,
       data: null,
       warnings,
     }
@@ -136,7 +136,7 @@ async function summarizePairing(
   const offlineCount = feishuBots.filter((bot) => runtimeStatus[bot.accountId]?.runtimeState === 'offline').length
 
   return {
-    summary: `已整理 ${feishuBots.length} 个飞书 Bot 的状态，其中 ${pairedCount} 个已配对，${degradedCount} 个待修复，${offlineCount} 个离线。`,
+    summary: `已整理 ${feishuBots.length} 个飞书机器人的状态，其中 ${pairedCount} 个已配对，${degradedCount} 个待修复，${offlineCount} 个离线。`,
     data: {
       feishuBotCount: feishuBots.length,
       pairedBotCount: pairedCount,
@@ -164,31 +164,31 @@ export async function runDashboardEntryBootstrapFlow(
     detail: string
   ) => options.onTaskUpdate?.(key, status, detail)
 
-  notify('config', 'active', '正在读取共享配置...')
+  notify('config', 'active', '正在读取当前配置...')
   const config = await api.readConfig().catch((error) => {
-    notify('config', 'error', '共享配置读取失败，当前无法安全进入控制面板。')
+    notify('config', 'error', '当前配置读取失败，当前无法安全进入控制面板。')
     throw createGenericFailureView(
-      '共享配置暂时不可读取',
-      `当前无法读取共享配置，所以不能安全进入控制面板。${error instanceof Error ? ` ${error.message}` : ''}`,
-      ['先点击“重试最终检查”再试一次。', '如果问题持续存在，再回到配置向导重新整理当前机器上的配置。']
+      '当前配置暂时不可读取',
+      `当前无法读取配置，所以不能安全进入控制面板。${error instanceof Error ? ` ${error.message}` : ''}`,
+      ['先点击“重试进入前检查”再试一次。', '如果问题持续存在，再回到配置引导重新整理当前机器上的配置。']
     )
   })
   notify('config', 'done', summarizeConfig(config))
 
   const softWarnings: string[] = []
-  notify('gateway', 'active', '正在读取当前 Gateway 状态快照...')
+  notify('gateway', 'active', '正在读取当前网关状态...')
   const health = await api.gatewayHealth().catch((error) => {
-    softWarnings.push(formatProbeErrorMessage('Gateway 状态读取失败，控制面板将先按离线快照进入', error))
+    softWarnings.push(formatProbeErrorMessage('网关状态读取失败，控制面板将先按离线状态进入', error))
     return null
   })
   const gatewayRunning = health?.running === true
   if (gatewayRunning) {
-    notify('gateway', 'done', String(health?.summary || '').trim() || 'Gateway 运行快照已就绪。')
+    notify('gateway', 'done', String(health?.summary || '').trim() || '网关当前状态已就绪。')
   } else {
     const gatewayWarning =
-      String(health?.summary || '').trim() || 'Gateway 当前未就绪，进入控制面板后可继续处理。'
+      String(health?.summary || '').trim() || '网关当前未就绪，进入控制面板后可继续处理。'
     if (health) {
-      softWarnings.push(`Gateway 当前未就绪：${gatewayWarning}`)
+      softWarnings.push(`网关当前未就绪：${gatewayWarning}`)
     }
     notify('gateway', 'warning', gatewayWarning)
   }
@@ -196,7 +196,7 @@ export async function runDashboardEntryBootstrapFlow(
   const upstreamModelState = await readOpenClawUpstreamModelState(api.getModelUpstreamState)
   const upstreamModelStatus = getUpstreamModelStatusLike(upstreamModelState)
   if (upstreamModelState.fallbackUsed && upstreamModelState.fallbackReason) {
-    softWarnings.push(`模型上游状态暂不可用，已回退到 CLI 状态快照：${upstreamModelState.fallbackReason}`)
+    softWarnings.push(`模型上游状态暂不可用，已回退到命令行工具状态快照：${upstreamModelState.fallbackReason}`)
   }
 
   let modelStatus = upstreamModelStatus
@@ -222,7 +222,7 @@ export async function runDashboardEntryBootstrapFlow(
       notify('pairing', 'done', pairingSummary.summary)
     }
   } catch (error) {
-    notify('pairing', 'warning', '配对摘要读取失败，进入控制面板后会按需重新刷新。')
+    notify('pairing', 'warning', '配对状态读取失败，进入控制面板后会按需重新刷新。')
     softWarnings.push(`配对状态整理失败：${error instanceof Error ? error.message : String(error)}`)
   }
 
@@ -303,9 +303,9 @@ export default function GatewayBootstrapGate({
         cause && typeof cause === 'object' && 'title' in cause
           ? (cause as GatewayBootstrapFailureView)
           : createGenericFailureView(
-              '最终检查没有完成',
-              `进入控制面板前的最终检查被中断。${cause instanceof Error ? ` ${cause.message}` : ''}`,
-              ['先点击“重试最终检查”再试一次。', '如果问题持续存在，再回到配置向导重新整理当前机器上的配置。']
+              '进入前检查没有完成',
+              `进入控制面板前的检查被中断。${cause instanceof Error ? ` ${cause.message}` : ''}`,
+              ['先点击“重试进入前检查”再试一次。', '如果问题持续存在，再回到配置引导重新整理当前机器上的配置。']
             )
       setFatalError(fallbackView)
     } finally {
@@ -388,7 +388,7 @@ export default function GatewayBootstrapGate({
             {bootstrapping ? '检查中...' : fatalError ? '重试' : '重新检查'}
           </Button>
           <Button onClick={onReconfigure} variant="default" size="xs" disabled={bootstrapping}>
-            配置向导
+            配置引导
           </Button>
         </div>
       )}

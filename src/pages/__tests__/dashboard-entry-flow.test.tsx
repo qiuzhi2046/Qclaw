@@ -153,7 +153,7 @@ describe('dashboard entry bootstrap flow', () => {
     const result = await runDashboardEntryBootstrapFlow(api)
 
     expect(result.snapshot.gatewayRunning).toBe(false)
-    expect(result.softWarnings).toContain('Gateway 状态读取失败，控制面板将先按离线快照进入：health down')
+    expect(result.softWarnings).toContain('网关状态读取失败，控制面板将先按离线状态进入：health down')
 
     const html = renderToStaticMarkup(
       <MantineProvider>
@@ -194,7 +194,7 @@ describe('dashboard entry bootstrap flow', () => {
 
     const result = await runDashboardEntryBootstrapFlow(api)
 
-    expect(result.softWarnings).toContain('飞书运行态读取失败：runtime down')
+    expect(result.softWarnings).toContain('飞书运行状态读取失败：runtime down')
     expect(result.snapshot.pairingSummary).toBeNull()
   })
 
@@ -225,7 +225,7 @@ describe('dashboard entry bootstrap flow', () => {
     const result = await runDashboardEntryBootstrapFlow(api)
 
     expect(result.softWarnings).toContain(
-      '模型上游状态暂不可用，已回退到 CLI 状态快照：control-ui-app-unavailable'
+      '模型上游状态暂不可用，已回退到命令行工具状态快照：control-ui-app-unavailable'
     )
     expect(result.softWarnings).toContain('模型状态读取失败：控制面板将先按配置快照显示模型信息。')
     expect(result.snapshot.modelStatus).toBeNull()
@@ -263,7 +263,7 @@ describe('dashboard entry bootstrap flow', () => {
       defaultModel: 'anthropic/claude-sonnet-4-6',
     })
     expect(result.softWarnings).toContain(
-      '模型上游状态暂不可用，已回退到 CLI 状态快照：control-ui-app-missing-model-state'
+      '模型上游状态暂不可用，已回退到命令行工具状态快照：control-ui-app-missing-model-state'
     )
     expect(api.getModelStatus).toHaveBeenCalledTimes(1)
   })
@@ -279,7 +279,7 @@ describe('dashboard entry bootstrap flow', () => {
     const result = await runDashboardEntryBootstrapFlow(api)
 
     expect(result.snapshot.gatewayRunning).toBe(false)
-    expect(result.softWarnings).toContain('Gateway 当前未就绪：Gateway 未 ready')
+    expect(result.softWarnings).toContain('网关当前未就绪：Gateway 未 ready')
   })
 
   it('treats config reads as a hard block', async () => {
@@ -288,7 +288,7 @@ describe('dashboard entry bootstrap flow', () => {
     })
 
     await expect(runDashboardEntryBootstrapFlow(api)).rejects.toMatchObject({
-      title: '共享配置暂时不可读取',
+      title: '当前配置暂时不可读取',
     })
   })
 })

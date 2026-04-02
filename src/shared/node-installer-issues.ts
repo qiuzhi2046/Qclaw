@@ -68,7 +68,7 @@ export function createNodeInstallerIssue(
       kind,
       title: '等待 Xcode Command Line Tools 安装完成',
       message:
-        '已尝试触发 Xcode CLI 系统安装弹窗。如果没有弹窗，请点击屏幕右下角的安装图标继续安装；安装完成后，点击“重试识别”刷新状态。',
+        '已尝试触发 Xcode 命令行工具系统安装弹窗。如果没有弹窗，请点击屏幕右下角的安装图标继续安装；安装完成后，点击“重试识别”刷新状态。',
       details: normalizedDetails,
     }
   }

@@ -209,7 +209,7 @@ const KNOWN_PROVIDER_METADATA: ProviderMetadata[] = [
     name: 'Ollama (本地)',
     logo: '🦙',
     region: 'global',
-    description: '本地 LLM 运行时',
+    description: '本地 LLM 环境',
   },
   {
     id: 'vllm',

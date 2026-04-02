@@ -86,7 +86,7 @@ function classifyCliFailureOutput(output: string): { message: string; warningOnl
 
   if (GATEWAY_UNREADY_REGEX.test(combined)) {
     return {
-      message: 'Gateway 尚未就绪，请稍后重试。若持续失败，请重启 Gateway 后再试。',
+      message: '网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。',
       warningOnly: false,
       priority: 3,
     }

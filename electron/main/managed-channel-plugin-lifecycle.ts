@@ -185,7 +185,7 @@ function buildInspectResult(params: {
       pluginScope: 'channel',
       entityScope: params.spec.entityScope,
       status: params.status,
-      blockingReason: '插件安装与注册已确认，但缺少渠道运行态证明',
+      blockingReason: '插件安装与注册已确认，但缺少渠道运行状态证明',
     }
   }
 
@@ -303,7 +303,7 @@ async function buildGenericStatus(
             ? '已在上游 plugins list 中确认插件已注册'
             : registeredState === 'missing'
               ? '当前未在上游 plugins list 中确认插件已注册'
-              : '当前 CLI 未提供可解析的 plugins list'
+              : '当前命令行工具未提供可解析的 plugins list'
         ),
         createStatusStage('loaded', 'unknown', 'status', '当前缺少上游 loaded 证明'),
         createStatusStage('ready', 'unknown', 'status', '当前缺少上游 ready 证明'),
@@ -323,7 +323,7 @@ async function buildGenericStatus(
             ? '已在上游 plugins list 中确认插件已注册'
             : registeredState === 'missing'
               ? '当前未在上游 plugins list 中确认插件已注册'
-              : '当前 CLI 未提供可解析的 plugins list，registered 暂记为 unknown / 未证实',
+              : '当前命令行工具未提供可解析的 plugins list，registered 暂记为 unknown / 未证实',
         },
         ...(configNeedsSync
           ? [{
@@ -499,7 +499,7 @@ export function createManagedChannelPluginLifecycleService(
             channelId: spec.channelId,
             pluginScope: 'channel',
             entityScope: spec.entityScope,
-            error: preflightRepair.summary || preflightRepair.stderr || '坏插件环境修复失败',
+            error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
           }
         }
 
@@ -612,8 +612,8 @@ export function createManagedChannelPluginLifecycleService(
             channelId: spec.channelId,
             pluginScope: 'channel',
             entityScope: spec.entityScope,
-            status: createEmptyStatus(spec, preflightRepair.summary || '坏插件环境修复失败'),
-            error: preflightRepair.summary || preflightRepair.stderr || '坏插件环境修复失败',
+            status: createEmptyStatus(spec, preflightRepair.summary || '损坏插件环境修复失败'),
+            error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
           }
         }
         resetFailure(spec.channelId)
@@ -675,8 +675,8 @@ export function createManagedChannelPluginLifecycleService(
           channelId: spec.channelId,
           pluginScope: 'channel',
           entityScope: spec.entityScope,
-          status: createEmptyStatus(spec, repairResult.summary || '坏插件环境修复失败'),
-          error: repairResult.summary || repairResult.stderr || '坏插件环境修复失败',
+          status: createEmptyStatus(spec, repairResult.summary || '损坏插件环境修复失败'),
+          error: repairResult.summary || repairResult.stderr || '损坏插件环境修复失败',
         }
       }
 
@@ -735,7 +735,7 @@ export function createManagedChannelPluginLifecycleService(
           channelId: spec.channelId,
           pluginScope: 'channel',
           entityScope: spec.entityScope,
-          reloadReason: reloadResult.summary || reloadResult.stderr || 'Gateway 重载失败',
+          reloadReason: reloadResult.summary || reloadResult.stderr || '网关重载失败',
           status: statusBeforeNormalize.status,
         }
       }

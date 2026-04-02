@@ -14,7 +14,7 @@
       "chatExplain": "这里可以给 OpenClaw 发送消息。",
       "channels": "配置 IM 渠道接入、机器人和消息通道。",
       "channelsExplain": "这里可以管理飞书、企微等即时通讯消息渠道。",
-      "models": "管理模型服务商、模型列表和 API 连接。",
+      "models": "管理 AI 提供商、模型列表和 API 连接。",
       "modelsExplain": "这里可以管理日常使用的大模型接口。",
       "skills": "查看、安装和管理可用 Skills。",
       "skillsExplain": "可以把 Skill 理解为给 Agent 的一份“说明书”，Agent 会按这份说明调用工具并执行操作。",
@@ -53,15 +53,15 @@
   },
   "modelsPage": {
     "refresh": {
-      "idle": "刷新模型列表和服务商状态。",
+      "idle": "刷新模型列表和 AI 提供商状态。",
       "loading": "模型目录正在刷新中。"
     },
-    "removeProvider": "删除当前服务商及其相关配置。"
+    "removeProvider": "删除当前 AI 提供商及其相关配置。"
   },
   "modelCenter": {
     "refreshCapabilities": "重新检测模型能力与可用特性。",
-    "providerHint": "选择要配置的服务商类型。",
-    "authTokenHint": "填写用于访问该服务商的授权凭证。"
+    "providerHint": "选择要配置的 AI 提供商类型。",
+    "authTokenHint": "填写用于访问该 AI 提供商的授权凭证。"
   },
   "skillsPage": {
     "overview": "Skill 可以简单理解为给 Agent 的一份“说明书”，Agent 会按这份说明调用工具并执行操作。",
@@ -80,8 +80,8 @@
   "settingsPage": {
     "updateCenter": "打开升级中心，查看并处理可用更新。",
     "backupCenter": "打开备份中心，查看或创建本地备份。",
-    "feishuBotManager": "打开飞书 Bot 管理，配置和维护飞书机器人。",
-    "reconfigure": "重新进入配置引导，按步骤配置模型和IM渠道。",
+    "feishuBotManager": "打开飞书机器人管理，配置和维护飞书机器人。",
+    "reconfigure": "重新进入配置引导，按步骤配置模型和消息渠道。",
     "toggleThemeToLight": "当前为暗色模式，点击切换到亮色模式。",
     "toggleThemeToDark": "当前为亮色模式，点击切换到暗色模式。",
     "enableGlobalTooltip": "当前已关闭全局悬浮提示，点击后重新开启所有 Tooltip 提示。",
@@ -99,7 +99,7 @@
     "refreshStatus": "重新检查更新状态和版本信息。"
   },
   "feishuBotManager": {
-    "refreshList": "重新加载飞书 Bot 列表和运行状态。"
+    "refreshList": "重新加载飞书机器人列表和运行状态。"
   },
   "cleanup": {
     "backupBeforeCleanup": "清理前额外创建一次备份，便于后续恢复。"

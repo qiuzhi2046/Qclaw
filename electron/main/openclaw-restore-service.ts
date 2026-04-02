@@ -386,7 +386,7 @@ async function resolveRestoreTarget(
     targetPaths: await resolveRuntimeOpenClawPaths(),
     candidate: null,
     warning: backupProvidedSourcePath
-      ? '备份记录的原始恢复路径未匹配当前 OpenClaw 安装，已回退到当前运行时默认路径。'
+      ? '备份记录的原始恢复路径未匹配当前 OpenClaw 安装，已回退到当前默认路径。'
       : undefined,
   }
 }
@@ -944,7 +944,7 @@ export async function runOpenClawRestore(
       gatewayApply,
       errorCode: gatewayApplyFailed ? 'runtime_apply_failed' : undefined,
       message: gatewayApplyFailed
-        ? '恢复执行完成，但运行时生效失败。请稍后手动重载 Gateway。'
+        ? '恢复执行完成，但当前状态生效失败。请稍后手动重载网关。'
         : '恢复执行完成。',
     }
   } catch (error) {

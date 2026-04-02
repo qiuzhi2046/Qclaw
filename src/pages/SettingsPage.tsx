@@ -103,7 +103,7 @@ export default function SettingsPage({
         </Group>
         <Group gap="xs" grow>
           <Tooltip label={tooltips.settingsPage.feishuBotManager} withArrow>
-            <Button variant="default" size="xs" onClick={() => setShowFeishuBotManager(true)}>飞书 Bot 管理</Button>
+            <Button variant="default" size="xs" onClick={() => setShowFeishuBotManager(true)}>飞书机器人管理</Button>
           </Tooltip>
           <Tooltip label={tooltips.settingsPage.reconfigure} withArrow>
             <Button variant="default" size="xs" onClick={() => setShowReconfigureConfirm(true)}>重新进入配置引导</Button>

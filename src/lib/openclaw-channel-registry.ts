@@ -107,7 +107,7 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
     helpUrl: 'https://my.feishu.cn/wiki/TsLTwplveiqbW8kH5XOclgvYn1d',
     helpText: '在企业微信管理后台创建 AI 机器人',
     fields: [
-      { key: 'botId', label: 'Bot ID', placeholder: '机器人 ID', required: true },
+      { key: 'botId', label: '机器人 ID', placeholder: '机器人 ID', required: true },
       { key: 'secret', label: 'Secret', placeholder: '机器人密钥', type: 'password' as const, required: true },
     ],
     plugin: {
@@ -561,5 +561,5 @@ export function buildCliChannelAddToken(
     return `${values.appId}:${values.appSecret}`
   }
 
-  throw new Error(`Channel ${channelId} does not support CLI channels add`)
+  throw new Error(`Channel ${channelId} does not support command-line channel add`)
 }

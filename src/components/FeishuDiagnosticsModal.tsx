@@ -144,7 +144,7 @@ export default function FeishuDiagnosticsModal({
         detected: false,
         accountId,
         activityKind: 'none',
-        summary: '监听当前 Bot 活动失败，请稍后重试。',
+        summary: '监听当前机器人活动失败，请稍后重试。',
         startedAt,
         endedAt: new Date().toISOString(),
         timeoutMs: 60_000,
@@ -209,7 +209,7 @@ export default function FeishuDiagnosticsModal({
     >
       <Stack gap="md">
         <Alert color="blue" variant="light" title="当前检查目标">
-          <Text size="sm">Bot：{botLabel}</Text>
+          <Text size="sm">机器人：{botLabel}</Text>
           <Text size="sm">accountId：{accountId}</Text>
           {agentId && <Text size="sm">Agent：{agentId}</Text>}
         </Alert>
@@ -219,7 +219,7 @@ export default function FeishuDiagnosticsModal({
             <div>
               <Text fw={600}>监听下一条消息</Text>
               <Text size="sm" c="dimmed">
-                点击开始后，请立刻在飞书里给这个 Bot 发送一条消息。Qclaw 会在当前机器监听该 Bot 的本地活动，
+                点击开始后，请立刻在飞书里给这个机器人发送一条消息。Qclaw 会在当前机器监听该机器人的本地活动，
                 用来判断消息是否真的落到了这台机器上。
               </Text>
             </div>
@@ -234,7 +234,7 @@ export default function FeishuDiagnosticsModal({
             {listening && (
               <Group gap="xs">
                 <Loader size="sm" />
-                <Text size="sm" c="dimmed">正在监听当前机器上的 Bot 本地活动，请在飞书中立即发送一条消息…</Text>
+                <Text size="sm" c="dimmed">正在监听当前机器上的机器人本地活动，请在飞书中立即发送一条消息…</Text>
               </Group>
             )}
 
@@ -262,7 +262,7 @@ export default function FeishuDiagnosticsModal({
             <div>
               <Text fw={600}>发送定位消息</Text>
               <Text size="sm" c="dimmed">
-                从当前这台机器的这个 Bot，主动给一个已配对用户发送定位消息，用来确认“到底是哪一台机器、哪一个 Bot 在发消息”。
+                从当前这台机器的这个机器人，主动给一个已配对用户发送定位消息，用来确认“到底是哪一台机器、哪一个机器人在发消息”。
               </Text>
             </div>
 
@@ -290,7 +290,7 @@ export default function FeishuDiagnosticsModal({
                 />
                 <Group justify="space-between" align="center">
                   <Text size="xs" c="dimmed">
-                    定位消息会带上 Bot、accountId、agentId、机器名和 traceId。
+                    定位消息会带上机器人名称、accountId、agentId、机器名和 traceId。
                   </Text>
                   <Button onClick={() => void handleSend()} loading={sending} disabled={!selectedOpenId || listening}>
                     发送定位消息
@@ -299,7 +299,7 @@ export default function FeishuDiagnosticsModal({
               </>
             ) : (
               <Alert color="yellow" variant="light" title="还没有可发送对象">
-                <Text size="sm">当前 Bot 还没有已配对用户，暂时无法发送定位消息。</Text>
+                <Text size="sm">当前机器人还没有已配对用户，暂时无法发送定位消息。</Text>
               </Alert>
             )}
 

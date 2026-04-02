@@ -685,7 +685,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.summary).toBe('修复坏插件环境失败，请重试。')
+    expect(result.summary).toBe('修复损坏插件环境失败，请重试。')
     expect(result.stderr).toContain('write config failed')
   })
 

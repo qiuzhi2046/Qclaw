@@ -41,7 +41,7 @@ export function getConfigModalTitle(configStep: ChannelsConfigStep, target: Chan
 
   const channelName = getChannelDefinition(target.channelId)?.name || target.channelId
   if (target.channelId === 'feishu' && target.accountName) {
-    return `${channelName} Bot「${target.accountName}」接入成功`
+    return `${channelName}机器人「${target.accountName}」接入成功`
   }
   return `${channelName} 接入成功`
 }
@@ -55,8 +55,8 @@ export function getPairingIntroCopy(target: ChannelPairingTarget | null): {
 
   if (target?.channelId === 'feishu' && accountName) {
     return {
-      title: `${channelName} Bot「${accountName}」已接入`,
-      message: `已完成${channelName} Bot「${accountName}」的接入配置。接下来请在对应的飞书机器人里发送一条消息，获取配对码后粘贴到下方，完成这个 Bot 的用户配对。`,
+      title: `${channelName}机器人「${accountName}」已接入`,
+      message: `已完成${channelName}机器人「${accountName}」的接入配置。接下来请在对应的飞书机器人里发送一条消息，获取配对码后粘贴到下方，完成这个机器人的用户配对。`,
     }
   }
 

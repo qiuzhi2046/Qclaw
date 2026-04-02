@@ -53,6 +53,7 @@ describe('openclaw cleanup planner', () => {
     expect(preview.blockedReasons).toEqual([])
     expect(preview.warnings.some((warning) => warning.includes('custom'))).toBe(true)
     expect(preview.backupItems[0]).toContain('完整状态备份')
+    expect(preview.deleteItems.some((item) => item.includes('网关服务'))).toBe(true)
   })
 
   it('keeps openclaw intact when preparing qclaw uninstall only', async () => {

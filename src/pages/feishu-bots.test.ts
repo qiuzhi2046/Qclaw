@@ -38,6 +38,31 @@ describe('listFeishuBots', () => {
     expect(bots[1].accountId).toBe('sales')
     expect(bots[1].agentId).toBe('feishu-sales')
   })
+
+  it('normalizes legacy default bot labels from existing config', () => {
+    const config = {
+      channels: {
+        feishu: {
+          enabled: true,
+          appId: 'cli_default',
+          appSecret: 'secret-default',
+          name: '默认 Bot',
+          accounts: {
+            sales: {
+              enabled: true,
+              name: 'Bot sales',
+              appId: 'cli_sales',
+              appSecret: 'secret-sales',
+            },
+          },
+        },
+      },
+    }
+
+    const bots = listFeishuBots(config)
+    expect(bots[0].name).toBe('默认机器人')
+    expect(bots[1].name).toBe('机器人 sales')
+  })
 })
 
 describe('listResidualLegacyFeishuAgentIds', () => {

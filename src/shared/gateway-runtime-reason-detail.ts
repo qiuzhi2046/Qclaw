@@ -27,12 +27,12 @@ export function describeGatewayRuntimeReasonDetail(
 
   switch (detail.code) {
     case 'device_token_mismatch':
-      return '控制界面与本地 Gateway 的 device token 不一致'
+      return '控制界面与本地网关的 device token 不一致'
     case 'gateway_auth_token_mismatch':
     case 'token_mismatch':
-      return '控制界面与 Gateway 的 auth token 不一致'
+      return '控制界面与网关的 auth token 不一致'
     case 'control_ui_connection_timeout':
-      return '控制界面连接 Gateway 超时'
+      return '控制界面连接网关超时'
     default:
       if (detail.rawMessage && detail.rawMessage !== detail.code) {
         return `OpenClaw Control UI 返回：${detail.rawMessage}`

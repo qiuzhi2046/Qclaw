@@ -43,8 +43,8 @@ describe('dashboard-entry-bootstrap', () => {
       pairing: 'pending',
     })
 
-    expect(copy.title).toBe('读取 Gateway 状态')
-    expect(copy.detail).toContain('运行快照')
+    expect(copy.title).toBe('读取网关状态')
+    expect(copy.detail).toContain('当前网关状态')
   })
 
   it('returns a completion message after all tasks finish or degrade softly', () => {

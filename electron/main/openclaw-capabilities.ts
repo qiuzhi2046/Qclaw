@@ -173,17 +173,17 @@ function hasRequiredFlags(commandFlags: Record<string, string[]>, commandKey: st
 function buildRecoveredMethodLabel(providerId: string, authChoice: string, kind: AuthMethodType): string {
   const providerName = resolveProviderDisplayName(providerId)
   if (authChoice === 'custom-api-key') return 'Custom Provider'
-  if (authChoice === 'openai-codex') return 'OpenAI Codex OAuth'
-  if (authChoice === 'github-copilot') return 'GitHub Copilot OAuth'
+  if (authChoice === 'openai-codex') return 'OpenAI Codex 浏览器授权登录'
+  if (authChoice === 'github-copilot') return 'GitHub Copilot 浏览器授权登录'
   if (kind === 'apiKey') return `${providerName} API Key`
-  if (kind === 'oauth') return `${providerName} OAuth`
+  if (kind === 'oauth') return `${providerName} 浏览器授权登录`
   if (kind === 'token') return `${providerName} Token`
   return authChoice
 }
 
 function buildRecoveredOAuthFallbackHint(authChoice: string): string {
   return [
-    '从 onboard 帮助文本恢复了该 OAuth 入口；当前版本的官方元数据不可见时，将回退到官方 onboard 认证入口。',
+    '从 onboard 帮助文本恢复了该浏览器授权登录入口；当前版本的官方元数据不可见时，将回退到官方 onboard 认证入口。',
     `Qclaw 会直接尝试 "openclaw onboard --auth-choice ${authChoice}"，以保持该 Provider 仍可完成配置。`,
   ].join(' ')
 }
@@ -215,7 +215,7 @@ function recoverMethodDescriptorFromAuthChoice(
       providerId: 'openai',
       method: {
         authChoice: normalizedAuthChoice,
-        label: 'OpenAI Codex OAuth',
+        label: 'OpenAI Codex 浏览器授权登录',
         hint: '从 onboard 帮助文本恢复；插件细节不可见时将直接尝试官方登录入口。',
         kind: 'oauth',
         route: {
@@ -232,7 +232,7 @@ function recoverMethodDescriptorFromAuthChoice(
       providerId: 'github-copilot',
       method: {
         authChoice: normalizedAuthChoice,
-        label: 'GitHub Copilot OAuth',
+        label: 'GitHub Copilot 浏览器授权登录',
         hint: '从 onboard 帮助文本恢复；会直接尝试 GitHub Copilot 登录入口。',
         kind: 'oauth',
         route: {
