@@ -66,6 +66,6 @@ describe('dashboard chat panel guardrails', () => {
     const source = readDashboardChatPanelSource()
 
     expect(source).toContain('发送首条消息后可切换')
-    expect(source).not.toContain('发送首条���息后可切换')
+    expect(source).not.toContain('\uFFFD')
   })
 })
