@@ -354,6 +354,9 @@ describe('preload api model channels', () => {
     await api.sendFeishuInstallerInput('session-1', '\n')
     expect(invokeMock).toHaveBeenLastCalledWith('feishu:installer:input', 'session-1', '\n')
 
+    await api.answerFeishuInstallerPrompt('session-1', 'prompt-1', 'confirm')
+    expect(invokeMock).toHaveBeenLastCalledWith('feishu:installer:prompt:answer', 'session-1', 'prompt-1', 'confirm')
+
     await api.stopFeishuInstaller()
     expect(invokeMock).toHaveBeenLastCalledWith('feishu:installer:stop')
 

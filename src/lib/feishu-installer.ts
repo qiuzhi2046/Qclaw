@@ -28,22 +28,3 @@ export function extractFeishuAsciiQr(text: string): string {
 
   return qrLines.join('\n').trim()
 }
-
-export function normalizeFeishuInstallerText(text: string): string {
-  return String(text || '')
-    .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, ' ')
-    .replace(/\[[0-9;?]+[A-Za-z]/g, ' ')
-    .replace(/\s+/g, ' ')
-}
-
-export function extractFeishuExistingBotPromptKey(text: string): string {
-  const normalized = normalizeFeishuInstallerText(text)
-  const hasYesNoPrompt = /\(\s*Y\s*\/\s*n\s*\)/i.test(normalized)
-  const hasReusePrompt =
-    (/Use it for this setup\?/i.test(normalized) && hasYesNoPrompt) ||
-    (/是否使用它进行配置/i.test(normalized) && hasYesNoPrompt)
-  if (!hasReusePrompt) return ''
-
-  const appId = normalized.match(/(cli_[a-z0-9]+)/i)?.[1] || 'unknown-bot'
-  return `${appId}:reuse-prompt`
-}

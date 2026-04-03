@@ -175,6 +175,8 @@ export const api = {
     ipcRenderer.invoke('feishu:diagnostics:send', request),
   sendFeishuInstallerInput: (sessionId: string, input: string) =>
     ipcRenderer.invoke('feishu:installer:input', sessionId, input),
+  answerFeishuInstallerPrompt: (sessionId: string, promptId: string, resolution: 'confirm' | 'cancel') =>
+    ipcRenderer.invoke('feishu:installer:prompt:answer', sessionId, promptId, resolution),
   stopFeishuInstaller: () => ipcRenderer.invoke('feishu:installer:stop'),
   onFeishuInstallerEvent: (listener: (payload: Record<string, any>) => void) =>
     subscribeToChannel('feishu:installer:event', listener),
