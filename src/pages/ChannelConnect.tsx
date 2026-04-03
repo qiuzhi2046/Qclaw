@@ -40,6 +40,7 @@ import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '
 import type { ManagedChannelPluginStatusView } from '../shared/managed-channel-plugin-lifecycle'
 import { pollWithBackoff } from '../shared/polling'
 import { UI_RUNTIME_DEFAULTS } from '../shared/runtime-policies'
+import type { OpenClawGuardedWriteReason } from '../shared/openclaw-phase2'
 
 type Status = 'form' | 'installing' | 'starting' | 'connected' | 'error'
 
@@ -253,7 +254,7 @@ function extractAsciiQrBlock(text: string): string {
 
 async function writeConfigDirect(
   config: Record<string, unknown>,
-  reason: 'channel-connect-sanitize' | 'channel-connect-onboard-prepare' | 'channel-connect-configure' = 'channel-connect-configure'
+  reason: OpenClawGuardedWriteReason = 'channel-connect-configure'
 ) {
   const result = await window.api.writeConfigGuarded({ config, reason })
   if (!result.ok) {
@@ -264,7 +265,7 @@ async function writeConfigDirect(
 async function writeConfigPatch(
   beforeConfig: Record<string, any> | null | undefined,
   afterConfig: Record<string, any>,
-  reason: 'channel-connect-sanitize' | 'channel-connect-onboard-prepare' | 'channel-connect-configure' = 'channel-connect-configure'
+  reason: OpenClawGuardedWriteReason = 'channel-connect-configure'
 ) {
   const result = await window.api.applyConfigPatchGuarded({
     beforeConfig: beforeConfig || {},
@@ -373,10 +374,31 @@ function normalizeFeishuConfigText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function isFeishuSecretRefLike(value: unknown): value is { source: string; provider: string; id: string } {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (
+      (value as Record<string, unknown>).source === 'env'
+      || (value as Record<string, unknown>).source === 'file'
+    )
+    && typeof (value as Record<string, unknown>).provider === 'string'
+    && typeof (value as Record<string, unknown>).id === 'string'
+}
+
+function hasFeishuSecretInput(value: unknown): boolean {
+  return normalizeFeishuConfigText(value).length > 0 || isFeishuSecretRefLike(value)
+}
+
+function cloneFeishuSecretInput<T>(value: T): T {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  return cloneJsonValue(value)
+}
+
 function readFeishuBotCredentials(
   config: Record<string, any> | null,
   accountId: string
-): { name: string; appId: string; appSecret: string } | null {
+): { name: string; appId: string; appSecret: unknown } | null {
   const feishu = config?.channels?.feishu
   if (!feishu || typeof feishu !== 'object' || Array.isArray(feishu)) {
     return null
@@ -384,8 +406,8 @@ function readFeishuBotCredentials(
 
   if (accountId === 'default') {
     const appId = normalizeFeishuConfigText(feishu.appId)
-    const appSecret = normalizeFeishuConfigText(feishu.appSecret)
-    if (!appId || !appSecret) return null
+    const appSecret = cloneFeishuSecretInput(feishu.appSecret)
+    if (!appId || !hasFeishuSecretInput(appSecret)) return null
     return {
       name: normalizeFeishuConfigText(feishu.name),
       appId,
@@ -399,8 +421,8 @@ function readFeishuBotCredentials(
   }
 
   const appId = normalizeFeishuConfigText(account.appId)
-  const appSecret = normalizeFeishuConfigText(account.appSecret)
-  if (!appId || !appSecret) return null
+  const appSecret = cloneFeishuSecretInput(account.appSecret)
+  if (!appId || !hasFeishuSecretInput(appSecret)) return null
 
   return {
     name: normalizeFeishuConfigText(account.name),
@@ -482,10 +504,48 @@ export function mergeFeishuCreateModeBots(params: {
 }
 
 export function canFinishFeishuCreateMode(
-  hasExistingBotConfig: boolean,
-  manualCredentialsReady: boolean
+  hasRecoveredBotConfig: boolean,
+  installerExitedSuccessfully: boolean
 ): boolean {
-  return hasExistingBotConfig || manualCredentialsReady
+  return hasRecoveredBotConfig && installerExitedSuccessfully
+}
+
+function didFeishuInstallerExitSuccessfully(params: {
+  installerRunning: boolean
+  installerExitCode: number | null
+  installerCanceled: boolean
+}): boolean {
+  return !params.installerRunning && !params.installerCanceled && params.installerExitCode === 0
+}
+
+function hasRecoveredFeishuCreateModeFromBots(params: {
+  previousFeishuConfigSnapshot?: Record<string, any> | null
+  nextBots: Array<{ appId: string }>
+}): boolean {
+  const nextAppIds = params.nextBots
+    .map((bot) => normalizeFeishuConfigText(bot.appId).toLowerCase())
+    .filter(Boolean)
+
+  if (nextAppIds.length === 0) return false
+
+  const previousBots = listFeishuBots(wrapFeishuConfigSnapshot(params.previousFeishuConfigSnapshot))
+  if (previousBots.length === 0) return true
+
+  const previousAppIds = new Set(previousBots.map((bot) => bot.appId.trim().toLowerCase()))
+  return nextAppIds.some((appId) => !previousAppIds.has(appId))
+}
+
+export function resolveFeishuCreateModeRecoveryNotice(
+  hasRecoveredBotConfig: boolean,
+  installerRunning: boolean,
+  installerExitedSuccessfully: boolean
+): string {
+  if (!hasRecoveredBotConfig) return ''
+  return installerRunning
+    ? '已检测到飞书机器人配置，正在等待飞书安装器完成收尾；安装器退出后才能点击“完成配置”。'
+    : installerExitedSuccessfully
+      ? '已检测到飞书机器人配置，飞书安装器已完成；现在可以点击“完成配置”。'
+      : '已检测到飞书机器人配置，但飞书安装器未正常完成；请先检查安装日志并重新运行新建流程。'
 }
 
 export function hasFeishuManualCredentialInput(formData: Record<string, string>): boolean {
@@ -547,14 +607,10 @@ export function hasRecoveredFeishuCreateMode(params: {
   previousFeishuConfigSnapshot?: Record<string, any> | null
   nextConfig: Record<string, any> | null
 }): boolean {
-  const nextBots = listFeishuBots(params.nextConfig)
-  if (nextBots.length === 0) return false
-
-  const previousBots = listFeishuBots(wrapFeishuConfigSnapshot(params.previousFeishuConfigSnapshot))
-  if (previousBots.length === 0) return true
-
-  const previousAppIds = new Set(previousBots.map((bot) => bot.appId.trim().toLowerCase()))
-  return nextBots.some((bot) => !previousAppIds.has(bot.appId.trim().toLowerCase()))
+  return hasRecoveredFeishuCreateModeFromBots({
+    previousFeishuConfigSnapshot: params.previousFeishuConfigSnapshot,
+    nextBots: listFeishuBots(params.nextConfig),
+  })
 }
 
 export function resolveFeishuAutoRecoveryTarget(params: {
@@ -898,10 +954,40 @@ export default function ChannelConnect({
     Boolean(feishuHasManualCredentialInput),
     Boolean(feishuManualCredentialsReady)
   )
+  const feishuCreateModeInstallerObserved =
+    selectedChannel?.id === 'feishu'
+    && feishuBotSetupMode === 'create'
+    && (
+      feishuInstallerRunning
+      || Boolean(feishuInstallerSessionId)
+      || feishuInstallerOutput.trim().length > 0
+      || feishuInstallerExitCode !== null
+      || feishuInstallerCanceled
+    )
+  const feishuCreateModeRecovered =
+    feishuCreateModeInstallerObserved
+    && feishuBotSetupMode === 'create'
+    && hasRecoveredFeishuCreateModeFromBots({
+      previousFeishuConfigSnapshot: feishuCreateStartConfigSnapshotRef.current,
+      nextBots: feishuBotsOrdered,
+    })
+  const feishuCreateModeInstallerExitedSuccessfully = didFeishuInstallerExitSuccessfully({
+    installerRunning: feishuInstallerRunning,
+    installerExitCode: feishuInstallerExitCode,
+    installerCanceled: feishuInstallerCanceled,
+  })
   const feishuCreateModeCanFinish = canFinishFeishuCreateMode(
-    feishuBotsOrdered.length > 0,
-    Boolean(feishuManualCredentialsReady)
+    feishuCreateModeRecovered,
+    feishuCreateModeInstallerExitedSuccessfully
   )
+  const feishuCreateModeRecoveryNotice =
+    selectedChannel?.id === 'feishu' && feishuBotSetupMode === 'create'
+      ? resolveFeishuCreateModeRecoveryNotice(
+          feishuCreateModeRecovered,
+          feishuInstallerRunning,
+          feishuCreateModeInstallerExitedSuccessfully
+        )
+      : ''
   const showInlineFeishuManualError =
     status === 'form' &&
     selectedChannel?.id === 'feishu' &&
@@ -941,7 +1027,7 @@ export default function ChannelConnect({
     let pluginState = await window.api.getFeishuOfficialPluginState()
     if (options?.syncConfig && pluginState.configChanged) {
       try {
-        await writeConfigDirect(pluginState.normalizedConfig)
+        await writeConfigDirect(pluginState.normalizedConfig, 'channel-connect-feishu-sync-config')
         pluginState = await window.api.getFeishuOfficialPluginState()
       } catch {
         // Keep using the normalized in-memory state even if self-healing writes fail.
@@ -968,6 +1054,13 @@ export default function ChannelConnect({
   const refreshFeishuBotsFromConfig = useCallback(async () => {
     return loadFeishuSetupState({ syncConfig: true })
   }, [loadFeishuSetupState])
+
+  useEffect(() => {
+    if (!feishuCreateModeRecoveryNotice) return
+    setFeishuInstallerNotice((current) =>
+      current === feishuCreateModeRecoveryNotice ? current : feishuCreateModeRecoveryNotice
+    )
+  }, [feishuCreateModeRecoveryNotice])
 
   const refreshFeishuSetupState = useCallback(
     async (options?: {
@@ -1011,9 +1104,14 @@ export default function ChannelConnect({
 
         if (options?.userInitiated) {
           if (recoveryTarget === 'recover-create') {
-            void stopBackgroundFeishuInstaller()
             setFeishuInstallerNotice(
-              '已刷新到最新配置，检测到飞书机器人信息，Qclaw 会停止后台安装器；现在可以直接点击“完成配置”。'
+              resolveFeishuCreateModeRecoveryNotice(
+                true,
+                Boolean(installerSnapshot?.active),
+                !installerSnapshot?.active
+                  && !Boolean(installerSnapshot?.canceled)
+                  && installerSnapshot?.code === 0
+              )
             )
           } else if (setupState.pluginState.installedOnDisk) {
             setFeishuInstallerNotice(
@@ -1073,7 +1171,10 @@ export default function ChannelConnect({
 
           if (recoveryTarget === 'heal-config') {
             try {
-              await writeConfigDirect(setupState.pluginState.normalizedConfig)
+              await writeConfigDirect(
+                setupState.pluginState.normalizedConfig,
+                'channel-connect-feishu-auto-recovery-heal'
+              )
               if (disposed) {
                 return {
                   setupState,
@@ -1117,9 +1218,8 @@ export default function ChannelConnect({
       }
 
       if (result.value.recoveryTarget === 'recover-create') {
-        void stopBackgroundFeishuInstaller()
         setFeishuInstallerNotice(
-          '已自动检测到飞书机器人配置，Qclaw 会停止后台安装器；现在可以直接点击“完成配置”。'
+          resolveFeishuCreateModeRecoveryNotice(true, true, false)
         )
       }
     }
@@ -1489,7 +1589,10 @@ export default function ChannelConnect({
         let readyState = initialState
         if (initialState.configChanged) {
           setFeishuManualBindingPreparePhase('syncing')
-          await writeConfigDirect(initialState.normalizedConfig)
+          await writeConfigDirect(
+            initialState.normalizedConfig,
+            'channel-connect-feishu-manual-binding-sync'
+          )
           if (feishuManualBindingRequestVersionRef.current !== requestVersion) return
           readyState = await window.api.getFeishuOfficialPluginState()
           if (feishuManualBindingRequestVersionRef.current !== requestVersion) return
@@ -1550,7 +1653,13 @@ export default function ChannelConnect({
     setError('')
 
     try {
-      await stopBackgroundFeishuInstaller()
+      if (feishuBotSetupMode === 'link') {
+        await stopBackgroundFeishuInstaller()
+      } else if (feishuInstallerRunning) {
+        throw new Error('飞书安装器仍在运行，请等待安装器退出后再继续完成配置。')
+      } else if (!feishuCreateModeCanFinish) {
+        throw new Error('飞书安装器尚未正常完成，请检查安装日志并重新运行新建流程。')
+      }
 
       const existingConfig = await window.api.readConfig()
       const sanitizedConfig = stripLegacyOpenClawRootKeys(existingConfig)
@@ -1634,7 +1743,12 @@ export default function ChannelConnect({
 
       nextConfig = reconcileFeishuOfficialPluginConfig(nextConfig)
 
-      await writeConfigDirect(nextConfig)
+      await writeConfigDirect(
+        nextConfig,
+        feishuBotSetupMode === 'create'
+          ? 'channel-connect-feishu-finish-create'
+          : 'channel-connect-feishu-finish-link'
+      )
       await refreshFeishuBotsFromConfig()
 
       if (!pairingTarget && feishuBotSetupMode === 'create') {

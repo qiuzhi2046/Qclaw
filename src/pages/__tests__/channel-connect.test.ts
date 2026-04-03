@@ -13,6 +13,7 @@ import {
   hasFeishuManualCredentialInput,
   isFeishuManualBindingReady,
   mergeFeishuCreateModeBots,
+  resolveFeishuCreateModeRecoveryNotice,
   resolveChannelConnectBindingStrategy,
   resolveFeishuAutoRecoveryTarget,
   resolveFeishuManualBindingPreparationCopy,
@@ -25,7 +26,6 @@ import {
   shouldValidateFeishuManualCredentials,
 } from '../ChannelConnect'
 import { getChannelDefinition } from '../../lib/openclaw-channel-registry'
-
 describe('shouldShowChannelConnectSkipButton', () => {
   it('stays hidden by default when the channel has not earned skip availability yet', () => {
     expect(
@@ -810,10 +810,26 @@ describe('Feishu config preservation during onboard', () => {
 })
 
 describe('canFinishFeishuCreateMode', () => {
-  it('allows finish when either installer-created bot config exists or manual credentials are ready', () => {
+  it('requires both recovered bot config and a clean installer exit before finishing create mode', () => {
     expect(canFinishFeishuCreateMode(false, false)).toBe(false)
-    expect(canFinishFeishuCreateMode(true, false)).toBe(true)
-    expect(canFinishFeishuCreateMode(false, true)).toBe(true)
+    expect(canFinishFeishuCreateMode(true, false)).toBe(false)
+    expect(canFinishFeishuCreateMode(true, true)).toBe(true)
+  })
+})
+
+describe('resolveFeishuCreateModeRecoveryNotice', () => {
+  it('asks the user to wait while the installer is still finishing its own cleanup', () => {
+    expect(resolveFeishuCreateModeRecoveryNotice(false, true, false)).toBe('')
+    expect(resolveFeishuCreateModeRecoveryNotice(true, true, false)).toContain('等待飞书安装器完成收尾')
+    expect(resolveFeishuCreateModeRecoveryNotice(true, true, false)).toContain('安装器退出后')
+  })
+
+  it('unlocks completion messaging only after the installer exited successfully', () => {
+    expect(resolveFeishuCreateModeRecoveryNotice(true, false, true)).toContain('现在可以点击“完成配置”')
+  })
+
+  it('keeps completion locked when the installer exited abnormally', () => {
+    expect(resolveFeishuCreateModeRecoveryNotice(true, false, false)).toContain('安装器未正常完成')
   })
 })
 
@@ -1148,5 +1164,40 @@ describe('mergeFeishuCreateModeBots', () => {
 
     expect(result.addedBots).toEqual([])
     expect(result.nextConfig).toEqual(currentConfig)
+  })
+
+  it('preserves SecretRef-style secrets when merging a newly created bot into accounts', () => {
+    const currentConfig = {
+      channels: {
+        feishu: {
+          name: '新建 Bot',
+          appId: 'cli_created',
+          appSecret: {
+            source: 'file',
+            provider: 'lark-secrets',
+            id: '/lark/appSecret',
+          },
+        },
+      },
+    }
+    const result = mergeFeishuCreateModeBots({
+      previousFeishuConfigSnapshot: {
+        name: '原默认 Bot',
+        appId: 'cli_existing',
+        appSecret: 'secret-existing',
+      },
+      currentConfig,
+    })
+
+    expect(result.addedBots).toHaveLength(1)
+    expect(result.nextConfig.channels.feishu.appId).toBe('cli_existing')
+    expect(result.nextConfig.channels.feishu.accounts[result.addedBots[0].accountId]).toMatchObject({
+      appId: 'cli_created',
+      appSecret: {
+        source: 'file',
+        provider: 'lark-secrets',
+        id: '/lark/appSecret',
+      },
+    })
   })
 })

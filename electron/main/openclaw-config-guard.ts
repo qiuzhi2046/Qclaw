@@ -36,6 +36,86 @@ const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { access, cp, mkdir } = fs.promises
 
+function normalizeDiagnosticText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function summarizeFeishuConfig(config: Record<string, any> | null | undefined) {
+  const feishu = isRecord(config?.channels) && isRecord(config?.channels?.feishu)
+    ? (config?.channels?.feishu as Record<string, any>)
+    : null
+  const accounts = isRecord(feishu?.accounts) ? (feishu?.accounts as Record<string, any>) : {}
+  const accountAppIds = Object.entries(accounts)
+    .map(([accountId, account]) => ({
+      accountId: normalizeDiagnosticText(accountId),
+      appId: normalizeDiagnosticText(account?.appId),
+    }))
+    .filter((entry) => entry.accountId && entry.appId)
+    .sort((left, right) => left.accountId.localeCompare(right.accountId, 'en'))
+
+  return {
+    defaultAppId: normalizeDiagnosticText(feishu?.appId),
+    accountAppIds,
+    botCount: (normalizeDiagnosticText(feishu?.appId) ? 1 : 0) + accountAppIds.length,
+    dmPolicy: normalizeDiagnosticText(feishu?.dmPolicy),
+    groupPolicy: normalizeDiagnosticText(feishu?.groupPolicy),
+    allowFromCount: Array.isArray(feishu?.allowFrom) ? feishu.allowFrom.length : 0,
+  }
+}
+
+function shouldLogFeishuConfigWrite(params: {
+  reason: string
+  changedJsonPaths: string[]
+  beforeConfig: Record<string, any>
+  afterConfig: Record<string, any>
+}): boolean {
+  if (params.reason.includes('feishu')) return true
+  if (params.reason.includes('channel-connect')) return true
+
+  const beforeSummary = summarizeFeishuConfig(params.beforeConfig)
+  const afterSummary = summarizeFeishuConfig(params.afterConfig)
+  if (beforeSummary.botCount > 0 || afterSummary.botCount > 0) {
+    return true
+  }
+
+  return params.changedJsonPaths.some((jsonPath) =>
+    jsonPath.startsWith('$.channels.feishu')
+    || jsonPath.startsWith('$.agents')
+    || jsonPath.startsWith('$.bindings')
+    || jsonPath.startsWith('$.session')
+  )
+}
+
+async function appendFeishuConfigWriteDiag(
+  candidate: OpenClawInstallCandidate,
+  event: string,
+  fields: Record<string, unknown>
+): Promise<void> {
+  try {
+    if (String(process.env.QCLAW_FEISHU_DIAG || '').trim() !== '1') return
+    const stateRoot = normalizeDiagnosticText(candidate.stateRoot)
+    if (!stateRoot) return
+    const logPath = path.join(stateRoot, 'logs', 'qclaw-feishu-installer-diag.jsonl')
+    await mkdir(path.dirname(logPath), { recursive: true })
+    const payload = {
+      ts: new Date().toISOString(),
+      pid: process.pid,
+      source: 'qclaw-config',
+      event: normalizeDiagnosticText(event) || 'unknown',
+      installFingerprint: normalizeDiagnosticText(candidate.installFingerprint),
+      configPath: normalizeDiagnosticText(candidate.configPath),
+      ...fields,
+    }
+    await fs.promises.appendFile(logPath, `${JSON.stringify(payload)}\n`, 'utf8')
+  } catch {
+    // Best effort only; diagnostics must never break config writes.
+  }
+}
+
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath)
@@ -258,6 +338,7 @@ export async function guardedWriteConfig(
   try {
     const currentConfig = await readConfig()
     const changedJsonPaths = collectChangedJsonPaths(currentConfig, request.config)
+    const reason = normalizeDiagnosticText(request.reason) || 'unknown'
 
     if (changedJsonPaths.length === 0) {
       const ownershipEntry = await getOwnershipEntry(preparation.candidate.installFingerprint)
@@ -274,11 +355,45 @@ export async function guardedWriteConfig(
       }
     }
 
+    const beforeFeishuSummary = summarizeFeishuConfig(currentConfig)
+    const afterFeishuSummary = summarizeFeishuConfig(request.config)
+    if (
+      shouldLogFeishuConfigWrite({
+        reason,
+        changedJsonPaths,
+        beforeConfig: currentConfig || {},
+        afterConfig: request.config,
+      })
+    ) {
+      await appendFeishuConfigWriteDiag(preparation.candidate, 'config-guard-write-start', {
+        reason,
+        changedJsonPaths,
+        beforeFeishu: beforeFeishuSummary,
+        afterFeishu: afterFeishuSummary,
+      })
+    }
+
     await writeConfig(request.config)
     const ownershipEntry = await recordManagedConfigWrite(preparation.candidate, {
       filePath: preparation.candidate.configPath,
       jsonPaths: changedJsonPaths,
     })
+
+    if (
+      shouldLogFeishuConfigWrite({
+        reason,
+        changedJsonPaths,
+        beforeConfig: currentConfig || {},
+        afterConfig: request.config,
+      })
+    ) {
+      await appendFeishuConfigWriteDiag(preparation.candidate, 'config-guard-write-complete', {
+        reason,
+        changedJsonPaths,
+        beforeFeishu: beforeFeishuSummary,
+        afterFeishu: afterFeishuSummary,
+      })
+    }
 
     return {
       ok: true,
@@ -292,6 +407,12 @@ export async function guardedWriteConfig(
       message: '共享配置已通过 DataGuard 写入。',
     }
   } catch (error) {
+    if (preparation.candidate) {
+      await appendFeishuConfigWriteDiag(preparation.candidate, 'config-guard-write-failed', {
+        reason: normalizeDiagnosticText(request.reason) || 'unknown',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
     return {
       ok: false,
       blocked: false,
