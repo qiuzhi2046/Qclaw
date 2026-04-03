@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { waitForDashboardGatewayRunning } from '../Dashboard'
 
 const FAST_POLL_POLICY = {
-  timeoutMs: 10,
+  timeoutMs: 50,
   initialIntervalMs: 1,
   maxIntervalMs: 1,
   backoffFactor: 1,
@@ -45,5 +45,25 @@ describe('waitForDashboardGatewayRunning', () => {
       ok: false,
       message: 'Gateway 仍在恢复中',
     })
+  })
+
+  it('returns success immediately when gateway is already running', async () => {
+    const gatewayHealth = vi
+      .fn()
+      .mockResolvedValueOnce({ running: true, summary: 'Gateway 已确认可用' })
+
+    const result = await waitForDashboardGatewayRunning(
+      { gatewayHealth },
+      { policy: FAST_POLL_POLICY }
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      health: {
+        running: true,
+        summary: 'Gateway 已确认可用',
+      },
+    })
+    expect(gatewayHealth).toHaveBeenCalledTimes(1)
   })
 })

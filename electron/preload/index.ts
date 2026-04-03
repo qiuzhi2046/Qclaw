@@ -290,6 +290,13 @@ export const api = {
   onDepsInstallLog: (listener: (msg: string) => void) => subscribeToChannel('deps:install:log', listener),
   depsCheckBrew: () => ipcRenderer.invoke('deps:checkBrew'),
   depsInstallBrew: () => ipcRenderer.invoke('deps:installBrew'),
+
+  // Translation
+  translateText: (text: string, source?: string, target?: string) =>
+    ipcRenderer.invoke('translate:text', text, source, target),
+  needsTranslation: (text: string) => ipcRenderer.invoke('translate:needs', text),
+  containsChinese: (text: string) => ipcRenderer.invoke('translate:contains-chinese', text),
+  clearTranslationCache: () => ipcRenderer.invoke('translate:clear-cache'),
 }
 
 contextBridge.exposeInMainWorld('api', api)

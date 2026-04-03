@@ -1970,6 +1970,16 @@ interface ElectronApi {
   onDepsInstallLog: (listener: (msg: string) => void) => () => void
   depsCheckBrew: () => Promise<{ installed: boolean }>
   depsInstallBrew: () => Promise<CliResult>
+
+  // Translation
+  translateText: (text: string, source?: string, target?: string) => Promise<{
+    ok: boolean
+    translatedText: string
+    error?: string
+  }>
+  needsTranslation: (text: string) => Promise<boolean>
+  containsChinese: (text: string) => Promise<boolean>
+  clearTranslationCache: () => Promise<{ ok: boolean }>
 }
 
 declare global {

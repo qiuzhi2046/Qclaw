@@ -208,6 +208,7 @@ import {
 } from './skills-uninstall-safety'
 import { removeManagedSkillLocally, removeSkillDirectoryLocally } from './skills-managed-uninstall'
 import { withExclusiveSkillMutation } from './skill-mutation-guard'
+import { translateText, needsTranslation, containsChinese, clearTranslationCache } from './translation-service'
 
 const { randomUUID } = process.getBuiltinModule('node:crypto') as typeof import('node:crypto')
 const { appendFile, readFile, rm } = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
@@ -1165,6 +1166,24 @@ export function registerIpcHandlers() {
     if (optHomebrewResult.ok) return { installed: true }
     const usrLocalResult = await runShell('/usr/local/bin/brew', ['--version'], undefined, 'env-setup')
     return { installed: usrLocalResult.ok }
+  })
+
+  // Translation service
+  ipcMain.handle('translate:text', async (_e, text: string, source?: string, target?: string) => {
+    return translateText({ text, source, target })
+  })
+
+  ipcMain.handle('translate:needs', async (_e, text: string) => {
+    return needsTranslation(text)
+  })
+
+  ipcMain.handle('translate:contains-chinese', async (_e, text: string) => {
+    return containsChinese(text)
+  })
+
+  ipcMain.handle('translate:clear-cache', async () => {
+    clearTranslationCache()
+    return { ok: true }
   })
 
   ipcMain.handle('deps:installBrew', async () => {

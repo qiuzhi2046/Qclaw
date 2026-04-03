@@ -15,6 +15,7 @@ import { tryNormalizeProcessCwd } from './runtime-working-directory'
 import { revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
+import { initTranslationService } from './translation-service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -265,6 +266,7 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  initTranslationService()
   registerIpcHandlers()
   createWindow()
   createTray()

@@ -1,4 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslationSearch } from '@/hooks/useTranslationSearch'
+import { clearLocalTranslationCache } from '@/hooks/useTranslation'
 import {
   Badge,
   Modal,
@@ -35,6 +37,7 @@ import {
 import { createPageDataCache } from '../lib/page-data-cache'
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
 import tooltips from '@/constants/tooltips.json'
+import { TranslatedText } from '@/components/TranslatedText'
 
 interface SkillMissing {
   bins: string[]
@@ -168,6 +171,7 @@ export default function SkillsPage() {
   const [installingBrew, setInstallingBrew] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [scanDirectoriesCollapsed, setScanDirectoriesCollapsed] = useState(true)
+  const [clearingCache, setClearingCache] = useState(false)
   const skillInstallUiLocked = Boolean(installing) || cancelingInstall
 
   // Collapsed state for each source
@@ -560,35 +564,46 @@ export default function SkillsPage() {
     setShowDetailModal(true)
   }
 
-  // Filter skills
-  const filteredSkills = useMemo(() => {
+  // Filter skills with translation support for description search
+  const { filteredItems: descriptionFilteredSkills, translatedMap } = useTranslationSearch(
+    skills,
+    (s) => s.description,
+    deferredSearch
+  )
+
+  // Final filter: match name OR skillKey OR description (including translated)
+  const finalFilteredSkills = useMemo(() => {
     if (!deferredSearch.trim()) return skills
     const query = deferredSearch.toLowerCase()
-    return skills.filter(
-      (s) =>
-        s.name.toLowerCase().includes(query) ||
-        s.skillKey.toLowerCase().includes(query) ||
-        s.description.toLowerCase().includes(query)
-    )
-  }, [skills, deferredSearch])
+    return skills.filter((s) => {
+      // Match name or skillKey directly
+      if (s.name.toLowerCase().includes(query) || s.skillKey.toLowerCase().includes(query)) {
+        return true
+      }
+      // Match description (original or translated)
+      const originalDesc = s.description.toLowerCase()
+      const translatedDesc = translatedMap.get(s.description)?.toLowerCase() || originalDesc
+      return originalDesc.includes(query) || translatedDesc.includes(query)
+    })
+  }, [skills, deferredSearch, translatedMap])
 
   // Group by source
   const groupedSkills = useMemo(() => {
     const groups: Record<string, SkillInfo[]> = {}
-    filteredSkills.forEach((skill) => {
+    finalFilteredSkills.forEach((skill) => {
       if (!groups[skill.source]) groups[skill.source] = []
       groups[skill.source].push(skill)
     })
     return groups
-  }, [filteredSkills])
+  }, [finalFilteredSkills])
 
   // Statistics
   const stats = useMemo(() => {
-    const total = filteredSkills.length
-    const available = filteredSkills.filter((s) => s.eligible && !s.disabled && !hasMissing(s)).length
-    const disabled = filteredSkills.filter((s) => s.disabled || hasMissing(s)).length
+    const total = finalFilteredSkills.length
+    const available = finalFilteredSkills.filter((s) => s.eligible && !s.disabled && !hasMissing(s)).length
+    const disabled = finalFilteredSkills.filter((s) => s.disabled || hasMissing(s)).length
     return { total, available, disabled }
-  }, [filteredSkills])
+  }, [finalFilteredSkills])
 
   const toggleSource = (source: string) => {
     setCollapsedSources((prev) => ({ ...prev, [source]: !prev[source] }))
@@ -692,6 +707,30 @@ export default function SkillsPage() {
                 <Text size="xs" c="dimmed">
                   本页面安装 Skill 时会优先走官方 `openclaw skills install`，不可用时再回退到 ClawHub，并优先安装到当前 OpenClaw workspace。
                 </Text>
+                <Button
+                  variant="light"
+                  size="xs"
+                  color="red"
+                  leftSection={<IconTrash size={14} />}
+                  loading={clearingCache}
+                  onClick={async () => {
+                    setClearingCache(true)
+                    try {
+                      // Clear backend cache
+                      await window.api.clearTranslationCache()
+                      // Clear frontend local cache
+                      clearLocalTranslationCache()
+                      // Reload skills to trigger fresh translations
+                      await fetchSkills({ background: true })
+                    } catch (error) {
+                      console.error('Failed to clear translation cache:', error)
+                    } finally {
+                      setClearingCache(false)
+                    }
+                  }}
+                >
+                  清除翻译缓存
+                </Button>
               </Stack>
             </div>
           </Collapse>
@@ -775,7 +814,14 @@ export default function SkillsPage() {
                           <Text size="sm" fw={500} className="app-text-primary">{item.slug}</Text>
                           <Badge size="xs" variant="light" color="gray">{item.score.toFixed(1)}</Badge>
                         </Group>
-                        <Text size="xs" className="app-text-secondary">{item.name}</Text>
+                        <TranslatedText
+                          text={item.name}
+                          size="xs"
+                          className="app-text-secondary"
+                          enableTranslation={true}
+                          showTooltip={true}
+                          showLoading={false}
+                        />
                       </div>
                       {alreadyInstalled ? (
                         <Badge size="sm" variant="light" color="green">已安装</Badge>
@@ -861,7 +907,7 @@ export default function SkillsPage() {
       )}
 
       {/* Empty state: search no results */}
-      {skills.length > 0 && filteredSkills.length === 0 && (
+      {skills.length > 0 && finalFilteredSkills.length === 0 && (
         <div className="text-center py-12">
           <Text size="lg" mb="xs">🔍 未找到匹配 "{deferredSearch}" 的 Skills</Text>
           <Button
@@ -877,16 +923,16 @@ export default function SkillsPage() {
       )}
 
       {/* Skills list */}
-      {filteredSkills.length > 0 && (
+      {finalFilteredSkills.length > 0 && (
         <div className="space-y-3">
           {isSearching ? (
             // Flat list when searching
             <div className="border app-border rounded-lg overflow-hidden">
-              {filteredSkills.map((skill, idx) => (
+              {finalFilteredSkills.map((skill, idx) => (
                 <SkillRow
                   key={skill.name}
                   skill={skill}
-                  isLast={idx === filteredSkills.length - 1}
+                  isLast={idx === finalFilteredSkills.length - 1}
                   onRowClick={handleRowClick}
                   onToggle={handleToggle}
                   onUninstall={handleUninstall}
@@ -968,7 +1014,12 @@ export default function SkillsPage() {
               <Text size="sm" fw={500} c="dimmed" mb={4}>
                 描述
               </Text>
-              <Text size="sm">{selectedSkill.description}</Text>
+              <TranslatedText
+                text={selectedSkill.description}
+                size="sm"
+                enableTranslation={true}
+                showTooltip={true}
+              />
             </div>
 
             <Group gap="md">
@@ -1274,10 +1325,17 @@ function SkillRow({
         {[skill.emoji, skill.name].filter(Boolean).join(' ')}
       </Text>
 
-      {/* Description */}
-      <Text size="xs" c="dimmed" className="flex-1 truncate">
-        {skill.description}
-      </Text>
+      {/* Description - translated */}
+      <TranslatedText
+        text={skill.description}
+        size="xs"
+        c="dimmed"
+        className="flex-1"
+        truncate="end"
+        enableTranslation={true}
+        showTooltip={true}
+        showLoading={false}
+      />
 
       {/* Toggle switch */}
       <div onClick={(e) => e.stopPropagation()}>
