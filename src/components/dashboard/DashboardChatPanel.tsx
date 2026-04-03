@@ -40,6 +40,7 @@ import {
   formatChatTraceEntryMeta,
 } from './chat-panel-diagnostics'
 import { findEquivalentRuntimeModelKey } from '../../lib/model-runtime-resolution'
+import type { ChatComposerEnterSendMode } from '../../lib/chat-composer-enter-send-preference'
 
 const QUICK_PROMPTS = [
   '帮我确认当前模型是否可用',
@@ -88,16 +89,30 @@ function formatMessageTime(createdAt: number, fallback = ''): string {
 function buildComposerHint(params: {
   hasSession: boolean
   canPatchModel: boolean
+  enterSendMode: ChatComposerEnterSendMode
 }): string {
+  const enterHint: string = (() => {
+    switch (params.enterSendMode) {
+      case 'enter':
+        return 'Enter 发送 · Shift+Enter 换行'
+      case 'shiftEnter':
+        return 'Shift+Enter 发送 · Enter 换行'
+      case 'altEnter':
+        return 'Alt+Enter 发送 · Enter 换行'
+      default:
+        return 'Enter 发送 · Shift+Enter 换行'
+    }
+  })()
+
   if (!params.hasSession) {
-    return '发送首条消息后可切换会话模型 · Enter 发送 · Shift+Enter 换行'
+    return `发送首条消息后可切换会话模型 · ${enterHint}`
   }
 
   if (!params.canPatchModel) {
-    return '当前会话暂不支持切换模型 · Enter 发送 · Shift+Enter 换行'
+    return `当前会话暂不支持切换模型 · ${enterHint}`
   }
 
-  return '模型切换仅影响当前会话 · Enter 发送 · Shift+Enter 换行'
+  return `模型切换仅影响当前会话 · ${enterHint}`
 }
 
 function buildEmptyTranscript(sessionId: string): ChatTranscript {
@@ -226,6 +241,7 @@ export default function DashboardChatPanel({
   availabilityMessage,
   onOpenSettings,
   onEnsureGatewayRunning,
+  enterSendMode,
 }: {
   availabilityState: DashboardChatAvailabilityState
   canSend: boolean
@@ -235,6 +251,7 @@ export default function DashboardChatPanel({
   availabilityMessage?: string
   onOpenSettings: () => void
   onEnsureGatewayRunning: () => Promise<boolean>
+  enterSendMode: ChatComposerEnterSendMode
 }) {
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
@@ -408,6 +425,7 @@ export default function DashboardChatPanel({
   const composerHint = buildComposerHint({
     hasSession: Boolean(activeSession),
     canPatchModel: sessionModelSelectionEnabled,
+    enterSendMode,
   })
   const externalTranscriptMessage = resolveExternalTranscriptMessage(activeTranscript)
   const capabilityIndicators = buildChatCapabilityIndicators(capabilitySnapshot)
@@ -1614,10 +1632,15 @@ export default function DashboardChatPanel({
               value={draft}
               onChange={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  void handleSend()
-                }
+                if (event.key !== 'Enter') return
+                const shouldSend = enterSendMode === 'enter'
+                  ? !event.shiftKey && !event.altKey
+                  : enterSendMode === 'shiftEnter'
+                    ? event.shiftKey
+                    : event.altKey
+                if (!shouldSend) return
+                event.preventDefault()
+                void handleSend()
               }}
               placeholder="输入消息"
               disabled={sending || !canSend}
