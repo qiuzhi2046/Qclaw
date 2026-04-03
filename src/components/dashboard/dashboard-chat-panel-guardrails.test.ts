@@ -61,4 +61,11 @@ describe('dashboard chat panel guardrails', () => {
     expect(source).not.toContain('session.modelSwitchBlockedReason')
     expect(source).not.toContain('{composerHint}')
   })
+
+  it('keeps the session model placeholder copy readable for first-message flows', () => {
+    const source = readDashboardChatPanelSource()
+
+    expect(source).toContain('发送首条消息后可切换')
+    expect(source).not.toContain('发送首条���息后可切换')
+  })
 })

@@ -1575,7 +1575,7 @@ export default function DashboardChatPanel({
                         placeholder={
                           activeSession
                             ? sessionModelPresentation.modeLabel
-                            : '发送首条���息后可切换'
+                            : '发送首条消息后可切换'
                         }
                         onChange={(value) => void handleSessionModelChange(value)}
                         disabled={!canSend || sending || chatModelSwitching || !sessionModelSelectionEnabled}
