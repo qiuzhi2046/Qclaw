@@ -2920,14 +2920,6 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function getManagedFeishuAgentId(accountId: string): string {
-  return `feishu-${accountId === 'default' ? 'default' : sanitizeStoreKey(accountId)}`
-}
-
-function getManagedFeishuWorkspace(accountId: string): string {
-  return `~/.openclaw/workspace-feishu-${accountId === 'default' ? 'default' : sanitizeStoreKey(accountId)}`
-}
-
 export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, FeishuBotRuntimeStatus>> {
   const config = await readConfig()
   const gateway = await gatewayHealth().catch(() => ({ running: false } as GatewayHealthCheckResult))
@@ -2935,7 +2927,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
   const agents = Array.isArray(config?.agents?.list) ? config?.agents?.list : []
   const bindings = Array.isArray(config?.bindings) ? config?.bindings : []
   const pluginConfigured = Array.isArray(config?.plugins?.allow)
-    ? config?.plugins?.allow.some((item: unknown) => String(item || '').trim() === 'openclaw-lark')
+    ? config?.plugins?.allow.some((item: unknown) => String(item || '').trim() === 'feishu')
     : false
   const dmScopeCorrect = normalizeText(config?.session?.dmScope) === 'per-account-channel-peer'
 
@@ -2967,8 +2959,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
 
   const result: Record<string, FeishuBotRuntimeStatus> = {}
   for (const bot of bots) {
-    const agentId = getManagedFeishuAgentId(bot.accountId)
-    const workspace = getManagedFeishuWorkspace(bot.accountId)
+    const agentId = bot.accountId
     const issues: string[] = []
     const managedAgent = agents.find((agent: any) => normalizeText(agent?.id) === agentId)
     const matchingBindings = bindings.filter(
@@ -2984,15 +2975,13 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
       issues.push('缺少完整的 App ID / App Secret。')
     }
     if (!pluginConfigured) {
-      issues.push('openclaw-lark 插件未在配置中启用。')
+      issues.push('feishu 插件未在配置中启用。')
     }
     if (!dmScopeCorrect) {
       issues.push('session.dmScope 不是 per-account-channel-peer。')
     }
     if (!managedAgent) {
-      issues.push(`缺少托管 Agent：${agentId}。`)
-    } else if (normalizeText(managedAgent.workspace) !== workspace) {
-      issues.push(`Agent workspace 未隔离到 ${workspace}。`)
+      issues.push(`未找到绑定的 Agent：${agentId}。`)
     }
     if (!matchingBindings.some((binding: any) => normalizeText(binding?.agentId) === agentId)) {
       issues.push(`缺少 accountId=${bot.accountId} 的路由绑定。`)
@@ -3020,7 +3009,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
     result[bot.accountId] = {
       accountId: bot.accountId,
       agentId,
-      workspace,
+      workspace: managedAgent?.workspace || '',
       enabled: bot.enabled,
       credentialsComplete: bot.credentialsComplete,
       gatewayRunning: Boolean(gateway.running),

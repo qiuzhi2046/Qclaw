@@ -9,13 +9,10 @@ import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { FEISHU_PLUGIN_NPX_SPECIFIER } from './plugin-install-npx'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 
-const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
-const FEISHU_OFFICIAL_PLUGIN_ID = 'openclaw-lark'
-const FEISHU_OFFICIAL_PLUGIN_SPEC = '@larksuite/openclaw-lark'
-const FEISHU_OFFICIAL_PLUGIN_MANIFEST = 'openclaw.plugin.json'
-const LEGACY_FEISHU_PLUGIN_IDS = ['feishu', 'feishu-openclaw-plugin']
+const FEISHU_OFFICIAL_PLUGIN_ID = 'feishu'
+const LEGACY_FEISHU_PLUGIN_IDS = ['openclaw-lark', 'feishu-openclaw-plugin']
 const FEISHU_PLUGIN_REPAIR_SCOPE = [FEISHU_OFFICIAL_PLUGIN_ID, ...LEGACY_FEISHU_PLUGIN_IDS]
 
 function cloneConfig(config: Record<string, any> | null | undefined): Record<string, any> {
@@ -31,10 +28,6 @@ function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function isBuiltInFeishuPluginExplicitlyDisabled(value: unknown): boolean {
-  return hasOwnRecord(value) && value.enabled === false
-}
-
 function collectLegacyPluginIds(config: Record<string, any>): string[] {
   const found = new Set<string>()
   const allow = Array.isArray(config.plugins?.allow) ? config.plugins.allow : []
@@ -45,12 +38,6 @@ function collectLegacyPluginIds(config: Record<string, any>): string[] {
 
   const entries = hasOwnRecord(config.plugins?.entries) ? config.plugins.entries : {}
   for (const pluginId of Object.keys(entries)) {
-    if (
-      pluginId === 'feishu' &&
-      isBuiltInFeishuPluginExplicitlyDisabled(entries[pluginId])
-    ) {
-      continue
-    }
     if (LEGACY_FEISHU_PLUGIN_IDS.includes(pluginId)) found.add(pluginId)
   }
 
@@ -63,9 +50,7 @@ function collectLegacyPluginIds(config: Record<string, any>): string[] {
 }
 
 function sanitizeLegacyFeishuPluginConfig(config: Record<string, any>): { config: Record<string, any>; changed: boolean } {
-  return sanitizeManagedPluginConfig(config, {
-    preserveBuiltInFeishuDisable: true,
-  })
+  return sanitizeManagedPluginConfig(config, {})
 }
 
 function stripOfficialFeishuPluginConfig(config: Record<string, any>): { config: Record<string, any>; changed: boolean } {
@@ -106,26 +91,14 @@ function isOfficialPluginEnabled(config: Record<string, any>): boolean {
 }
 
 function ensureOfficialPluginInstallRecord(
-  config: Record<string, any>,
-  installPath: string
+  config: Record<string, any>
 ): Record<string, any> {
   const next = cloneConfig(config)
   next.plugins = hasOwnRecord(next.plugins) ? next.plugins : {}
-  next.plugins.installs = hasOwnRecord(next.plugins.installs) ? next.plugins.installs : {}
-
-  const existingInstall = hasOwnRecord(next.plugins.installs[FEISHU_OFFICIAL_PLUGIN_ID])
-    ? next.plugins.installs[FEISHU_OFFICIAL_PLUGIN_ID]
-    : {}
-
-  next.plugins.installs[FEISHU_OFFICIAL_PLUGIN_ID] = {
-    ...existingInstall,
-    source: normalizeText(existingInstall.source) || 'npm',
-    spec: normalizeText(existingInstall.spec) || FEISHU_OFFICIAL_PLUGIN_SPEC,
-    ...(installPath
-      ? {
-          installPath: normalizeText(existingInstall.installPath) || installPath,
-        }
-      : {}),
+  next.plugins.entries = hasOwnRecord(next.plugins.entries) ? next.plugins.entries : {}
+  next.plugins.entries[FEISHU_OFFICIAL_PLUGIN_ID] = {
+    ...(next.plugins.entries[FEISHU_OFFICIAL_PLUGIN_ID] || {}),
+    enabled: true,
   }
 
   return next
@@ -157,7 +130,6 @@ function shouldApplyFeishuIsolation(config: Record<string, any>): boolean {
 function buildNormalizedConfig(params: {
   config: Record<string, any>
   installedOnDisk: boolean
-  installPath: string
 }): Record<string, any> {
   const sanitized = sanitizeLegacyFeishuPluginConfig(params.config).config
   if (!params.installedOnDisk) {
@@ -167,7 +139,7 @@ function buildNormalizedConfig(params: {
       : stripped
   }
 
-  const withInstallRecord = ensureOfficialPluginInstallRecord(sanitized, params.installPath)
+  const withInstallRecord = ensureOfficialPluginInstallRecord(sanitized)
   const withAllowlist = reconcileTrustedPluginAllowlist(withInstallRecord).config
   return applyFeishuMultiBotIsolation(withAllowlist)
 }
@@ -176,18 +148,8 @@ function isStateReady(state: FeishuOfficialPluginState): boolean {
   return state.installedOnDisk && state.officialPluginConfigured
 }
 
-function resolveFeishuOfficialPluginManifestPath(homeDir: string): string {
-  return path.join(homeDir, 'extensions', FEISHU_OFFICIAL_PLUGIN_ID, FEISHU_OFFICIAL_PLUGIN_MANIFEST)
-}
-
-async function isFeishuOfficialPluginInstalledOnDisk(homeDir: string): Promise<boolean> {
-  if (!homeDir) return false
-  try {
-    await fs.promises.access(resolveFeishuOfficialPluginManifestPath(homeDir))
-    return true
-  } catch {
-    return false
-  }
+async function isFeishuOfficialPluginInstalledOnDisk(_homeDir: string): Promise<boolean> {
+  return true
 }
 
 export interface FeishuOfficialPluginState {
@@ -251,7 +213,6 @@ export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPlug
   const normalizedConfig = buildNormalizedConfig({
     config: baseConfig,
     installedOnDisk,
-    installPath,
   })
   const configChanged = JSON.stringify(normalizedConfig) !== JSON.stringify(baseConfig)
 

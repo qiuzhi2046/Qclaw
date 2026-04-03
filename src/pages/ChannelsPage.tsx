@@ -12,7 +12,6 @@ import {
   type ChannelPairingTarget,
 } from './channels-page-utils'
 import {
-  listFeishuBots,
   listResidualLegacyFeishuAgentIds,
   removeFeishuBotConfigForPluginState,
   sanitizeFeishuPluginConfig,
@@ -211,59 +210,28 @@ export default function ChannelsPage() {
 
       if (normalizedConfig.channels?.feishu) {
         const feishuPluginStatus = await loadManagedPluginStatus('feishu')
-        const feishuBots = listFeishuBots(normalizedConfig)
-        try {
-          const feishuPairingStatus = await window.api.pairingFeishuStatus(feishuBots.map((bot) => bot.accountId))
-          for (const bot of feishuBots) {
-            const pairing = feishuPairingStatus[bot.accountId]
-            const pairedCount = Number(pairing?.pairedCount || 0)
-            channelList.push({
-              id: `feishu:${bot.accountId}`,
-              channelId: 'feishu',
-              configChannelId: 'feishu',
-              name: bot.name,
-              accountName: bot.name,
-              platform: 'feishu',
-              enabled: bot.enabled,
-              credentials: {},
-              pairingRequired: true,
-              pairingState: pairedCount > 0 ? 'paired' : 'pending',
-              pairedCount,
-              pairingUsers: pairing?.pairedUsers || [],
-              pairingAccountId: bot.accountId,
-              agentId: bot.agentId,
-              isFeishuBot: true,
-              runtimeState: feishuRuntimeStatus[bot.accountId]?.runtimeState,
-              runtimeSummary: feishuRuntimeStatus[bot.accountId]?.summary,
-              runtimeIssues: feishuRuntimeStatus[bot.accountId]?.issues || [],
-              pluginStatus: feishuPluginStatus,
-            })
-          }
-        } catch {
-          for (const bot of feishuBots) {
-            channelList.push({
-              id: `feishu:${bot.accountId}`,
-              channelId: 'feishu',
-              configChannelId: 'feishu',
-              name: bot.name,
-              accountName: bot.name,
-              platform: 'feishu',
-              enabled: bot.enabled,
-              credentials: {},
-              pairingRequired: true,
-              pairingState: 'pending',
-              pairedCount: 0,
-              pairingUsers: [],
-              pairingAccountId: bot.accountId,
-              agentId: bot.agentId,
-              isFeishuBot: true,
-              runtimeState: feishuRuntimeStatus[bot.accountId]?.runtimeState,
-              runtimeSummary: feishuRuntimeStatus[bot.accountId]?.summary,
-              runtimeIssues: feishuRuntimeStatus[bot.accountId]?.issues || [],
-              pluginStatus: feishuPluginStatus,
-            })
-          }
-        }
+
+        channelList.push({
+          id: `feishu`,
+          channelId: 'feishu',
+          configChannelId: 'feishu',
+          name: '飞书 (Feishu)',
+          accountName: '飞书 (Feishu)',
+          platform: 'feishu',
+          enabled: normalizedConfig.channels.feishu.enabled !== false,
+          credentials: {},
+          pairingRequired: false,
+          pairingState: 'not_required',
+          pairedCount: 0,
+          pairingUsers: [],
+          pairingAccountId: '',
+          agentId: '',
+          isFeishuBot: true,
+          runtimeState: feishuRuntimeStatus['main']?.runtimeState || feishuRuntimeStatus['default']?.runtimeState,
+          runtimeSummary: feishuRuntimeStatus['main']?.summary || feishuRuntimeStatus['default']?.summary,
+          runtimeIssues: feishuRuntimeStatus['main']?.issues || feishuRuntimeStatus['default']?.issues || [],
+          pluginStatus: feishuPluginStatus,
+        })
       }
 
       const weixinConfig = config.channels?.['openclaw-weixin']
@@ -603,23 +571,18 @@ export default function ChannelsPage() {
         nextConfig.channels = {}
       }
 
-      if (channel.channelId === 'feishu' && channel.pairingAccountId) {
+      if (channel.isFeishuBot) {
         if (!nextConfig.channels.feishu || typeof nextConfig.channels.feishu !== 'object') {
-          throw new Error('未找到飞书渠道配置')
+          nextConfig.channels.feishu = { enabled: nextEnabled, accounts: {} }
+        } else {
+          nextConfig.channels.feishu.enabled = nextEnabled
         }
 
-        if (channel.pairingAccountId === 'default') {
-          nextConfig.channels.feishu.enabled = nextEnabled
-        } else {
-          const accounts = nextConfig.channels.feishu.accounts as Record<string, any> | undefined
-          if (!accounts || typeof accounts !== 'object' || !accounts[channel.pairingAccountId]) {
-            throw new Error(`未找到飞书 Bot 账号: ${channel.pairingAccountId}`)
-          }
-          const accountConfig = accounts[channel.pairingAccountId]
-          if (!accountConfig || typeof accountConfig !== 'object' || Array.isArray(accountConfig)) {
-            throw new Error(`飞书 Bot 账号配置异常: ${channel.pairingAccountId}`)
-          }
-          accountConfig.enabled = nextEnabled
+        if (!nextConfig.plugins) nextConfig.plugins = {}
+        if (!nextConfig.plugins.entries) nextConfig.plugins.entries = {}
+        nextConfig.plugins.entries['feishu'] = {
+          ...(nextConfig.plugins.entries['feishu'] || {}),
+          enabled: nextEnabled,
         }
       } else if (channel.channelId === 'openclaw-weixin' && channel.pairingAccountId) {
         const existingWeixinChannel = nextConfig.channels['openclaw-weixin'] as Record<string, any> | undefined
@@ -826,7 +789,9 @@ export default function ChannelsPage() {
                               插件状态：{channel.pluginStatus.summary}
                             </Text>
                             <Group gap="xs">
-                              {channel.pluginStatus.stages.map((stage) => (
+                              {channel.pluginStatus.stages
+                                .filter(stage => stage.id === 'installed' || stage.id === 'registered')
+                                .map((stage) => (
                                 <Badge
                                   key={`${channel.id}:${stage.id}`}
                                   variant="light"

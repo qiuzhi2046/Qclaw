@@ -177,16 +177,10 @@ async function getDingtalkOfficialChannelStatus(): Promise<OfficialChannelStatus
     },
     registered.evidence,
     {
-      source: 'status',
+      source: 'plugins-list',
       channelId: 'dingtalk',
       pluginId,
-      message: '当前尚无上游 loaded signal，loaded 保持 unknown / 未证实',
-    },
-    {
-      source: 'status',
-      channelId: 'dingtalk',
-      pluginId,
-      message: '当前尚无上游 channel status / probe，ready 保持 unknown / 未证实',
+      message: '当前缺少上游 loaded / ready 证明，状态保留为未知。',
     },
   ]
 
@@ -200,11 +194,9 @@ async function getDingtalkOfficialChannelStatus(): Promise<OfficialChannelStatus
     createStage(
       'registered',
       registered.state,
-      'plugins-list',
+      registered.evidence.source,
       registered.evidence.message
     ),
-    createStage('loaded', 'unknown', 'upstream-status-missing', '当前缺少上游 loaded 证明'),
-    createStage('ready', 'unknown', 'upstream-probe-missing', '当前缺少上游 ready 证明'),
   ]
 
   return {
@@ -248,16 +240,10 @@ async function getFeishuOfficialChannelStatus(): Promise<OfficialChannelStatusVi
         }]
       : []),
     {
-      source: 'status',
+      source: 'plugins-list',
       channelId: 'feishu',
       pluginId: state.pluginId,
-      message: '当前尚无统一上游 loaded signal，loaded 保持 unknown / 未证实',
-    },
-    {
-      source: 'status',
-      channelId: 'feishu',
-      pluginId: state.pluginId,
-      message: '当前尚无统一上游 channel status / probe，ready 保持 unknown / 未证实',
+      message: '当前缺少上游 loaded / ready 证明，状态保留为未知。',
     },
   ]
 
@@ -274,8 +260,6 @@ async function getFeishuOfficialChannelStatus(): Promise<OfficialChannelStatusVi
       'plugins-list',
       registered.evidence.message
     ),
-    createStage('loaded', 'unknown', 'upstream-status-missing', '当前缺少上游 loaded 证明'),
-    createStage('ready', 'unknown', 'upstream-probe-missing', '当前缺少上游 ready 证明'),
   ]
 
   return {

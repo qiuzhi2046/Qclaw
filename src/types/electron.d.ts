@@ -1973,6 +1973,9 @@ interface ElectronApi {
     apiKey?: string
   }) => Promise<{ ok: boolean; error?: string }>
   skillsUninstall: (name: string) => Promise<CliResult>
+  skillsWorkspaceList: (workspace: string) => Promise<CliResult>
+  skillsWorkspaceUninstall: (workspace: string, name: string) => Promise<CliResult>
+  workspaceDelete: (workspace: string) => Promise<CliResult>
   skillsInstall: (name: string) => Promise<CliResult>
   clawhubSearch: (query: string, limit?: number) => Promise<{ ok: boolean; skills: { slug: string; name: string; score: number }[]; error?: string }>
   clawhubInstall: (slug: string) => Promise<CliResult>

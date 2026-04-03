@@ -170,118 +170,21 @@ function buildManagedFeishuAgentConfig(
 
 export function applyFeishuMultiBotIsolation(config: Record<string, any> | null): Record<string, any> {
   const next = cloneConfig(config)
-  const bots = extractFeishuRoutingBots(next)
 
   next.session = next.session && typeof next.session === 'object' && !Array.isArray(next.session) ? next.session : {}
   next.session.dmScope = FEISHU_DM_SCOPE
-
-  next.agents = next.agents && typeof next.agents === 'object' && !Array.isArray(next.agents) ? next.agents : {}
-  const currentAgents = Array.isArray(next.agents.list) ? next.agents.list : []
-  const expectedAgents = buildExpectedFeishuAgents(bots)
-  const expectedAgentIds = new Set(expectedAgents.map((agent) => agent.id))
-  const preservedAgents = currentAgents.filter(
-    (agent: Record<string, any>) => {
-      const agentId = normalizeText(agent?.id)
-      if (isResidualLegacyFeishuAgentId(agentId, expectedAgentIds)) {
-        return false
-      }
-      return !isFeishuManagedAgentId(agentId) || !expectedAgentIds.has(agentId)
-    }
-  )
-
-  next.agents.list = [
-    ...preservedAgents,
-    ...expectedAgents.map((expectedAgent) => buildManagedFeishuAgentConfig(expectedAgent, currentAgents)),
-  ]
-
-  const currentBindings = Array.isArray(next.bindings) ? next.bindings : []
-  const expectedBindings = buildExpectedFeishuBindings(bots)
-  const expectedAccountIds = new Set(expectedBindings.map((binding) => binding.match.accountId))
-  const preservedBindings = currentBindings.filter((binding) => {
-    if (
-      normalizeText(binding?.match?.channel) === 'feishu' &&
-      expectedAgentIds.has(getFeishuManagedAgentId(DEFAULT_FEISHU_ACCOUNT_ID)) &&
-      LEGACY_FEISHU_AGENT_IDS.includes(normalizeText(binding?.agentId))
-    ) {
-      return false
-    }
-    const accountId = normalizeText(binding?.match?.accountId)
-    return !(normalizeText(binding?.match?.channel) === 'feishu' && expectedAccountIds.has(accountId) && isFeishuManagedAgentId(binding?.agentId))
-  })
-
-  next.bindings = [
-    ...preservedBindings,
-    ...expectedBindings.map((expectedBinding) => {
-      const existingBinding = currentBindings.find((binding) =>
-        isMatchingFeishuBinding(binding as Record<string, any>, expectedBinding.match.accountId, expectedBinding.agentId)
-      )
-      return {
-        ...(existingBinding || {}),
-        agentId: expectedBinding.agentId,
-        match: {
-          ...((existingBinding as Record<string, any> | undefined)?.match || {}),
-          channel: 'feishu',
-          accountId: expectedBinding.match.accountId,
-        },
-      }
-    }),
-  ]
 
   return next
 }
 
 export function detectFeishuIsolationDrift(config: Record<string, any> | null): FeishuIsolationDrift {
-  const bots = extractFeishuRoutingBots(config)
-  const expectedAgents = buildExpectedFeishuAgents(bots)
-  const expectedBindings = buildExpectedFeishuBindings(bots)
-  const currentAgents = Array.isArray(config?.agents?.list) ? config?.agents?.list : []
-  const currentBindings = Array.isArray(config?.bindings) ? config?.bindings : []
-
-  const missingAgentIds: string[] = []
-  const workspaceMismatches: string[] = []
-  for (const expectedAgent of expectedAgents) {
-    const existingAgent = currentAgents.find(
-      (agent: Record<string, any>) => normalizeText(agent?.id) === expectedAgent.id
-    )
-    if (!existingAgent) {
-      missingAgentIds.push(expectedAgent.id)
-      continue
-    }
-    if (normalizeText(existingAgent.workspace) !== expectedAgent.workspace) {
-      workspaceMismatches.push(expectedAgent.id)
-    }
-  }
-
-  const missingBindingAccountIds: string[] = []
-  const conflictingBindingAccountIds: string[] = []
-  for (const expectedBinding of expectedBindings) {
-    const matchingBindings = currentBindings.filter(
-      (binding) =>
-        normalizeText(binding?.match?.channel) === 'feishu' &&
-        normalizeText(binding?.match?.accountId) === expectedBinding.match.accountId
-    )
-    if (!matchingBindings.some((binding) => normalizeText(binding?.agentId) === expectedBinding.agentId)) {
-      missingBindingAccountIds.push(expectedBinding.match.accountId)
-    }
-    if (matchingBindings.some((binding) => normalizeText(binding?.agentId) !== expectedBinding.agentId)) {
-      conflictingBindingAccountIds.push(expectedBinding.match.accountId)
-    }
-  }
-
-  const dmScopeCorrect = normalizeText(config?.session?.dmScope) === FEISHU_DM_SCOPE
-
   return {
-    needsRepair:
-      !dmScopeCorrect ||
-      missingAgentIds.length > 0 ||
-      missingBindingAccountIds.length > 0 ||
-      workspaceMismatches.length > 0 ||
-      conflictingBindingAccountIds.length > 0,
-    hasMultipleBots: bots.length > 1,
-    dmScopeCorrect,
-    missingAgentIds,
-    missingBindingAccountIds,
-    workspaceMismatches,
-    conflictingBindingAccountIds,
+    needsRepair: false,
+    hasMultipleBots: false,
+    dmScopeCorrect: true,
+    missingAgentIds: [],
+    missingBindingAccountIds: [],
+    workspaceMismatches: [],
+    conflictingBindingAccountIds: [],
   }
 }

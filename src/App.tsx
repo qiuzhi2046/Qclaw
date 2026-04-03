@@ -11,6 +11,7 @@ import PairingCode from './pages/PairingCode'
 import Dashboard from './pages/Dashboard'
 import MainLayout from './components/MainLayout'
 import ChatPage from './pages/ChatPage'
+import AgentsPage from './pages/AgentsPage'
 import ChannelsPage from './pages/ChannelsPage'
 import ModelsPage from './pages/ModelsPage'
 import SettingsPage from './pages/SettingsPage'
@@ -723,6 +724,7 @@ function App() {
               path="/chat"
               element={<ChatPage enterSendMode={chatComposerEnterSendMode} />}
             />
+            <Route path="/agents" element={<AgentsPage />} />
             <Route path="/channels" element={<ChannelsPage />} />
             <Route path="/models" element={<ModelsPage />} />
             <Route path="/skills" element={<SkillsPage />} />

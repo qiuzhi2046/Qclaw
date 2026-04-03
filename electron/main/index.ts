@@ -54,6 +54,8 @@ let appExitCleanupPromise: Promise<void> | null = null
 let isQuitting = false
 const preload = path.join(__dirname, '../preload/index.mjs')
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
+const DEV_SERVER_RETRY_MAX_ATTEMPTS = 20
+const DEV_SERVER_RETRY_INTERVAL_MS = 500
 const focusApp = process.platform === 'darwin'
   ? (options: { steal: boolean }) => app.focus(options)
   : undefined
@@ -122,6 +124,40 @@ function createWindow() {
   })
 
   if (VITE_DEV_SERVER_URL) {
+    let devServerRetryAttempts = 0
+    let devServerRetryTimer: NodeJS.Timeout | null = null
+
+    const clearDevServerRetryTimer = () => {
+      if (devServerRetryTimer) {
+        clearTimeout(devServerRetryTimer)
+        devServerRetryTimer = null
+      }
+    }
+
+    const scheduleDevServerRetry = () => {
+      if (devServerRetryAttempts >= DEV_SERVER_RETRY_MAX_ATTEMPTS) return
+      devServerRetryAttempts += 1
+      clearDevServerRetryTimer()
+      devServerRetryTimer = setTimeout(() => {
+        if (browserWindow.isDestroyed()) return
+        void browserWindow.loadURL(VITE_DEV_SERVER_URL)
+      }, DEV_SERVER_RETRY_INTERVAL_MS)
+    }
+
+    browserWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame || validatedURL !== VITE_DEV_SERVER_URL) return
+      if (!String(errorDescription || '').includes('ERR_EMPTY_RESPONSE') && errorCode !== -102) return
+      scheduleDevServerRetry()
+    })
+
+    browserWindow.webContents.on('did-finish-load', () => {
+      clearDevServerRetryTimer()
+    })
+
+    browserWindow.on('closed', () => {
+      clearDevServerRetryTimer()
+    })
+
     void browserWindow.loadURL(VITE_DEV_SERVER_URL)
   } else {
     void browserWindow.loadFile(indexHtml)

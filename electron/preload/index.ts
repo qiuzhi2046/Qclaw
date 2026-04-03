@@ -284,6 +284,10 @@ export const api = {
   skillsUpdate: (payload: { skillKey: string; enabled?: boolean; apiKey?: string }) =>
     ipcRenderer.invoke('skills:update', payload),
   skillsUninstall: (name: string) => ipcRenderer.invoke('skills:uninstall', name),
+  skillsWorkspaceList: (workspace: string) => ipcRenderer.invoke('skills:workspaceList', workspace),
+  skillsWorkspaceUninstall: (workspace: string, name: string) =>
+    ipcRenderer.invoke('skills:workspaceUninstall', workspace, name),
+  workspaceDelete: (workspace: string) => ipcRenderer.invoke('workspace:delete', workspace),
   skillsInstall: (name: string) => ipcRenderer.invoke('skills:install', name),
   clawhubSearch: (query: string, limit?: number) => ipcRenderer.invoke('clawhub:search', query, limit),
   clawhubInstall: (slug: string) => ipcRenderer.invoke('clawhub:install', slug),

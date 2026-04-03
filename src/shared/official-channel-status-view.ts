@@ -9,7 +9,8 @@ export function getOfficialChannelStageLabel(
   if (stageId === 'installed') return '已安装'
   if (stageId === 'registered') return '已注册'
   if (stageId === 'loaded') return '已加载'
-  return '已就绪'
+  if (stageId === 'ready') return '已就绪'
+  return ''
 }
 
 export function getOfficialChannelStageStateLabel(

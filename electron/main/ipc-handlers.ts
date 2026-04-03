@@ -1,6 +1,8 @@
 /**
  * IPC handlers — bridge between renderer and CLI
  */
+import path from 'node:path'
+import fs from 'node:fs'
 import { app, ipcMain, shell } from 'electron'
 import {
   checkNode,
@@ -919,6 +921,48 @@ export function registerIpcHandlers() {
     const payload = await getOpenClawSkillsListPayload()
     return resolveOpenClawSkillLocations(payload)
   }
+
+  ipcMain.handle('skills:workspaceList', async (_e, workspace: string) => {
+    try {
+      const skillsDir = path.join(workspace, 'skills')
+      const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true }).catch(() => [])
+      const skills = []
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const skillJsonPath = path.join(skillsDir, entry.name, 'skill.json')
+          try {
+            const content = await fs.promises.readFile(skillJsonPath, 'utf8')
+            const skill = JSON.parse(content)
+            skills.push({ ...skill, name: entry.name, title: skill.name || entry.name, source: 'openclaw-workspace', path: path.join(skillsDir, entry.name) })
+          } catch {
+            skills.push({ name: entry.name, title: entry.name, source: 'openclaw-workspace', description: '无法读取 skill.json', path: path.join(skillsDir, entry.name) })
+          }
+        }
+      }
+      return { ok: true, stdout: JSON.stringify(skills) }
+    } catch (e) {
+      return { ok: false, stderr: String(e) }
+    }
+  })
+
+  ipcMain.handle('skills:workspaceUninstall', async (_e, workspace: string, name: string) => {
+    try {
+      const skillPath = path.join(workspace, 'skills', name)
+      await fs.promises.rm(skillPath, { recursive: true, force: true })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, stderr: String(e) }
+    }
+  })
+
+  ipcMain.handle('workspace:delete', async (_e, workspace: string) => {
+    try {
+      await fs.promises.rm(workspace, { recursive: true, force: true })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, stderr: String(e) }
+    }
+  })
 
   ipcMain.handle('skills:uninstall', async (_e, name: string) => {
     const normalizedName = String(name || '').trim()

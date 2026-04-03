@@ -2,12 +2,11 @@ import { DEFAULT_FEISHU_CHANNEL_SETTINGS } from '../lib/openclaw-channel-registr
 import {
   applyFeishuMultiBotIsolation,
   detectFeishuIsolationDrift,
-  getFeishuManagedAgentId,
 } from '../lib/feishu-multi-bot-routing'
 
 const DEFAULT_FEISHU_ACCOUNT_ID = 'default'
-const BUILTIN_FEISHU_PLUGIN_ID = 'feishu'
-const LEGACY_FEISHU_PLUGIN_IDS = ['feishu-openclaw-plugin']
+export const FEISHU_OFFICIAL_PLUGIN_ID = 'feishu'
+const LEGACY_FEISHU_PLUGIN_IDS = ['feishu-openclaw-plugin', 'openclaw-lark']
 const LEGACY_FEISHU_AGENT_IDS = ['feishu-bot']
 
 export interface FeishuBotItem {
@@ -81,7 +80,7 @@ export function listFeishuBots(config: Record<string, any> | null): FeishuBotIte
       appId: defaultAppId,
       enabled: feishu.enabled !== false,
       isDefault: true,
-      agentId: getFeishuManagedAgentId(DEFAULT_FEISHU_ACCOUNT_ID),
+        agentId: DEFAULT_FEISHU_ACCOUNT_ID,
     })
   }
 
@@ -97,7 +96,7 @@ export function listFeishuBots(config: Record<string, any> | null): FeishuBotIte
         appId,
         enabled: account.enabled !== false,
         isDefault: false,
-        agentId: getFeishuManagedAgentId(accountId),
+        agentId: accountId,
       })
     }
   }
@@ -227,31 +226,21 @@ export function sanitizeFeishuPluginConfig(config: Record<string, any> | null): 
 
   if (Array.isArray(next.plugins.allow)) {
     next.plugins.allow = next.plugins.allow.filter(
-      (item: unknown) => ![BUILTIN_FEISHU_PLUGIN_ID, ...LEGACY_FEISHU_PLUGIN_IDS].includes(String(item || '').trim())
+      (item: unknown) => !LEGACY_FEISHU_PLUGIN_IDS.includes(String(item || '').trim())
     )
   }
 
-  if (next.plugins.entries && typeof next.plugins.entries === 'object') {
-    for (const legacyId of LEGACY_FEISHU_PLUGIN_IDS) {
-      delete next.plugins.entries[legacyId]
-    }
+  if (next.plugins?.entries && typeof next.plugins.entries === 'object') {
+    const entries = { ...next.plugins.entries }
+    LEGACY_FEISHU_PLUGIN_IDS.forEach(id => delete entries[id])
+    entries[FEISHU_OFFICIAL_PLUGIN_ID] = { ...(entries[FEISHU_OFFICIAL_PLUGIN_ID] || {}), enabled: true }
+    next.plugins.entries = entries
   }
 
-  if (!hasOwnRecord(next.plugins.entries)) {
-    next.plugins.entries = {}
-  }
-  const currentBuiltInEntry = next.plugins.entries[BUILTIN_FEISHU_PLUGIN_ID]
-  next.plugins.entries[BUILTIN_FEISHU_PLUGIN_ID] = hasOwnRecord(currentBuiltInEntry)
-    ? {
-        ...currentBuiltInEntry,
-        enabled: false,
-      }
-    : { enabled: false }
-
-  if (next.plugins.installs && typeof next.plugins.installs === 'object') {
-    for (const legacyId of [BUILTIN_FEISHU_PLUGIN_ID, ...LEGACY_FEISHU_PLUGIN_IDS]) {
-      delete next.plugins.installs[legacyId]
-    }
+  if (next.plugins?.installs && typeof next.plugins.installs === 'object') {
+    const installs = { ...next.plugins.installs }
+    LEGACY_FEISHU_PLUGIN_IDS.forEach(id => delete installs[id])
+    next.plugins.installs = installs
   }
 
   return next
@@ -261,15 +250,17 @@ export function stripFeishuOfficialPluginConfig(config: Record<string, any> | nu
   const next = sanitizeFeishuPluginConfig(config)
   if (Array.isArray(next.plugins?.allow)) {
     next.plugins.allow = next.plugins.allow.filter(
-      (item: unknown) => String(item || '').trim() !== 'openclaw-lark'
+      (item: unknown) => String(item || '').trim() !== FEISHU_OFFICIAL_PLUGIN_ID
     )
   }
   if (next.plugins?.entries && typeof next.plugins.entries === 'object') {
-    const { ['openclaw-lark']: _removedEntry, ...entries } = next.plugins.entries
+    const entries = { ...next.plugins.entries }
+    delete entries[FEISHU_OFFICIAL_PLUGIN_ID]
     next.plugins.entries = entries
   }
   if (next.plugins?.installs && typeof next.plugins.installs === 'object') {
-    const { ['openclaw-lark']: _removedInstall, ...installs } = next.plugins.installs
+    const installs = { ...next.plugins.installs }
+    delete installs[FEISHU_OFFICIAL_PLUGIN_ID]
     next.plugins.installs = installs
   }
   return next

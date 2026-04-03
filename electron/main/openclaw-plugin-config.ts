@@ -1,11 +1,10 @@
-const BUILTIN_FEISHU_PLUGIN_ID = 'feishu'
-const FEISHU_OFFICIAL_PLUGIN_ID = 'openclaw-lark'
-const LEGACY_PLUGIN_IDS = new Set([BUILTIN_FEISHU_PLUGIN_ID, 'feishu-openclaw-plugin'])
-const LEGACY_PLUGIN_ENTRY_IDS = new Set(['feishu-openclaw-plugin'])
-const LEGACY_PLUGIN_INSTALL_IDS = new Set([BUILTIN_FEISHU_PLUGIN_ID, 'feishu-openclaw-plugin'])
+const FEISHU_OFFICIAL_PLUGIN_ID = 'feishu'
+const LEGACY_PLUGIN_IDS = new Set(['feishu-openclaw-plugin', 'openclaw-lark'])
+const LEGACY_PLUGIN_ENTRY_IDS = new Set(['feishu-openclaw-plugin', 'openclaw-lark'])
+const LEGACY_PLUGIN_INSTALL_IDS = new Set(['feishu-openclaw-plugin', 'openclaw-lark'])
 const FEISHU_RELATED_PLUGIN_IDS = new Set([
-  BUILTIN_FEISHU_PLUGIN_ID,
   'feishu-openclaw-plugin',
+  'openclaw-lark',
   FEISHU_OFFICIAL_PLUGIN_ID,
 ])
 
@@ -75,50 +74,6 @@ function hasFeishuPluginContext(config: Record<string, any> | null | undefined):
   return false
 }
 
-function ensureBuiltinFeishuPluginDisabled(
-  config: Record<string, any>,
-  preserveBuiltInFeishuDisable: boolean
-): { changed: boolean; config: Record<string, any> } {
-  if (!preserveBuiltInFeishuDisable) {
-    return {
-      changed: false,
-      config,
-    }
-  }
-
-  const nextConfig = config
-  let changed = false
-
-  if (!hasOwnRecord(nextConfig.plugins)) {
-    nextConfig.plugins = {}
-    changed = true
-  }
-
-  const plugins = nextConfig.plugins as Record<string, any>
-  if (!hasOwnRecord(plugins.entries)) {
-    plugins.entries = {}
-    changed = true
-  }
-
-  const currentEntry = plugins.entries[BUILTIN_FEISHU_PLUGIN_ID]
-  const normalizedEntry = hasOwnRecord(currentEntry)
-    ? {
-        ...currentEntry,
-        enabled: false,
-      }
-    : { enabled: false }
-
-  if (!hasOwnRecord(currentEntry) || JSON.stringify(currentEntry) !== JSON.stringify(normalizedEntry)) {
-    plugins.entries[BUILTIN_FEISHU_PLUGIN_ID] = normalizedEntry
-    changed = true
-  }
-
-  return {
-    changed,
-    config: nextConfig,
-  }
-}
-
 export function sanitizeManagedPluginConfig(
   config: Record<string, any> | null | undefined,
   options: {
@@ -128,11 +83,9 @@ export function sanitizeManagedPluginConfig(
 ): { changed: boolean; config: Record<string, any> } {
   const nextConfig = cloneConfig(config)
   const blockedPluginIds = normalizeBlockedPluginIds(options.blockedPluginIds)
-  const preserveBuiltInFeishuDisable =
-    options.preserveBuiltInFeishuDisable ?? hasFeishuPluginContext(nextConfig)
   const plugins = hasOwnRecord(nextConfig.plugins) ? nextConfig.plugins : null
   if (!plugins) {
-    return ensureBuiltinFeishuPluginDisabled(nextConfig, preserveBuiltInFeishuDisable)
+    return { changed: false, config: nextConfig }
   }
 
   let changed = false
@@ -163,12 +116,9 @@ export function sanitizeManagedPluginConfig(
     }
   }
 
-  const disabledBuiltIn = ensureBuiltinFeishuPluginDisabled(nextConfig, preserveBuiltInFeishuDisable)
-  changed = changed || disabledBuiltIn.changed
-
   return {
     changed,
-    config: disabledBuiltIn.config,
+    config: nextConfig,
   }
 }
 
