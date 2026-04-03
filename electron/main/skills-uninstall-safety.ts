@@ -2,10 +2,12 @@ const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 const SKILL_SLUG_REGEX = /^[a-z0-9][a-z0-9._-]*$/i
+type PathModule = typeof import('node:path')
 
 interface ResolveSkillPathOptions {
   homeDir?: string
   rootKind?: 'managed' | 'workspace'
+  pathModule?: PathModule
 }
 
 function normalizePathValue(value: unknown): string {
@@ -16,17 +18,18 @@ export function isAllowedOpenClawSkillsRoot(
   skillsRootDir: string,
   options: ResolveSkillPathOptions = {}
 ): boolean {
+  const pathModule = options.pathModule || path
   const homeDir = normalizePathValue(options.homeDir || os.homedir())
   if (!homeDir) return false
 
-  const stateRoot = path.resolve(homeDir, '.openclaw')
-  const skillsRoot = path.resolve(skillsRootDir)
-  const relative = path.relative(stateRoot, skillsRoot)
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+  const stateRoot = pathModule.resolve(homeDir, '.openclaw')
+  const skillsRoot = pathModule.resolve(skillsRootDir)
+  const relative = pathModule.relative(stateRoot, skillsRoot)
+  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
     return false
   }
 
-  const segments = relative.split(path.sep).filter(Boolean)
+  const segments = relative.split(pathModule.sep).filter(Boolean)
   if (options.rootKind === 'managed') {
     return segments.length === 1 && segments[0] === 'skills'
   }
@@ -76,6 +79,7 @@ export function resolveSkillPathUnderRoot(
   skillSlug: string,
   options: ResolveSkillPathOptions = {}
 ): { ok: true; skillsRoot: string; targetPath: string } | { ok: false; error: string } {
+  const pathModule = options.pathModule || path
   const safeSlug = normalizeSafeSkillSlug(skillSlug)
   if (!safeSlug) {
     return { ok: false, error: 'invalid-skill-slug' }
@@ -86,14 +90,14 @@ export function resolveSkillPathUnderRoot(
     return { ok: false, error: 'invalid-managed-skills-dir' }
   }
 
-  const skillsRoot = path.resolve(normalizedSkillsRootDir)
+  const skillsRoot = pathModule.resolve(normalizedSkillsRootDir)
   if (!isAllowedOpenClawSkillsRoot(skillsRoot, options)) {
     return { ok: false, error: 'unsafe-skills-root' }
   }
 
-  const targetPath = path.resolve(skillsRoot, safeSlug)
-  const relative = path.relative(skillsRoot, targetPath)
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+  const targetPath = pathModule.resolve(skillsRoot, safeSlug)
+  const relative = pathModule.relative(skillsRoot, targetPath)
+  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
     return { ok: false, error: 'unsafe-fallback-path' }
   }
 

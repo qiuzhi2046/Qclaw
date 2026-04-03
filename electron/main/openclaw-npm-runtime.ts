@@ -4,7 +4,8 @@ import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 const { mkdtemp, mkdir, writeFile } = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
 const { randomUUID } = process.getBuiltinModule('node:crypto') as typeof import('node:crypto')
 const { tmpdir } = process.getBuiltinModule('node:os') as typeof import('node:os')
-const { join } = process.getBuiltinModule('node:path') as typeof import('node:path')
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+const { join } = path
 
 const OPENCLAW_MANAGED_NPM_SUBDIR = join('openclaw-installer', 'npm')
 const OPENCLAW_MANAGED_NPM_USERCONFIG = 'user.npmrc'
@@ -13,6 +14,10 @@ const OPENCLAW_MANAGED_NPM_CACHE_DIR = 'cache'
 const OPENCLAW_PRIVILEGED_NPM_CACHE_PREFIX = 'qclaw-openclaw-admin-npm'
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000
 const DEFAULT_FETCH_RETRIES = 2
+
+function joinForPlatform(platform: NodeJS.Platform, ...parts: string[]): string {
+  return (platform === 'win32' ? path.win32 : path.posix).join(...parts)
+}
 
 const MANAGED_NPM_CONFIG_CONTENT = [
   'fund=false',
@@ -91,7 +96,12 @@ export function createPrivilegedOpenClawNpmCommandOptions(
     String(overrides.tempDir || '').trim() ||
     (platform === 'darwin' ? '/private/tmp' : tmpdir())
   const suffix = String(overrides.uuidFactory?.() || randomUUID()).trim() || 'run'
-  const cachePath = join(tempRoot, `${OPENCLAW_PRIVILEGED_NPM_CACHE_PREFIX}-${suffix}`, 'cache')
+  const cachePath = joinForPlatform(
+    platform,
+    tempRoot,
+    `${OPENCLAW_PRIVILEGED_NPM_CACHE_PREFIX}-${suffix}`,
+    'cache'
+  )
 
   return {
     ...options,

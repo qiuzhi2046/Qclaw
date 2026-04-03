@@ -3,6 +3,8 @@ import { parseJsonFromCommandResult, parseJsonFromOutput } from './openclaw-comm
 import { normalizeOpenClawSkillsListPayload } from './skills-paths'
 import installWebPolicy from '../../install-web-v1.manifest.json'
 
+type PathModule = typeof import('node:path')
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -292,10 +294,13 @@ export function normalizeOpenClawSkillsPayload(
   payload: Record<string, unknown>,
   options: {
     config?: Record<string, unknown> | null
+    pathModule?: PathModule
   } = {}
 ): Record<string, unknown> {
   const normalizedPayload = mergeBundledManifestSkills({
-    payload: normalizeOpenClawSkillsListPayload(payload),
+    payload: normalizeOpenClawSkillsListPayload(payload, {
+      pathModule: options.pathModule,
+    }),
     config: options.config,
   })
   const rawSkills = Array.isArray(normalizedPayload.skills) ? normalizedPayload.skills : []

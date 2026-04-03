@@ -343,7 +343,13 @@ describe('repairMainAuthProfilesFromOtherAgentStores', () => {
 describe('repairAgentAuthProfilesFromOtherAgentStores', () => {
   it('copies minimax-portal oauth auth when repair is requested for canonical minimax', async () => {
     const channelDefaultAuthStorePath = '/tmp/openclaw/profiles/team-a/agents/channel-default/agent/auth-profiles.json'
-    const channelBotAuthStorePath = '/tmp/openclaw/profiles/team-a/agents/channel-bot/agent/auth-profiles.json'
+    const channelBotAuthStorePath = path.join(
+      '/tmp/openclaw/profiles/team-a',
+      'agents',
+      'channel-bot',
+      'agent',
+      'auth-profiles.json'
+    )
     let writeCount = 0
     let writtenPath = ''
     const written = { value: null as Record<string, any> | null }
@@ -464,7 +470,13 @@ describe('repairAgentAuthProfilesFromOtherAgentStores', () => {
 
   it('keeps non-minimax provider repair exact and does not pull sibling aliases', async () => {
     const channelDefaultAuthStorePath = '/tmp/openclaw/profiles/team-a/agents/channel-default/agent/auth-profiles.json'
-    const channelBotAuthStorePath = '/tmp/openclaw/profiles/team-a/agents/channel-bot/agent/auth-profiles.json'
+    const channelBotAuthStorePath = path.join(
+      '/tmp/openclaw/profiles/team-a',
+      'agents',
+      'channel-bot',
+      'agent',
+      'auth-profiles.json'
+    )
     const writeJsonSpy = vi.fn(async () => undefined)
 
     const readFileSpy = vi.fn(async (filePath: unknown) => {

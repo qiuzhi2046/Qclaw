@@ -5,7 +5,7 @@ const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 function extractRunDirectSource(cliSource: string): string {
   const matched = cliSource.match(
-    /export async function runDirect\([\s\S]*?\n}\n\nfunction buildCommandCapabilityEnv\(\): NodeJS\.ProcessEnv \{/
+    /export async function runDirect\([\s\S]*?\r?\n}\r?\n\r?\nfunction buildCommandCapabilityEnv\(\): NodeJS\.ProcessEnv \{/
   )
   if (!matched) {
     throw new Error('runDirect source block not found')

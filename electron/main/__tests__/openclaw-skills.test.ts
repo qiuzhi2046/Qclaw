@@ -8,6 +8,7 @@ import {
   normalizeOpenClawSkillsPayload,
   normalizeSkillConfigKey,
 } from '../openclaw-skills'
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 describe('openclaw skills compatibility helpers', () => {
   it('derives skill metadata from metadata.openclaw when top-level fields are missing', () => {
@@ -43,21 +44,26 @@ describe('openclaw skills compatibility helpers', () => {
   })
 
   it('normalizes list payloads and keeps derived location fields', () => {
-    const payload = normalizeOpenClawSkillsPayload({
-      workspaceDir: '/Users/demo/.openclaw/workspace-default',
-      managedSkillsDir: '/Users/demo/.openclaw/skills',
-      skills: [
-        {
-          name: 'Token Optimizer',
-          source: 'openclaw-workspace',
-          metadata: {
-            openclaw: {
-              skillKey: 'token-optimizer',
+    const payload = normalizeOpenClawSkillsPayload(
+      {
+        workspaceDir: '/Users/demo/.openclaw/workspace-default',
+        managedSkillsDir: '/Users/demo/.openclaw/skills',
+        skills: [
+          {
+            name: 'Token Optimizer',
+            source: 'openclaw-workspace',
+            metadata: {
+              openclaw: {
+                skillKey: 'token-optimizer',
+              },
             },
           },
-        },
-      ],
-    })
+        ],
+      },
+      {
+        pathModule: path.posix as unknown as typeof import('node:path'),
+      }
+    )
 
     expect(payload).toMatchObject({
       workspaceDir: '/Users/demo/.openclaw/workspace-default',

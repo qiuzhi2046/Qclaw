@@ -102,6 +102,7 @@ describe('discoverOpenClawInstallations', () => {
   const tempDirs: string[] = []
   const originalUserDataDir = process.env.QCLAW_USER_DATA_DIR
   const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
 
   function makeTempDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qclaw-openclaw-discovery-'))
@@ -125,6 +126,11 @@ describe('discoverOpenClawInstallations', () => {
       delete process.env.HOME
     } else {
       process.env.HOME = originalHome
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE
+    } else {
+      process.env.USERPROFILE = originalUserProfile
     }
 
     while (tempDirs.length > 0) {
@@ -302,6 +308,7 @@ describe('discoverOpenClawInstallations', () => {
   it('reports history-only when only historical state files exist', async () => {
     const homeDir = makeTempDir()
     process.env.HOME = homeDir
+    process.env.USERPROFILE = homeDir
 
     const openClawHome = path.join(homeDir, '.openclaw')
     fs.mkdirSync(openClawHome, { recursive: true })
@@ -318,7 +325,7 @@ describe('discoverOpenClawInstallations', () => {
     expect(result.historyDataCandidates).toEqual([
       {
         path: openClawHome,
-        displayPath: '~/.openclaw',
+        displayPath: process.platform === 'win32' ? '~\\.openclaw' : '~/.openclaw',
         reason: 'default-home-dir',
       },
     ])

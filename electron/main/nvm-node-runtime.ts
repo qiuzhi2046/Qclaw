@@ -66,13 +66,13 @@ export function normalizeNvmVersionTag(version: string): string {
 export function buildNvmNodeBinDir(
   nvmDir: string,
   version: string,
-  pathModule: typeof import('node:path') = path
+  pathModule: typeof import('node:path') = path.posix
 ): string {
   return pathModule.join(nvmDir, 'versions', 'node', normalizeNvmVersionTag(version), 'bin')
 }
 
 export function buildNvmShellPrefix(nvmDir: string): string {
-  return `export NVM_DIR=${quotePosixShellArg(nvmDir)} && source ${quotePosixShellArg(path.join(nvmDir, 'nvm.sh'))}`
+  return `export NVM_DIR=${quotePosixShellArg(nvmDir)} && source ${quotePosixShellArg(path.posix.join(nvmDir, 'nvm.sh'))}`
 }
 
 export function buildNvmInstallCommand(nvmDir: string, targetVersion: string): string {
@@ -92,7 +92,7 @@ export async function listInstalledNvmNodeBinDirs(
   const readdir =
     options.readdir ||
     ((targetPath, readOptions) => fsPromises.readdir(targetPath, readOptions))
-  const pathModule = options.pathModule || path
+  const pathModule = options.pathModule || path.posix
 
   let entries: Array<NvmDirentLike | import('node:fs').Dirent> = []
   try {
@@ -117,7 +117,7 @@ export async function detectNvmDir(
       await fsPromises.access(targetPath)
     })
   const homedir = options.homedir || (() => process.env.HOME || '')
-  const pathModule = options.pathModule || path
+  const pathModule = options.pathModule || path.posix
 
   const configuredNvmDir = String(env.NVM_DIR || '').trim()
   if (configuredNvmDir) return configuredNvmDir

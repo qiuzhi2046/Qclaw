@@ -294,7 +294,9 @@ describe('openclaw restore service', () => {
     await expect(fs.readFile(path.join(targetStateRoot, 'openclaw.json'), 'utf8')).resolves.toContain('"primary": "openai/gpt-5"')
     await expect(fs.readFile(path.join(targetStateRoot, 'openclaw.json'), 'utf8')).resolves.not.toContain('"defaultModel"')
     await expect(fs.readFile(path.join(wrongStateRoot, 'openclaw.json'), 'utf8')).resolves.toContain('wrong-target')
-    expect((await fs.stat(path.join(targetStateRoot, 'openclaw.json'))).mode & 0o777).toBe(0o600)
+    expect((await fs.stat(path.join(targetStateRoot, 'openclaw.json'))).mode & 0o777).toBe(
+      process.platform === 'win32' ? 0o666 : 0o600
+    )
     expect(createManagedBackupArchiveMock).toHaveBeenCalledWith({
       candidate: expect.objectContaining({
         stateRoot: targetStateRoot,

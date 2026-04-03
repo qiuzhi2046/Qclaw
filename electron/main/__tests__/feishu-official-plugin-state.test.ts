@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 const {
   applyConfigPatchGuardedMock,
@@ -224,7 +225,7 @@ describe('getFeishuOfficialPluginState', () => {
         expect.objectContaining({
           source: 'npm',
           spec: '@larksuite/openclaw-lark',
-          installPath: '/Users/alice/.openclaw/extensions/openclaw-lark',
+          installPath: path.join('/Users/alice/.openclaw', 'extensions', 'openclaw-lark'),
         })
       )
       expect(result.normalizedConfig.session.dmScope).toBe('per-account-channel-peer')

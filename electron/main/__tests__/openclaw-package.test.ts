@@ -20,6 +20,43 @@ function makeTempDir(): string {
   return dir
 }
 
+function buildComparablePathVariants(targetPath: string): Set<string> {
+  const variants = new Set<string>()
+  const normalizedInput = String(targetPath || '').trim()
+  if (!normalizedInput) return variants
+
+  const addVariant = (value: string) => {
+    const normalized = path.normalize(String(value || '').trim())
+    if (!normalized) return
+    variants.add(process.platform === 'win32' ? normalized.toLowerCase() : normalized)
+  }
+
+  addVariant(path.resolve(normalizedInput))
+
+  try {
+    addVariant(fs.realpathSync(normalizedInput))
+  } catch {
+    // Ignore resolution failures and keep the remaining variants.
+  }
+
+  if (typeof fs.realpathSync.native === 'function') {
+    try {
+      addVariant(fs.realpathSync.native(normalizedInput))
+    } catch {
+      // Ignore native resolution failures and keep the remaining variants.
+    }
+  }
+
+  return variants
+}
+
+function expectSameResolvedLocation(actualPath: string, expectedPath: string): void {
+  const actualVariants = buildComparablePathVariants(actualPath)
+  const expectedVariants = buildComparablePathVariants(expectedPath)
+  const sharedVariant = Array.from(actualVariants).find((candidate) => expectedVariants.has(candidate))
+  expect(sharedVariant).toBeDefined()
+}
+
 function createFakeOpenClawInstall(): {
   tempDir: string
   commandPath: string
@@ -164,10 +201,9 @@ describe('resolveOpenClawBinaryPath', () => {
       env: buildTestEnv({
         HOME: '/Users/alice',
       }),
-      fileExists: (candidate: string) => candidate === install.commandPath,
     })
 
-    expect(resolved).toBe(install.commandPath)
+    expect(resolved.replaceAll('/', path.sep)).toBe(install.commandPath)
   })
 })
 
@@ -201,7 +237,7 @@ describe('resolveOpenClawPackageRoot', () => {
       binaryPath: install.commandPath,
     })
 
-    expect(packageRoot).toBe(fs.realpathSync(install.packageRoot))
+    expectSameResolvedLocation(packageRoot, install.packageRoot)
   })
 
   it('walks parent directories when the resolved binary lives under a package bin subdirectory', async () => {
@@ -211,7 +247,7 @@ describe('resolveOpenClawPackageRoot', () => {
       binaryPath: install.commandPath,
     })
 
-    expect(packageRoot).toBe(fs.realpathSync(install.packageRoot))
+    expectSameResolvedLocation(packageRoot, install.packageRoot)
   })
 
   it('rejects malformed layouts that do not contain an adjacent openclaw package.json', async () => {
@@ -235,16 +271,11 @@ describe('readOpenClawPackageInfo', () => {
       binaryPath: install.commandPath,
     })
 
-    const resolvedPackageRoot = fs.realpathSync(install.packageRoot)
-    const resolvedPackageJsonPath = fs.realpathSync(install.packageJsonPath)
-
-    expect(info).toMatchObject({
-      name: 'openclaw',
-      version: '2026.3.8',
-      packageRoot: resolvedPackageRoot,
-      packageJsonPath: resolvedPackageJsonPath,
-      binaryPath: install.commandPath,
-      resolvedBinaryPath: path.join(resolvedPackageRoot, 'openclaw.mjs'),
-    })
+    expect(info.name).toBe('openclaw')
+    expect(info.version).toBe('2026.3.8')
+    expect(info.binaryPath).toBe(install.commandPath)
+    expectSameResolvedLocation(info.packageRoot, install.packageRoot)
+    expectSameResolvedLocation(info.packageJsonPath, install.packageJsonPath)
+    expectSameResolvedLocation(info.resolvedBinaryPath, path.join(install.packageRoot, 'openclaw.mjs'))
   })
 })
