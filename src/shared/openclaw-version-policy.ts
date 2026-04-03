@@ -36,6 +36,9 @@ export interface OpenClawVersionEnforcementResult {
 }
 
 function normalizeVersionCore(value: string | null | undefined): string {
+  if (value?.startsWith("OpenClaw")) {
+    return value.match(/\d{4}\.\d+\.\d+/)?.[0] || value;
+  }
   return String(value || '')
     .trim()
     .replace(/^v/i, '')
