@@ -675,7 +675,7 @@ function App() {
 
   if (appState === 'welcome') {
     return renderWithContactModal(renderFrame(
-      <div className="w-full max-w-md px-2">
+      <div className="w-full max-w-xl px-2 pb-6">
         <Welcome onAccept={() => setAppState('env-check')} />
       </div>
     , false))

@@ -1264,8 +1264,8 @@ export default function Dashboard({
           </Group>
         </Group>
         <Collapse in={Boolean(expanded.dev)}>
-          <div className="px-3 pb-3 space-y-2">
-            <Tooltip label={tooltips.dashboard.openDeveloperPanel} withArrow>
+          <div className="px-3 pb-3 flex gap-2">
+            <Tooltip label={tooltips.dashboard.openDeveloperPanel} withArrow className="flex-1">
               <Button
                 onClick={handleOpenDashboard}
                 variant="filled"
@@ -1276,7 +1276,7 @@ export default function Dashboard({
                 打开 OpenClaw 开发者面板
               </Button>
             </Tooltip>
-            <Tooltip label={tooltips.dashboard.openWorkspaceFolder} withArrow>
+            <Tooltip label={tooltips.dashboard.openWorkspaceFolder} withArrow className="flex-1">
               <Button
                 onClick={handleOpenWorkspace}
                 variant="light"
@@ -1364,23 +1364,14 @@ export default function Dashboard({
                     <IconRefresh size={14} />
                   </ActionIcon>
                 </Tooltip>
+                {activeModel && (
+                  <Badge size="xs" color="blue" variant="filled">{activeModel}</Badge>
+                )}
               </Group>
-              <Text size="xs" c="dimmed">{catalogSummary.visibleCount}</Text>
+              <Text size="xs" c="dimmed">{catalogRefreshLabel}</Text>
             </Group>
-            <Text size="xs" c="dimmed">
-              {catalogSummary.label} · {catalogSummary.detail}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {catalogRefreshLabel}
-            </Text>
-            {activeModel && (
-              <Group gap="xs">
-                <Text size="xs" c="dimmed">当前模型:</Text>
-                <Badge size="xs" color="blue" variant="filled">{activeModel}</Badge>
-              </Group>
-            )}
             {providers.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-3">
                 {providers.map((provider) => {
                   const models = getModelsPageProviderModels(provider.id, visibleCatalog)
                   const providerCatalog = getModelsPageProviderModels(provider.id, effectiveCatalog)
@@ -1392,8 +1383,8 @@ export default function Dashboard({
                   const providerAvailableCount = providerCatalog.filter((model) => isCatalogModelAvailable(model)).length
                   const providerTotalCount = providerCatalog.length
                   return (
-                    <div key={provider.id}>
-                      <Group gap={6}>
+                    <div key={provider.id} className="rounded-lg p-2.5 app-bg-tertiary">
+                      <Group gap={6} mb={models.length > 0 ? 6 : 0}>
                         <Text size="xs" fw={600} className="app-text-secondary">
                           {provider.logo} {provider.name}
                         </Text>
@@ -1409,7 +1400,7 @@ export default function Dashboard({
                         )}
                       </Group>
                       {models.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5 pl-4 mt-1">
+                        <div className="flex flex-wrap gap-2">
                           {models.map((model) => {
                             const isActive = activeModel === model.key
                             const isSwitching = switching === model.key

@@ -285,6 +285,7 @@ export interface CustomProviderConfigInput {
 
 interface ModelCenterProps {
   onConfigured: (context: SetupModelContext) => void | Promise<void>
+  onCancel?: () => void
   providerNames?: Record<string, string>
   envKeyMap?: Record<string, string>
   submitIdleLabel?: string
@@ -1646,6 +1647,7 @@ export async function refreshModelCapabilitiesData(
 
 export default function ModelCenter({
   onConfigured,
+  onCancel,
   providerNames,
   submitIdleLabel = '下一步 — 配置消息渠道',
   stayOnConfigured = false,
@@ -2587,6 +2589,15 @@ export default function ModelCenter({
       <div className="mb-1 flex items-center justify-between gap-3">
         <Title order={2} size="lg" fw={600} className="app-text-primary">配置 AI 提供商</Title>
         <div className="flex items-center gap-2">
+          {onCancel && (
+            <Button
+              variant="default"
+              size="xs"
+              onClick={onCancel}
+            >
+              取消
+            </Button>
+          )}
           <Button
             variant="default"
             size="xs"

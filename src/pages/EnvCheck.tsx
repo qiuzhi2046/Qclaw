@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ActionIcon, Alert, Button, Loader, Modal, Text, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { IconRefresh } from '@tabler/icons-react'
 import { ENV_CHECK_UI_POLICY, getEnvCheckSupportActionsForIssueKind, type EnvCheckSupportAction } from '../shared/env-check-policy'
 import {
   classifyMacGitToolsIssue,
@@ -409,7 +410,7 @@ export function buildOpenClawGateState(
         canUpgrade: false,
         canAutoCorrect: false,
         blocksContinue: false,
-        statusLabel: '已处于受支持上限',
+        statusLabel: '',
         message: withTakeoverSuffix('当前 OpenClaw 已是受支持上限版本'),
       }
   }
@@ -1814,6 +1815,17 @@ export default function EnvCheck({
                   {step.error || step.description}
                 </div>
               </div>
+              {step.id === 'openclaw' && openClawGateState?.activeCandidate && !isRunning && (
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => void handleOpenClawRefresh()}
+                  disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
+                  title="刷新 OpenClaw 版本"
+                >
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              )}
               {step.version && step.status === 'ok' && (
                 <div className="text-xs app-text-muted app-bg-tertiary px-2 py-1 rounded">
                   {step.version}
@@ -1850,33 +1862,17 @@ export default function EnvCheck({
                   {openClawGateState.statusLabel}
                 </div>
               )}
-      {step.id === 'openclaw' && openClawGateState?.activeCandidate && !isRunning && (
-                <>
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    onClick={() => void handleOpenClawRefresh()}
-                    disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
-                    title="刷新 OpenClaw 版本"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                      <path d="M21 3v5h-5" />
-                    </svg>
-                  </ActionIcon>
-                  {canShowOpenClawUpgradeAction(openClawGateState, activeTakeoverBackupBlocked) && (
-                    <Button
-                      size="xs"
-                      variant="light"
-                      color="green"
-                      onClick={() => void handleOpenClawUpgrade()}
-                      disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
-                      loading={isUpgradingOpenClaw}
-                    >
-                      {openClawGateState.canAutoCorrect ? '重试修复' : '一键升级'}
-                    </Button>
-                  )}
-                </>
+              {step.id === 'openclaw' && openClawGateState?.activeCandidate && !isRunning && canShowOpenClawUpgradeAction(openClawGateState, activeTakeoverBackupBlocked) && (
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="green"
+                  onClick={() => void handleOpenClawUpgrade()}
+                  disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
+                  loading={isUpgradingOpenClaw}
+                >
+                  {openClawGateState.canAutoCorrect ? '重试修复' : '一键升级'}
+                </Button>
               )}
             </div>
           </Tooltip>

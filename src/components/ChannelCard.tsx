@@ -1,4 +1,6 @@
-import { Button, Card, Badge, Group, Text } from '@mantine/core'
+import { useState } from 'react'
+import { Card, Badge, Group, Text, ActionIcon, Menu } from '@mantine/core'
+import { IconSettings, IconTrash, IconPlayerPlay, IconPlayerPause, IconLink, IconCpu, IconTool, IconPencil } from '@tabler/icons-react'
 import {
   getChannelEnabledLabel,
   shouldShowPluginStatus,
@@ -17,6 +19,7 @@ export interface ChannelCardChannel {
   id: string
   channelId: string
   name: string
+  displayName: string
   enabled: boolean
   pairingRequired: boolean
   pairingAccountId?: string
@@ -35,8 +38,8 @@ export interface ChannelCardProps {
   onOpenModelConfig: () => void
   onToggleEnabled: () => void
   onOpenPairing: () => void
-  onOpenDiagnostics: () => void
   onRepairPlugin: () => void
+  onRename: () => void
   onRemove: () => void
 }
 
@@ -54,6 +57,17 @@ function getRuntimeLabel(state: FeishuRuntimeStatusState | undefined): string {
   return '离线'
 }
 
+function getStatusBorderColor(channel: ChannelCardChannel): string {
+  if (!channel.enabled) return 'var(--mantine-color-gray-5)'
+  if (channel.channelId === 'feishu') {
+    if (channel.runtimeState === 'online') return 'var(--mantine-color-orange-6)'
+    if (channel.runtimeState === 'degraded') return 'var(--mantine-color-yellow-6)'
+    if (channel.runtimeState === 'disabled') return 'var(--mantine-color-gray-5)'
+    return 'var(--mantine-color-red-6)'
+  }
+  return 'var(--mantine-color-orange-6)'
+}
+
 export default function ChannelCard({
   channel,
   platformInfo,
@@ -64,18 +78,24 @@ export default function ChannelCard({
   onOpenModelConfig,
   onToggleEnabled,
   onOpenPairing,
-  onOpenDiagnostics,
   onRepairPlugin,
+  onRename,
   onRemove,
 }: ChannelCardProps) {
+  const [menuOpened, setMenuOpened] = useState(false)
+
   return (
     <Card
-      padding="lg"
+      padding={0}
       withBorder
+      radius="md"
       className={`transition-colors duration-200 ${
         channel.pairingRequired ? 'cursor-pointer' : ''
       }`}
-      style={channel.pairingRequired ? { '--hover-bg': 'var(--app-bg-tertiary)' } as React.CSSProperties : undefined}
+      style={{
+        borderLeft: `3px solid ${getStatusBorderColor(channel)}`,
+        overflow: 'visible',
+      }}
       onMouseEnter={(e) => {
         if (channel.pairingRequired) e.currentTarget.style.backgroundColor = 'var(--app-bg-tertiary)'
       }}
@@ -84,113 +104,148 @@ export default function ChannelCard({
       }}
       onClick={channel.pairingRequired ? onOpenPairing : undefined}
     >
-      <div className="space-y-3">
-        {/* 信息区：Logo + 名称 + 所有状态标签 */}
-        <Group gap="sm" align="center" wrap="wrap">
-          {platformInfo.logo
-            ? <img src={platformInfo.logo} alt={platformInfo.name} style={{ width: 32, height: 32 }} />
-            : <Text size="2xl">❓</Text>
-          }
-          <Text size="lg" fw={600}>{channel.name}</Text>
-          <Badge variant="light" size="sm">
-            {platformInfo.name}
-          </Badge>
-          <Badge variant="light" size="sm" color={channel.enabled ? 'teal' : 'gray'}>
-            {getChannelEnabledLabel(channel.enabled)}
-          </Badge>
-          {channel.channelId === 'feishu' && (
-            <Badge
-              variant="light"
-              size="sm"
-              color={getRuntimeBadgeColor(channel.runtimeState)}
-            >
-              {getRuntimeLabel(channel.runtimeState)}
-            </Badge>
-          )}
-          {shouldShowPluginStatus(channel) && channel.pluginStatus && getVisiblePluginStatusStages(channel.pluginStatus).map((stage) => (
-            <Badge
-              key={`${channel.id}:${stage.id}`}
-              variant="light"
-              size="sm"
-              color={getOfficialChannelStageColor(stage.state)}
-            >
-              {getOfficialChannelStageLabel(stage.id)}
-            </Badge>
-          ))}
-        </Group>
+      <div style={{ padding: '14px 16px' }}>
+        <Group gap="sm" align="center" wrap="wrap" justify="space-between">
+          <Group gap="sm" align="center" wrap="wrap" style={{ flex: 1 }}>
+            {platformInfo.logo
+              ? <img src={platformInfo.logo} alt={platformInfo.name} style={{ width: 28, height: 28, borderRadius: 6 }} />
+              : <Text size="xl">❓</Text>
+            }
+            <Text size="md" fw={600} style={{ lineHeight: 1.2 }}>{channel.displayName}</Text>
 
-        {/* 操作区：所有按钮 */}
-        <Group gap="xs" justify="flex-end" wrap="wrap">
-          {channel.channelId === 'feishu' && channel.agentId && (
-            <Button
-              variant="light"
-              size="sm"
-              disabled={togglingAnyChannel}
-              onClick={(event) => {
-                event.stopPropagation()
-                onOpenModelConfig()
-              }}
-              className="cursor-pointer"
+            <Badge variant="light" size="xs" radius="sm" color="gray" style={{ textTransform: 'none' }}>
+              {platformInfo.name}
+            </Badge>
+
+            <Badge
+              variant="dot"
+              size="xs"
+              color={channel.enabled ? 'teal' : 'gray'}
             >
-              配置模型
-            </Button>
-          )}
-          <Button
-            color={channel.enabled ? 'orange' : 'teal'}
-            variant="light"
-            size="sm"
-            disabled={togglingAnotherChannel}
-            loading={isToggling}
-            onClick={(event) => {
-              event.stopPropagation()
-              onToggleEnabled()
-            }}
-            className="cursor-pointer"
+              {getChannelEnabledLabel(channel.enabled)}
+            </Badge>
+
+            {channel.channelId === 'feishu' && (
+              <Badge
+                variant="dot"
+                size="xs"
+                color={getRuntimeBadgeColor(channel.runtimeState)}
+              >
+                {getRuntimeLabel(channel.runtimeState)}
+              </Badge>
+            )}
+
+            {shouldShowPluginStatus(channel) && channel.pluginStatus && getVisiblePluginStatusStages(channel.pluginStatus).map((stage) => (
+              <Badge
+                key={`${channel.id}:${stage.id}`}
+                variant="dot"
+                size="xs"
+                color={getOfficialChannelStageColor(stage.state)}
+              >
+                {getOfficialChannelStageLabel(stage.id)}
+              </Badge>
+            ))}
+          </Group>
+
+          <Menu
+            opened={menuOpened}
+            onChange={setMenuOpened}
+            position="bottom-end"
+            shadow="md"
+            withinPortal
           >
-            {channel.enabled ? '禁用' : '启用'}
-          </Button>
-          {channel.pairingRequired && (
-            <Button
-              variant="light"
-              size="sm"
-              disabled={togglingAnyChannel}
-              onClick={(event) => {
-                event.stopPropagation()
-                onOpenPairing()
-              }}
-              className="cursor-pointer"
-            >
-              配对管理
-            </Button>
-          )}
-          {shouldShowFeishuPluginRepairAction(channel) && (
-            <Button
-              variant="light"
-              size="sm"
-              disabled={togglingAnyChannel || (Boolean(repairingPluginChannelId) && repairingPluginChannelId !== channel.channelId)}
-              loading={repairingPluginChannelId === channel.channelId}
-              onClick={(event) => {
-                event.stopPropagation()
-                onRepairPlugin()
-              }}
-              className="cursor-pointer"
-            >
-              修复飞书插件
-            </Button>
-          )}
-          <Button
-            color="red"
-            variant="light"
-            size="sm"
-            disabled={togglingAnyChannel}
-            onClick={(event) => {
-              event.stopPropagation()
-              onRemove()
-            }}
-            className="cursor-pointer"
-          >
-            删除
-          </Button>
+            <Menu.Target>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="lg"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setMenuOpened((o) => !o)
+                }}
+                className="cursor-pointer"
+              >
+                <IconSettings size={18} />
+              </ActionIcon>
+            </Menu.Target>
+
+            <Menu.Dropdown>
+              <Menu.Item
+                leftSection={<IconPencil size={14} />}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onRename()
+                }}
+              >
+                重命名
+              </Menu.Item>
+
+              {channel.channelId === 'feishu' && channel.agentId && (
+                <Menu.Item
+                  leftSection={<IconCpu size={14} />}
+                  disabled={togglingAnyChannel}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onOpenModelConfig()
+                  }}
+                >
+                  配置模型
+                </Menu.Item>
+              )}
+
+              <Menu.Item
+                leftSection={channel.enabled ? <IconPlayerPause size={14} /> : <IconPlayerPlay size={14} />}
+                color={channel.enabled ? 'orange' : 'teal'}
+                disabled={togglingAnotherChannel || isToggling}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onToggleEnabled()
+                }}
+              >
+                {channel.enabled ? '禁用' : '启用'}
+              </Menu.Item>
+
+              {channel.pairingRequired && (
+                <Menu.Item
+                  leftSection={<IconLink size={14} />}
+                  disabled={togglingAnyChannel}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onOpenPairing()
+                  }}
+                >
+                  配对管理
+                </Menu.Item>
+              )}
+
+              {shouldShowFeishuPluginRepairAction(channel) && (
+                <Menu.Item
+                  leftSection={<IconTool size={14} />}
+                  disabled={togglingAnyChannel || (Boolean(repairingPluginChannelId) && repairingPluginChannelId !== channel.channelId)}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRepairPlugin()
+                  }}
+                >
+                  修复飞书插件
+                </Menu.Item>
+              )}
+
+              <Menu.Divider />
+
+              <Menu.Item
+                leftSection={<IconTrash size={14} />}
+                color="red"
+                disabled={togglingAnyChannel}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onRemove()
+                }}
+              >
+                删除
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       </div>
     </Card>

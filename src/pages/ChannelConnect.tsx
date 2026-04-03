@@ -877,6 +877,7 @@ export default function ChannelConnect({
   const [feishuInstallerPendingPrompt, setFeishuInstallerPendingPrompt] =
     useState<Awaited<ReturnType<typeof window.api.getFeishuInstallerState>>['pendingPrompt']>(null)
   const [showFeishuInstallTutorial, setShowFeishuInstallTutorial] = useState(false)
+  const [showFeishuQrModal, setShowFeishuQrModal] = useState(false)
   const [finishingFeishuSetup, setFinishingFeishuSetup] = useState(false)
   const [refreshingFeishuState, setRefreshingFeishuState] = useState(false)
   const [preparingFeishuManualBinding, setPreparingFeishuManualBinding] = useState(false)
@@ -1060,6 +1061,12 @@ export default function ChannelConnect({
       current === feishuCreateModeRecoveryNotice ? current : feishuCreateModeRecoveryNotice
     )
   }, [feishuCreateModeRecoveryNotice])
+
+  useEffect(() => {
+    if (feishuInstallerAsciiQr.length > 0) {
+      setShowFeishuQrModal(true)
+    }
+  }, [feishuInstallerAsciiQr])
 
   const refreshFeishuSetupState = useCallback(
     async (options?: {
@@ -2305,63 +2312,12 @@ export default function ChannelConnect({
                             </Text>
                           )}
                           <Text size="xs" c="dimmed">
-                            Qclaw 会自动轮询插件状态；如果插件其实已经装好、但页面还没切换，也可以点击上方“刷新状态”立即重试。
+                            Qclaw 会自动轮询插件状态；如果插件其实已经装好、但页面还没切换，也可以点击上方"刷新状态"立即重试。
                           </Text>
                         </div>
                       </div>
                     </div>
-                  ) : feishuBotSetupMode === 'create' ? (
-                    <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)] md:items-start">
-                      {feishuInstallerAsciiQr ? (
-                        <div className="rounded-xl border app-border bg-black px-3 py-3 overflow-auto">
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <p className="text-[11px] font-medium text-emerald-300">本次安装器生成的真实二维码</p>
-                            <Badge size="xs" variant="light" color="success">已刷新</Badge>
-                          </div>
-                          <pre className="whitespace-pre font-mono text-[8px] leading-[1.1] text-zinc-100">
-                            {feishuInstallerAsciiQr}
-                          </pre>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center rounded-xl border app-border bg-black/20 px-4 py-4">
-                          <div className="mb-2 flex w-full items-center justify-between gap-2">
-                            <p className="text-[11px] font-medium app-text-secondary">
-                              {feishuInstallerHasLiveQr ? '本次安装器二维码' : '官网兜底二维码'}
-                            </p>
-                            <Badge
-                              size="xs"
-                              variant="light"
-                              color={feishuInstallerHasLiveQr ? 'success' : feishuInstallerRunning ? 'warning' : 'gray'}
-                            >
-                              {feishuInstallerHasLiveQr ? '已刷新' : feishuInstallerRunning ? '等待刷新' : '未刷新'}
-                            </Badge>
-                          </div>
-                          <QRCodeSVG value={feishuInstallerQrUrl} size={180} includeMargin />
-                          {feishuInstallerRunning && !feishuInstallerHasLiveQr && (
-                            <div className="mt-3 w-full">
-                              <div className="mb-1 flex items-center justify-between text-[11px] app-text-muted">
-                                <span>正在等待官方安装器生成本次二维码</span>
-                                <span>加载中</span>
-                              </div>
-                              <div className="h-1.5 overflow-hidden rounded-full app-bg-tertiary">
-                                <div
-                                  className="h-full rounded-full"
-                                  style={{
-                                    width: '24%',
-                                    marginLeft: 0,
-                                    background: 'linear-gradient(90deg, #10b981 0%, #2dd4bf 100%)',
-                                    boxShadow: '0 0 12px rgba(45, 212, 191, 0.35)',
-                                    animation: 'feishuQrProgress 1.4s ease-in-out infinite',
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                    </div>
-                  ) : (
+                  ) : feishuBotSetupMode === 'link' ? (
                     <div className="space-y-3">
                       <Text size="xs" c="dimmed">
                         已确认飞书官方插件可用，现在可以手动填写已有机器人的 App ID / App Secret。
@@ -2414,7 +2370,7 @@ export default function ChannelConnect({
                         )}
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {(feishuInstallerRunning || feishuInstallerOutput.trim() || feishuInstallerExitCode !== null) && (
                     <Card withBorder radius="md" padding="md" className="app-bg-secondary">
@@ -2433,43 +2389,6 @@ export default function ChannelConnect({
                         >
                           {feishuInstallerRunning ? '运行中' : feishuInstallerExitCode === 0 ? '已完成' : '已退出'}
                         </Badge>
-                      </div>
-
-                      <div className="mb-3 flex flex-wrap gap-2">
-                        <Button
-                          variant="light"
-                          size="compact-xs"
-                          onClick={() => void sendFeishuInstallerInput('\u001b[A')}
-                          disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}
-                        >
-                          上移
-                        </Button>
-                        <Button
-                          variant="light"
-                          size="compact-xs"
-                          onClick={() => void sendFeishuInstallerInput('\u001b[B')}
-                          disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}
-                        >
-                          下移
-                        </Button>
-                        <Button
-                          variant="light"
-                          size="compact-xs"
-                          color="success"
-                          onClick={() => void sendFeishuInstallerInput('\r')}
-                          disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}
-                        >
-                          确认
-                        </Button>
-                        <Button
-                          variant="subtle"
-                          size="compact-xs"
-                          color="danger"
-                          onClick={() => void sendFeishuInstallerInput('\u0003')}
-                          disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}
-                        >
-                          Ctrl+C
-                        </Button>
                       </div>
 
                       <ScrollArea.Autosize mah={220} type="auto" offsetScrollbars>
@@ -2800,6 +2719,24 @@ export default function ChannelConnect({
         opened={showFeishuInstallTutorial}
         onClose={() => setShowFeishuInstallTutorial(false)}
       />
+
+      <Modal
+        opened={showFeishuQrModal && feishuInstallerAsciiQr.length > 0}
+        onClose={() => setShowFeishuQrModal(false)}
+        size="md"
+        title={<Text fw={600}>飞书安装器二维码</Text>}
+        centered
+      >
+        <div className="rounded-xl bg-black px-4 py-4 overflow-auto">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium text-emerald-300">本次安装器生成的真实二维码</p>
+            <Badge size="xs" variant="light" color="success">已刷新</Badge>
+          </div>
+          <pre className="whitespace-pre font-mono text-[8px] leading-[1.1] text-zinc-100">
+            {feishuInstallerAsciiQr}
+          </pre>
+        </div>
+      </Modal>
 
       <Modal
         opened={showQrModal}

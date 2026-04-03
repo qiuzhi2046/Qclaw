@@ -1659,8 +1659,25 @@ export default function ModelsPage() {
     <div className="p-4 h-full overflow-y-auto space-y-2">
       {/* 页头 */}
       <div className="px-1 mb-1 space-y-2">
-        <Group justify="space-between" align="flex-start">
-          <Text size="md" fw={700} className="app-text-primary">AI 模型</Text>
+        <Group justify="space-between" align="center">
+          <Group gap="xs">
+            {!showAddForm && (
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<IconPlus size={14} />}
+                onClick={() => setShowAddForm(true)}
+                className="cursor-pointer"
+              >
+                添加
+              </Button>
+            )}
+          </Group>
+          {activeModel && (
+            <Text size="sm" c="dimmed" className="flex-1 text-center">
+              当前模型: <Text span size="sm" fw={600} className="app-text-primary">{activeModel}</Text>
+            </Text>
+          )}
           <Group gap="xs">
             <SegmentedControl
               size="xs"
@@ -1702,19 +1719,6 @@ export default function ModelsPage() {
         >
           {cleanupNotice.message}
         </Alert>
-      )}
-
-      {/* 当前激活模型 */}
-      {activeModel && (
-        <div className="border app-border rounded-lg px-3 py-2.5 app-bg-secondary" style={{ borderLeft: '3px solid var(--mantine-color-blue-6)' }}>
-          <Group justify="space-between">
-            <Group gap="xs">
-              <Text size="xs" c="dimmed">当前模型</Text>
-              <Text size="sm" fw={600} className="app-text-primary">{activeModel}</Text>
-            </Group>
-            <Badge size="xs" color="blue" variant="dot">已激活</Badge>
-          </Group>
-        </div>
       )}
 
       {/* 已配置 AI 提供商 */}
@@ -1872,41 +1876,15 @@ export default function ModelsPage() {
               </div>
             )
           })}
-
-          {/* 添加 AI 提供商 */}
-          {!showAddForm && (
-            <Button
-              variant="default"
-              size="xs"
-              fullWidth
-              leftSection={<IconPlus size={14} />}
-              onClick={() => setShowAddForm(true)}
-              className="cursor-pointer"
-              styles={{ root: { borderStyle: 'dashed' } }}
-            >
-              添加 AI 提供商
-            </Button>
-          )}
         </div>
       )}
 
       {/* ModelCenter wizard — show when adding */}
       {showAddForm && (
         <div className="border app-border rounded-lg overflow-hidden p-3">
-          <Group justify="space-between" mb="sm">
-            <Text size="sm" fw={600} className="app-text-primary">添加新的 AI 提供商</Text>
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="gray"
-              onClick={() => setShowAddForm(false)}
-              className="cursor-pointer"
-            >
-              取消
-            </Button>
-          </Group>
           <ModelCenter
             onConfigured={handleConfigured}
+            onCancel={() => setShowAddForm(false)}
             stayOnConfigured={true}
             configuredMessage="AI 提供商配置成功"
             collapsible={false}

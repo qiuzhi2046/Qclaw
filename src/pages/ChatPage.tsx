@@ -99,7 +99,7 @@ export default function ChatPage({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
       <DashboardChatPanel
         availabilityState={availabilityState}
         canSend={canSend}

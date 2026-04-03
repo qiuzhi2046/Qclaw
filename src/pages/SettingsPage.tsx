@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Text, Button, Group, Collapse, Modal, Tooltip, SegmentedControl } from '@mantine/core'
+import { Text, Button, Group, Collapse, Modal, Tooltip } from '@mantine/core'
 import { useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { IconChevronRight } from '@tabler/icons-react'
+import logoImg from '@/assets/logo.png'
 import BackupCenter from '../components/BackupCenter'
 import CleanupDialog from '../components/CleanupDialog'
 import FeishuBotManagerModal from '../components/FeishuBotManagerModal'
@@ -95,28 +96,25 @@ export default function SettingsPage({
   const [showReconfigureConfirm, setShowReconfigureConfirm] = useState(false)
 
   return (
-    <div className="p-4 space-y-2">
+    <div className="p-4 pb-2 h-full flex flex-col relative">
+      <div className="space-y-2">
       {/* 通用工具 */}
       <Section title="通用">
-        <Group gap="xs" grow>
+        <div className="grid grid-cols-3 gap-2">
           <Tooltip label={tooltips.settingsPage.updateCenter} withArrow>
-            <Button variant="default" size="xs" onClick={() => setShowUpdateCenter(true)}>升级中心</Button>
+            <Button variant="default" size="sm" fw={400} onClick={() => setShowUpdateCenter(true)}>升级中心</Button>
           </Tooltip>
           <Tooltip label={tooltips.settingsPage.backupCenter} withArrow>
-            <Button variant="default" size="xs" onClick={() => setShowBackupCenter(true)}>备份中心</Button>
+            <Button variant="default" size="sm" fw={400} onClick={() => setShowBackupCenter(true)}>备份中心</Button>
           </Tooltip>
-        </Group>
-        <Group gap="xs" grow>
           <Tooltip label={tooltips.settingsPage.feishuBotManager} withArrow>
-            <Button variant="default" size="xs" onClick={() => setShowFeishuBotManager(true)}>飞书机器人管理</Button>
+            <Button variant="default" size="sm" fw={400} onClick={() => setShowFeishuBotManager(true)}>飞书机器人管理</Button>
           </Tooltip>
           <Tooltip label={tooltips.settingsPage.reconfigure} withArrow>
-            <Button variant="default" size="xs" onClick={() => setShowReconfigureConfirm(true)}>重新进入配置引导</Button>
+            <Button variant="default" size="sm" fw={400} onClick={() => setShowReconfigureConfirm(true)}>重新进入配置引导</Button>
           </Tooltip>
-        </Group>
-        <Group gap="xs" grow>
           <Tooltip label={isDark ? tooltips.settingsPage.toggleThemeToLight : tooltips.settingsPage.toggleThemeToDark} withArrow>
-            <Button variant="default" size="xs" onClick={() => setColorScheme(isDark ? 'light' : 'dark')}>
+            <Button variant="default" size="sm" fw={400} onClick={() => setColorScheme(isDark ? 'light' : 'dark')}>
               亮色/暗色
             </Button>
           </Tooltip>
@@ -128,11 +126,11 @@ export default function SettingsPage({
             }
             withArrow
           >
-            <Button variant="default" size="xs" onClick={onToggleTooltip}>
+            <Button variant="default" size="sm" fw={400} onClick={onToggleTooltip}>
               打开/关闭软件提示
             </Button>
           </Tooltip>
-        </Group>
+        </div>
       </Section>
 
       {/* 聊天输入 */}
@@ -140,46 +138,61 @@ export default function SettingsPage({
         title="聊天输入"
         titleTooltip={tooltips.settingsPage.chatComposerEnterSendMode}
       >
-        <SegmentedControl
-          value={enterSendMode}
-          onChange={(value) => {
-            if (!value) return
-            onChangeEnterSendMode(value as ChatComposerEnterSendMode)
-          }}
-          data={[
-            { value: 'enter', label: 'Enter 发送（默认）' },
-            { value: 'shiftEnter', label: 'Shift+Enter 发送' },
-            { value: 'altEnter', label: 'Alt+Enter 发送' },
-          ]}
-        />
-        <Text size="xs" c="dimmed" mt={8}>
-          提示：切换后将影响聊天输入框的快捷键行为。
-        </Text>
+        <div className="grid grid-cols-3 gap-2">
+          <Button
+            variant={enterSendMode === 'enter' ? 'filled' : 'default'}
+            size="sm"
+            fw={400}
+            onClick={() => onChangeEnterSendMode('enter')}
+          >
+            Enter 发送（默认）
+          </Button>
+          <Button
+            variant={enterSendMode === 'shiftEnter' ? 'filled' : 'default'}
+            size="sm"
+            fw={400}
+            onClick={() => onChangeEnterSendMode('shiftEnter')}
+          >
+            Shift+Enter 发送
+          </Button>
+          <Button
+            variant={enterSendMode === 'altEnter' ? 'filled' : 'default'}
+            size="sm"
+            fw={400}
+            onClick={() => onChangeEnterSendMode('altEnter')}
+          >
+            Alt+Enter 发送
+          </Button>
+        </div>
       </Section>
 
       {/* 卸载清除 */}
       <Section title="卸载清除" titleTooltip={tooltips.settingsPage.deleteOpenClawAndData} defaultOpen={false}>
         <Group gap="xs" grow>
           <Tooltip label={tooltips.settingsPage.cleanupOpenClaw} withArrow>
-            <Button variant="light" color="red" size="xs" onClick={() => setShowCleanupDialog(true)}>删除 OpenClaw</Button>
+            <Button variant="light" color="red" size="sm" fw={400} onClick={() => setShowCleanupDialog(true)}>删除 OpenClaw</Button>
           </Tooltip>
           <Tooltip label={tooltips.settingsPage.cleanupOpenClawData} withArrow>
-            <Button variant="light" color="red" size="xs" onClick={() => setShowDataCleanupDialog(true)}>清理 OpenClaw 数据</Button>
+            <Button variant="light" color="red" size="sm" fw={400} onClick={() => setShowDataCleanupDialog(true)}>清理 OpenClaw 数据</Button>
           </Tooltip>
         </Group>
       </Section>
+      </div>
 
-      {/* 关于 — 与上方按钮规格一致 */}
-      <Button
-        variant="default"
-        size="xs"
-        fullWidth
-        onClick={() => setShowAbout(true)}
-        styles={{ inner: { justifyContent: 'space-between' } }}
-      >
-        <span>关于 Qclaw</span>
-        <IconChevronRight size={14} />
-      </Button>
+      <Tooltip label="关于 Qclaw" withArrow position="left">
+        <button
+          type="button"
+          className="absolute bottom-4 right-4 p-0 border-0 bg-transparent cursor-pointer rounded-full"
+          style={{ lineHeight: 0, transition: 'transform 0.2s ease' }}
+          onClick={() => setShowAbout(true)}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.2)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.95)' }}
+          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1.2)' }}
+        >
+          <img src={logoImg} alt="Qclaw" width={64} height={64} className="rounded-full" />
+        </button>
+      </Tooltip>
 
       <AboutModal opened={showAbout} onClose={() => setShowAbout(false)} />
       <Modal
