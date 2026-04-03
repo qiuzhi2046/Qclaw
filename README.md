@@ -28,6 +28,16 @@
   </p>
 </div>
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=qiuzhi2046%2FQclaw&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=qiuzhi2046/Qclaw&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=qiuzhi2046/Qclaw&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=qiuzhi2046/Qclaw&type=date&legend=top-left" />
+ </picture>
+</a>
+
 <details>
   <summary>目录</summary>
   <ol>
@@ -223,12 +233,21 @@ build/              应用图标与打包资源
 
 [贡献指南](CONTRIBUTING.md)
 
+- **Qclaw贡献者交流群**
+<p>
+  <img src="docs/images/feishu_contributor.png" alt="Qclaw贡献者交流群" height="160">
+  <br />
+  <mark>如果你希望给 Qclaw 做贡献，欢迎加入贡献者交流群！</mark>
+</p>
+
 ## 加入社区
 
-- **Qclaw开源交流群**
+- **Qclaw用户交流群**
 
 <p>
-  <img src="docs/images/feishu_qrcode.png" alt="Qclaw开源交流群二维码" height="180">
+  <img src="docs/images/feishu_qrcode.png" alt="Qclaw用户交流群二维码" height="180">
+  <br />
+  <mark>如果你对Qclaw有疑问、希望与其他朋友交流等，欢迎加入用户交流群！</mark>
 </p>
 
 
