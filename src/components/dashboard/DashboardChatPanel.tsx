@@ -40,6 +40,7 @@ import {
   formatChatTraceEntryMeta,
 } from './chat-panel-diagnostics'
 import { findEquivalentRuntimeModelKey } from '../../lib/model-runtime-resolution'
+import type { ChatComposerEnterSendMode } from '../../lib/chat-composer-enter-send-preference'
 
 const QUICK_PROMPTS = [
   '帮我确认当前模型是否可用',
@@ -197,6 +198,7 @@ export default function DashboardChatPanel({
   availabilityMessage,
   onOpenSettings,
   onEnsureGatewayRunning,
+  enterSendMode,
 }: {
   availabilityState: DashboardChatAvailabilityState
   canSend: boolean
@@ -206,6 +208,7 @@ export default function DashboardChatPanel({
   availabilityMessage?: string
   onOpenSettings: () => void
   onEnsureGatewayRunning: () => Promise<boolean>
+  enterSendMode: ChatComposerEnterSendMode
 }) {
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
@@ -1570,10 +1573,15 @@ export default function DashboardChatPanel({
               value={draft}
               onChange={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  void handleSend()
-                }
+                if (event.key !== 'Enter') return
+                const shouldSend = enterSendMode === 'enter'
+                  ? !event.shiftKey && !event.altKey
+                  : enterSendMode === 'shiftEnter'
+                    ? event.shiftKey
+                    : event.altKey
+                if (!shouldSend) return
+                event.preventDefault()
+                void handleSend()
               }}
               placeholder="输入消息"
               disabled={sending || !canSend}

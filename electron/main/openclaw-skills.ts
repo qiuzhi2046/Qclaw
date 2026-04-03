@@ -349,7 +349,15 @@ export function normalizeSkillInfoCliResult(result: CliResult): CliResult {
 export function isUnsupportedSkillsCommand(result: Pick<CliResult, 'ok' | 'stdout' | 'stderr'>): boolean {
   if (result.ok) return false
   const corpus = `${result.stderr || ''}\n${result.stdout || ''}`.toLowerCase()
-  return /unknown|unsupported|unrecognized|no such|not found|invalid command|too many arguments|expected 0 arguments/.test(corpus)
+  return (
+    /\bunknown command\b/.test(corpus)
+    || /\bunsupported\b/.test(corpus)
+    || /\bunrecognized command\b/.test(corpus)
+    || /\bno such command\b/.test(corpus)
+    || /\binvalid command\b/.test(corpus)
+    || /\btoo many arguments\b/.test(corpus)
+    || /\bexpected 0 arguments\b/.test(corpus)
+  )
 }
 
 export function findNormalizedSkillByNameOrKey(

@@ -2,6 +2,7 @@ import { pruneStalePluginConfigEntries } from './openclaw-config-warnings'
 import { runNodeEvalWithQualifiedRuntime } from './node-subprocess-runtime'
 import { formatDisplayPath } from './openclaw-paths'
 import {
+  getManagedChannelPluginByPluginId,
   isOfficialManagedPluginId,
   listManagedChannelPluginRecords,
 } from '../../src/shared/managed-channel-plugin-registry'
@@ -60,6 +61,28 @@ function normalizePluginIds(values: string[] | undefined): string[] {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))]
 }
 
+function getManagedPluginRecord(pluginId: string) {
+  const normalizedPluginId = String(pluginId || '').trim().toLowerCase()
+  return MANAGED_CHANNEL_PLUGIN_RECORDS.find((record) => record.pluginId.toLowerCase() === normalizedPluginId)
+}
+
+function shouldQuarantineOfficialManagedPlugin(
+  pluginId: string,
+  options: Pick<PluginInstallSafetyOptions, 'scopePluginIds' | 'quarantineOfficialManagedPlugins'>
+): boolean {
+  if (!isOfficialManagedPluginId(pluginId)) return true
+  if (options.quarantineOfficialManagedPlugins !== true) return false
+
+  const record = getManagedPluginRecord(pluginId)
+  if (!record) return true
+
+  const scopedPluginIds = normalizePluginIds(options.scopePluginIds)
+  const isScopedRepair = scopedPluginIds.length > 0
+  if (isScopedRepair) return true
+
+  return record.smokeTestPolicy === 'strict'
+}
+
 function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -84,6 +107,17 @@ function looksLikePluginSdkCompatibilityFailure(detail: string): boolean {
     || /named export .* not found/.test(text)
     || /cannot read (?:properties|property) of undefined/.test(text)
   )
+}
+
+function shouldSkipManagedPluginQuarantine(pluginId: string): boolean {
+  const managedPlugin = getManagedChannelPluginByPluginId(pluginId)
+  if (!managedPlugin) return false
+
+  // Personal Weixin is shipped as an interactive-installer plugin whose entry imports
+  // host-only OpenClaw runtime helpers. The generic Node smoke test in this file is not
+  // a reliable compatibility signal for that package, so quarantining it causes false
+  // positives and breaks unrelated features such as skills listing/install.
+  return managedPlugin.channelId === 'openclaw-weixin'
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -233,7 +267,10 @@ async function findIncompatibleExtensionPlugins(
       if (!pluginSdkResolutionFailure && !pluginSdkCompatibilityFailure) {
         continue
       }
-      if (isOfficialManagedPluginId(entry.name) && options.quarantineOfficialManagedPlugins !== true) {
+      if (!shouldQuarantineOfficialManagedPlugin(entry.name, options)) {
+        break
+      }
+      if (shouldSkipManagedPluginQuarantine(entry.name)) {
         break
       }
       incompatible.push({

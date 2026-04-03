@@ -90,8 +90,22 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function isConfigSecretRefLike(
+  value: unknown
+): value is { source: 'env' | 'file'; provider: string; id: string } {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (
+      (value as Record<string, unknown>).source === 'env'
+      || (value as Record<string, unknown>).source === 'file'
+    )
+    && typeof (value as Record<string, unknown>).provider === 'string'
+    && typeof (value as Record<string, unknown>).id === 'string'
+}
+
 async function resolveFeishuAccountCredentials(accountId: string): Promise<FeishuCredentials | null> {
-  const { readConfig } = await loadCliModule()
+  const { readConfig, resolveConfigSecretValue } = await loadCliModule()
   const config = await readConfig()
   const feishu = (config?.channels?.feishu || {}) as Record<string, any>
   if (!feishu || typeof feishu !== 'object') return null
@@ -104,7 +118,9 @@ async function resolveFeishuAccountCredentials(accountId: string): Promise<Feish
   const merged = accountOverride ? { ...feishu, ...accountOverride } : feishu
 
   const appId = normalizeText(merged.appId)
-  const appSecret = normalizeText(merged.appSecret)
+  const appSecret = isConfigSecretRefLike(merged.appSecret)
+    ? await resolveConfigSecretValue(merged.appSecret)
+    : normalizeText(merged.appSecret)
   if (!appId || !appSecret) return null
 
   return {

@@ -21,6 +21,11 @@ import {
   readTooltipEnabled,
   writeTooltipEnabled,
 } from './lib/tooltip-preference'
+import {
+  readChatComposerEnterSendMode,
+  writeChatComposerEnterSendMode,
+} from './lib/chat-composer-enter-send-preference'
+import type { ChatComposerEnterSendMode } from './lib/chat-composer-enter-send-preference'
 import { shouldCompleteChannelConnect } from './pages/channels-page-utils'
 import type {
   EnvCheckReadyPayload,
@@ -271,6 +276,9 @@ function App() {
   const [pluginRepairRunning, setPluginRepairRunning] = useState(false)
   const [pluginRepairResult, setPluginRepairResult] = useState<PluginRepairResult | null>(null)
   const [tooltipEnabled, setTooltipEnabled] = useState(() => readTooltipEnabled())
+  const [chatComposerEnterSendMode, setChatComposerEnterSendMode] = useState(
+    () => readChatComposerEnterSendMode()
+  )
   const [entryCompatibilitySnapshot, setEntryCompatibilitySnapshot] = useState<OpenClawEntryCompatibilitySnapshot>({
     runtimeStore: null,
     capabilities: null,
@@ -482,6 +490,11 @@ function App() {
       writeTooltipEnabled(next)
       return next
     })
+  }, [])
+
+  const handleChangeChatComposerEnterSendMode = useCallback((nextMode: ChatComposerEnterSendMode) => {
+    setChatComposerEnterSendMode(nextMode)
+    writeChatComposerEnterSendMode(nextMode)
   }, [])
 
   const tooltipThemeOverride = useMemo(() => ({
@@ -706,7 +719,10 @@ function App() {
                 pluginRepairResult={pluginRepairResult}
               />
             } />
-            <Route path="/chat" element={<ChatPage />} />
+            <Route
+              path="/chat"
+              element={<ChatPage enterSendMode={chatComposerEnterSendMode} />}
+            />
             <Route path="/channels" element={<ChannelsPage />} />
             <Route path="/models" element={<ModelsPage />} />
             <Route path="/skills" element={<SkillsPage />} />
@@ -717,6 +733,8 @@ function App() {
                   onReconfigure={handleReconfigure}
                   onToggleTooltip={handleToggleTooltip}
                   tooltipEnabled={tooltipEnabled}
+                  enterSendMode={chatComposerEnterSendMode}
+                  onChangeEnterSendMode={handleChangeChatComposerEnterSendMode}
                 />
               }
             />

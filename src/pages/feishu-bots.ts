@@ -22,7 +22,7 @@ export interface FeishuBotItem {
 export interface AddFeishuBotInput {
   name: string
   appId: string
-  appSecret: string
+  appSecret: unknown
 }
 
 function cloneConfig(config: Record<string, any> | null): Record<string, any> {
@@ -47,6 +47,22 @@ function normalizeLegacyBotDisplayName(rawName: string, accountId: string, isDef
 
 function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isFeishuSecretRefLike(value: unknown): value is { source: 'env' | 'file'; provider: string; id: string } {
+  return hasOwnRecord(value)
+    && (value.source === 'env' || value.source === 'file')
+    && typeof value.provider === 'string'
+    && typeof value.id === 'string'
+}
+
+function hasFeishuSecretInput(value: unknown): boolean {
+  return normalizeText(value).length > 0 || isFeishuSecretRefLike(value)
+}
+
+function cloneFeishuSecretInput<T>(value: T): T {
+  if (!hasOwnRecord(value)) return value
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 function ensureFeishuRoot(config: Record<string, any>): Record<string, any> {
@@ -142,11 +158,11 @@ export function addFeishuBotConfig(
 ): { nextConfig: Record<string, any>; accountId: string } {
   const name = normalizeText(input.name)
   const appId = normalizeText(input.appId)
-  const appSecret = normalizeText(input.appSecret)
+  const appSecret = cloneFeishuSecretInput(input.appSecret)
 
   if (!name) throw new Error('机器人名称不能为空')
   if (!appId) throw new Error('App ID 不能为空')
-  if (!appSecret) throw new Error('App Secret 不能为空')
+  if (!hasFeishuSecretInput(appSecret)) throw new Error('App Secret 不能为空')
 
   const next = cloneConfig(config)
   const feishu = ensureFeishuRoot(next)
@@ -165,7 +181,7 @@ export function addFeishuBotConfig(
     enabled: true,
     name,
     appId,
-    appSecret,
+    appSecret: cloneFeishuSecretInput(appSecret),
     dmPolicy: DEFAULT_FEISHU_CHANNEL_SETTINGS.dmPolicy,
     domain: normalizeText(feishu.domain) || DEFAULT_FEISHU_CHANNEL_SETTINGS.domain,
     groupPolicy: normalizeText(feishu.groupPolicy) || DEFAULT_FEISHU_CHANNEL_SETTINGS.groupPolicy,
@@ -218,12 +234,12 @@ export function activateFeishuBotConfig(
   const feishu = ensureFeishuRoot(next)
 
   if (accountId === DEFAULT_FEISHU_ACCOUNT_ID) {
-    if (!normalizeText(feishu.appId) || !normalizeText(feishu.appSecret)) {
+    if (!normalizeText(feishu.appId) || !hasFeishuSecretInput(feishu.appSecret)) {
       throw new Error('默认飞书机器人缺少完整配置，无法直接关联')
     }
   } else {
     const account = feishu.accounts?.[accountId] as Record<string, any> | undefined
-    if (!account || !normalizeText(account.appId) || !normalizeText(account.appSecret)) {
+    if (!account || !normalizeText(account.appId) || !hasFeishuSecretInput(account.appSecret)) {
       throw new Error('所选飞书机器人缺少完整配置，无法关联')
     }
   }

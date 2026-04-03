@@ -294,9 +294,21 @@ function hasCompleteCredentials(channelConfig: unknown, keys: string[]): boolean
   return keys.every((key) => normalizeText(channelConfig[key]).length > 0)
 }
 
+function hasConfigSecretInput(value: unknown): boolean {
+  return (
+    (typeof value === 'string' && value.trim().length > 0)
+    || (
+      hasOwnRecord(value)
+      && (value.source === 'env' || value.source === 'file')
+      && typeof value.provider === 'string'
+      && typeof value.id === 'string'
+    )
+  )
+}
+
 function hasConfiguredFeishuChannel(config: Record<string, any> | null | undefined): boolean {
   const feishu = config?.channels?.feishu
-  if (hasCompleteCredentials(feishu, ['appId', 'appSecret'])) {
+  if (hasOwnRecord(feishu) && normalizeText(feishu.appId).length > 0 && hasConfigSecretInput(feishu.appSecret)) {
     return true
   }
 
@@ -306,7 +318,9 @@ function hasConfiguredFeishuChannel(config: Record<string, any> | null | undefin
   if (!accounts) return false
 
   return Object.values(accounts).some((account) =>
-    hasCompleteCredentials(account, ['appId', 'appSecret'])
+    hasOwnRecord(account)
+    && normalizeText(account.appId).length > 0
+    && hasConfigSecretInput(account.appSecret)
   )
 }
 

@@ -218,7 +218,15 @@ async function resolvePackageLayout(
     throw new Error('Node fs.promises is unavailable in this runtime')
   }
   const resolvedBinaryPath = await fsPromises.realpath(binaryPath)
-  const packageLocation = await findNearestOpenClawPackageLocation(path.dirname(resolvedBinaryPath), fsPromises)
+
+  let startDir = path.dirname(resolvedBinaryPath)
+
+  if (process.platform === "win32") {
+    const nodeModules = path.join(startDir, "node_modules", "openclaw")
+    startDir = fs.existsSync(nodeModules) ? nodeModules : startDir
+  }
+  
+  const packageLocation = await findNearestOpenClawPackageLocation(startDir, fsPromises)
   if (!packageLocation) {
     throw new Error(
       `Resolved OpenClaw binary does not have an adjacent or parent openclaw package.json: ${resolvedBinaryPath}`
