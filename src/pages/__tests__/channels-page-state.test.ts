@@ -62,7 +62,7 @@ describe('channels page state helpers', () => {
     expect(channelCardSource).toContain('修复飞书插件')
     expect(channelsPageSource).toContain('window.api.repairManagedChannelPlugin')
     expect(channelsPageSource).toContain('window.api.getManagedChannelPluginStatus')
-    expect(channelCardSource).toContain('repairingPluginChannelId === channel.channelId')
+    expect(channelCardSource).toContain('repairingPluginChannelId !== channel.channelId')
   })
 
   it('shows the shared feishu plugin repair action only for feishu bot rows', () => {
