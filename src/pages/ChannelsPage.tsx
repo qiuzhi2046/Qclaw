@@ -32,6 +32,7 @@ import {
   getOfficialChannelStageLabel,
 } from '../shared/official-channel-status-view'
 import { runManagedChannelRepairFlow } from '../shared/managed-channel-repair'
+import ChannelCard from '../components/ChannelCard'
 import { resolveManagedChannelIdentity } from '../shared/managed-channel-identity'
 import { getManagedChannelPluginByChannelId } from '../shared/managed-channel-plugin-registry'
 import { readOpenClawUpstreamModelState } from '../shared/upstream-model-state'
@@ -752,155 +753,21 @@ export default function ChannelsPage() {
               const togglingAnyChannel = Boolean(togglingChannelId)
               const togglingAnotherChannel = Boolean(togglingChannelId && togglingChannelId !== channel.id)
               return (
-                <Card
+                <ChannelCard
                   key={channel.id}
-                  padding="lg"
-                  withBorder
-                  className={`transition-colors duration-200 ${
-                    channel.pairingRequired ? 'cursor-pointer' : ''
-                  }`}
-                  style={channel.pairingRequired ? { '--hover-bg': 'var(--app-bg-tertiary)' } as React.CSSProperties : undefined}
-                  onMouseEnter={(e) => {
-                    if (channel.pairingRequired) e.currentTarget.style.backgroundColor = 'var(--app-bg-tertiary)'
-                  }}
-                  onMouseLeave={(e) => {
-                    if (channel.pairingRequired) e.currentTarget.style.backgroundColor = ''
-                  }}
-                  onClick={channel.pairingRequired ? () => handleOpenPairing(channel) : undefined}
-                >
-                  <Group justify="space-between" align="flex-start">
-                    <Group gap="md" align="flex-start">
-                      {platformInfo.logo
-                        ? <img src={platformInfo.logo} alt={platformInfo.name} style={{ width: 32, height: 32 }} />
-                        : <Text size="2xl">❓</Text>
-                      }
-                      <div>
-                        <Group gap="xs">
-                          <Text size="lg" fw={600}>{channel.name}</Text>
-                          <Badge variant="light" size="sm">
-                            {platformInfo.name}
-                          </Badge>
-                        </Group>
-                        <Group gap="xs" mt={8}>
-                          <Badge variant="light" size="sm" color={channel.enabled ? 'teal' : 'gray'}>
-                            {getChannelEnabledLabel(channel.enabled)}
-                          </Badge>
-                          {channel.channelId === 'feishu' && (
-                            <Badge
-                              variant="light"
-                              size="sm"
-                              color={getRuntimeBadgeColor(channel.runtimeState)}
-                            >
-                              {getRuntimeLabel(channel.runtimeState)}
-                            </Badge>
-                          )}
-                        </Group>
-                        {shouldShowPluginStatus(channel) && channel.pluginStatus && getVisiblePluginStatusStages(channel.pluginStatus).length > 0 && (
-                          <div className="mt-3 space-y-2">
-                            <Group gap="xs">
-                              {getVisiblePluginStatusStages(channel.pluginStatus).map((stage) => (
-                                <Badge
-                                  key={`${channel.id}:${stage.id}`}
-                                  variant="light"
-                                  size="sm"
-                                  color={getOfficialChannelStageColor(stage.state)}
-                                >
-                                  {getOfficialChannelStageLabel(stage.id)}
-                                </Badge>
-                              ))}
-                            </Group>
-                          </div>
-                        )}
-                      </div>
-                    </Group>
-                    <Group gap="xs">
-                      {channel.channelId === 'feishu' && channel.agentId && (
-                        <Button
-                          variant="light"
-                          size="sm"
-                          disabled={togglingAnyChannel}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void handleOpenModelConfig(channel)
-                          }}
-                          className="cursor-pointer"
-                        >
-                          配置模型
-                        </Button>
-                      )}
-                      <Button
-                        color={channel.enabled ? 'orange' : 'teal'}
-                        variant="light"
-                        size="sm"
-                        disabled={togglingAnotherChannel}
-                        loading={isToggling}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleToggleChannelEnabled(channel)
-                        }}
-                        className="cursor-pointer"
-                      >
-                        {channel.enabled ? '禁用' : '启用'}
-                      </Button>
-                      {channel.pairingRequired && (
-                        <Button
-                          variant="light"
-                          size="sm"
-                          disabled={togglingAnyChannel}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            handleOpenPairing(channel)
-                          }}
-                          className="cursor-pointer"
-                        >
-                          配对管理
-                        </Button>
-                      )}
-                      {channel.channelId === 'feishu' && channel.pairingAccountId && (
-                        <Button
-                          variant="light"
-                          size="sm"
-                          disabled={togglingAnyChannel}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            handleOpenDiagnostics(channel)
-                          }}
-                          className="cursor-pointer"
-                        >
-                          故障排查
-                        </Button>
-                      )}
-                      {shouldShowFeishuPluginRepairAction(channel) && (
-                        <Button
-                          variant="light"
-                          size="sm"
-                          disabled={togglingAnyChannel || (Boolean(repairingPluginChannelId) && repairingPluginChannelId !== channel.channelId)}
-                          loading={repairingPluginChannelId === channel.channelId}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void handleRepairFeishuPlugin(channel)
-                          }}
-                          className="cursor-pointer"
-                        >
-                          修复飞书插件
-                        </Button>
-                      )}
-                      <Button
-                        color="red"
-                        variant="light"
-                        size="sm"
-                        disabled={togglingAnyChannel}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleRemoveChannel(channel)
-                        }}
-                        className="cursor-pointer"
-                      >
-                        删除
-                      </Button>
-                    </Group>
-                  </Group>
-                </Card>
+                  channel={channel}
+                  platformInfo={platformInfo}
+                  isToggling={isToggling}
+                  togglingAnyChannel={togglingAnyChannel}
+                  togglingAnotherChannel={togglingAnotherChannel}
+                  repairingPluginChannelId={repairingPluginChannelId}
+                  onOpenModelConfig={() => void handleOpenModelConfig(channel)}
+                  onToggleEnabled={() => void handleToggleChannelEnabled(channel)}
+                  onOpenPairing={() => handleOpenPairing(channel)}
+                  onOpenDiagnostics={() => handleOpenDiagnostics(channel)}
+                  onRepairPlugin={() => void handleRepairFeishuPlugin(channel)}
+                  onRemove={() => void handleRemoveChannel(channel)}
+                />
               )
             })
           )}

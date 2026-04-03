@@ -73,14 +73,14 @@ export default function PairingCode({
   const normalizedFeishuBotLabel =
     channel === 'feishu' && accountName
       ? accountId === 'default' && /^默认\s*bot$/i.test(accountName.trim())
-        ? '默认机器人'
+        ? '机器人'
         : accountId && accountName.trim().toLowerCase() === `bot ${accountId}`.toLowerCase()
           ? `机器人 ${accountId}`
           : accountName
       : accountName
   const feishuBotLabel =
     channel === 'feishu'
-      ? normalizedFeishuBotLabel || (accountId === 'default' ? '默认机器人' : accountId ? `机器人 ${accountId}` : '')
+      ? normalizedFeishuBotLabel || (accountId === 'default' ? '机器人' : accountId ? `机器人 ${accountId}` : '')
       : ''
   const parsedInput = parsePairingInput(code)
   const canPair = isPairingCodeReady(parsedInput.code)

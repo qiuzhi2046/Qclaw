@@ -37,7 +37,7 @@ function normalizeText(value: unknown): string {
 function normalizeLegacyBotDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
   const normalized = normalizeText(rawName)
   if (!normalized) return ''
-  if (isDefault && /^默认\s*bot$/i.test(normalized)) return '默认机器人'
+  if (isDefault && /^默认\s*bot$/i.test(normalized)) return '机器人'
   const normalizedAccountId = normalizeText(accountId)
   if (normalizedAccountId && normalized.toLowerCase() === `bot ${normalizedAccountId}`.toLowerCase()) {
     return `机器人 ${normalizedAccountId}`
@@ -74,7 +74,7 @@ function ensureFeishuRoot(config: Record<string, any>): Record<string, any> {
 function createDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
   const normalizedLegacyName = normalizeLegacyBotDisplayName(rawName, accountId, isDefault)
   if (normalizedLegacyName) return normalizedLegacyName
-  if (isDefault) return '默认机器人'
+  if (isDefault) return '机器人'
   return `机器人 ${accountId}`
 }
 
@@ -130,10 +130,25 @@ export function listFeishuBots(config: Record<string, any> | null): FeishuBotIte
     }
   }
 
-  return bots.sort((a, b) => {
+  const sorted = bots.sort((a, b) => {
     if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
     return a.name.localeCompare(b.name, 'zh-CN')
   })
+
+  const nameCount = new Map<string, number>()
+  for (const bot of sorted) {
+    nameCount.set(bot.name, (nameCount.get(bot.name) || 0) + 1)
+  }
+  const nameIndex = new Map<string, number>()
+  for (const bot of sorted) {
+    if ((nameCount.get(bot.name) || 0) > 1) {
+      const idx = (nameIndex.get(bot.name) || 0) + 1
+      nameIndex.set(bot.name, idx)
+      bot.name = `${bot.name} (${idx})`
+    }
+  }
+
+  return sorted
 }
 
 export function listResidualLegacyFeishuAgentIds(config: Record<string, any> | null): string[] {

@@ -60,7 +60,7 @@ describe('listFeishuBots', () => {
     }
 
     const bots = listFeishuBots(config)
-    expect(bots[0].name).toBe('默认机器人')
+    expect(bots[0].name).toBe('机器人')
     expect(bots[1].name).toBe('机器人 sales')
   })
 })

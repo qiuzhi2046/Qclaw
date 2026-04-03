@@ -48,7 +48,7 @@ function normalizeText(value: unknown): string {
 function normalizeLegacyBotDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
   const normalized = normalizeText(rawName)
   if (!normalized) return ''
-  if (isDefault && /^默认\s*bot$/i.test(normalized)) return '默认机器人'
+  if (isDefault && /^默认\s*bot$/i.test(normalized)) return '机器人'
   const normalizedAccountId = normalizeText(accountId)
   if (normalizedAccountId && normalized.toLowerCase() === `bot ${normalizedAccountId}`.toLowerCase()) {
     return `机器人 ${normalizedAccountId}`
@@ -59,7 +59,7 @@ function normalizeLegacyBotDisplayName(rawName: string, accountId: string, isDef
 function createDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
   const normalizedLegacyName = normalizeLegacyBotDisplayName(rawName, accountId, isDefault)
   if (normalizedLegacyName) return normalizedLegacyName
-  if (isDefault) return '默认机器人'
+  if (isDefault) return '机器人'
   return `机器人 ${accountId}`
 }
 

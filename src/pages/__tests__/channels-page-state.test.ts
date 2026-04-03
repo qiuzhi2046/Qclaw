@@ -50,15 +50,19 @@ describe('channels page state helpers', () => {
   })
 
   it('adds a direct feishu plugin repair action to the channel card actions', () => {
+    const channelCardSource = fs.readFileSync(
+      path.join(process.cwd(), 'src', 'components', 'ChannelCard.tsx'),
+      'utf8'
+    )
     const channelsPageSource = fs.readFileSync(
       path.join(process.cwd(), 'src', 'pages', 'ChannelsPage.tsx'),
       'utf8'
     )
 
-    expect(channelsPageSource).toContain('修复飞书插件')
+    expect(channelCardSource).toContain('修复飞书插件')
     expect(channelsPageSource).toContain('window.api.repairManagedChannelPlugin')
     expect(channelsPageSource).toContain('window.api.getManagedChannelPluginStatus')
-    expect(channelsPageSource).toContain('repairingPluginChannelId === channel.channelId')
+    expect(channelCardSource).toContain('repairingPluginChannelId === channel.channelId')
   })
 
   it('shows the shared feishu plugin repair action only for feishu bot rows', () => {
