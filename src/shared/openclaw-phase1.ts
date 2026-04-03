@@ -180,8 +180,16 @@ function normalizeVersionPart(raw: string): number | null {
 }
 
 function normalizeVersionCore(value: string): string {
-  return String(value || '')
-    .trim()
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  // Extract x.y.z or x.y numeric version from strings like "OpenClaw 2026.3.24 (cff6dc9)"
+  const extracted = raw.match(/\b(\d+\.\d+(?:\.\d+)?)\b/)
+  if (extracted) {
+    return extracted[1].split('-')[0].trim()
+  }
+
+  return raw
     .replace(/^v/i, '')
     .split('-')[0]
     .trim()

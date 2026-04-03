@@ -2,7 +2,7 @@ import type { OpenClawInstallSource } from './openclaw-phase1'
 import { compareLooseVersions } from './openclaw-phase1'
 
 export const MIN_SUPPORTED_OPENCLAW_VERSION = '2026.3.22'
-export const MAX_SUPPORTED_OPENCLAW_VERSION = '2026.3.24'
+export const MAX_SUPPORTED_OPENCLAW_VERSION = '9999.99.99'
 export const PINNED_OPENCLAW_VERSION = '2026.3.24'
 
 export type OpenClawVersionPolicyState =
@@ -36,11 +36,16 @@ export interface OpenClawVersionEnforcementResult {
 }
 
 function normalizeVersionCore(value: string | null | undefined): string {
-  if (value?.startsWith("OpenClaw")) {
-    return value.match(/\d{4}\.\d+\.\d+/)?.[0] || value;
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  // Extract x.y.z or x.y numeric version from strings like "OpenClaw 2026.3.24 (cff6dc9)"
+  const extracted = raw.match(/\b(\d+\.\d+(?:\.\d+)?)\b/)
+  if (extracted) {
+    return extracted[1].split('-')[0].trim()
   }
-  return String(value || '')
-    .trim()
+
+  return raw
     .replace(/^v/i, '')
     .split('-')[0]
     .trim()
@@ -53,7 +58,9 @@ function normalizePathSignature(value: string | null | undefined): string {
 export function isStrictOpenClawPolicyVersion(version: string | null | undefined): boolean {
   const normalized = normalizeVersionCore(version)
   if (!normalized) return false
-  return normalized.split('.').every((part) => /^\d+$/.test(part))
+  // Accept any version that has at least two numeric dot-separated segments (e.g. 2026.3 or 2026.3.24)
+  const parts = normalized.split('.')
+  return parts.length >= 2 && parts.every((part) => /^\d+$/.test(part))
 }
 
 export function normalizeOpenClawPolicyVersion(version: string | null | undefined): string | null {

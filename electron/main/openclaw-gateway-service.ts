@@ -107,7 +107,7 @@ interface EnsureGatewayRunningOptions {
   skipRuntimePrecheck?: boolean
 }
 
-const GATEWAY_SERVICE_NOT_LOADED_PATTERN = /\bgateway service not loaded\b/i
+const GATEWAY_SERVICE_NOT_LOADED_PATTERN = /\bgateway service not loaded\b|\bschtasks run failed\b|\bschtasks.*not found\b/i
 const UNKNOWN_MANAGED_CHANNEL_ID_PATTERN =
   /channels\.([A-Za-z0-9._-]+): unknown channel id: ([A-Za-z0-9._-]+)/gi
 
@@ -1804,7 +1804,43 @@ async function ensureGatewayRunningImpl(
     // Stop any stale gateway processes before reinstalling the daemon service.
     // Multiple residual processes cause bonjour name conflicts and port races.
     await gatewayStop().catch(() => undefined)
-    const installGatewayResult = await runCli(['gateway', 'install'], undefined, 'gateway')
+    let installGatewayResult = await runCli(['gateway', 'install'], undefined, 'gateway')
+
+    // On Windows, gateway install requires admin privileges to create a scheduled task.
+    // If it fails with an access denied error, retry via PowerShell elevation (UAC prompt).
+    if (
+      !installGatewayResult.ok &&
+      process.platform === 'win32' &&
+      /拒绝访问|access.*denied|schtasks.*create.*failed/i.test(
+        `${installGatewayResult.stderr}\n${installGatewayResult.stdout}`
+      )
+    ) {
+      appendGatewayEvidence(context, {
+        source: 'service',
+        message: 'Gateway 服务安装需要管理员权限，正在弹出 UAC 授权窗口...',
+        detail: combineCliOutput(installGatewayResult),
+      })
+
+      // Use cmd /c with Start-Process so UAC dialog appears on top of Electron window
+      const elevatedResult = await runShell(
+        'powershell',
+        [
+          '-NoProfile', '-NonInteractive', '-Command',
+          [
+            '$p = Start-Process -FilePath "cmd.exe"',
+            ' -ArgumentList \'/c openclaw gateway install\'',
+            ' -Verb RunAs -PassThru -Wait;',
+            'exit $p.ExitCode',
+          ].join(''),
+        ],
+        120_000,
+        'gateway'
+      )
+      if (elevatedResult.ok || elevatedResult.code === 0) {
+        installGatewayResult = { ok: true, stdout: elevatedResult.stdout, stderr: elevatedResult.stderr, code: 0 }
+      }
+    }
+
     if (!installGatewayResult.ok) {
       appendGatewayEvidence(context, {
         source: 'service',

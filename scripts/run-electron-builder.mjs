@@ -8,10 +8,19 @@ const { version, displayVersion, timeZone, fromOverride } = packageVersion
 const localPublishUrl = await readLocalPublishUrl()
 const updatePublishUrl = localPublishUrl || String(process.env.QCLAW_UPDATE_PUBLISH_URL || '').trim()
 
+// macOS 专有的签名/公证配置，只在 macOS 上打包时注入
+const isMacBuild = process.platform === 'darwin'
+const macOnlyArgs = isMacBuild ? [
+  '-c.forceCodeSigning=true',
+  '-c.afterSign=scripts/after-sign-notarize.cjs',
+  '-c.afterAllArtifactBuild=scripts/after-all-artifact-build.cjs',
+] : []
+
 const builderArgs = [
   ...forwardedArgs,
   `-c.extraMetadata.version=${version}`,
   ...(updatePublishUrl ? [`-c.publish.url=${updatePublishUrl}`] : []),
+  ...macOnlyArgs,
 ]
 
 console.log(

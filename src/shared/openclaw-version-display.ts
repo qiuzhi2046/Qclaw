@@ -14,6 +14,10 @@ export function normalizeOpenClawVersionDisplay(value: string | null | undefined
   const normalized = String(value || '').trim()
   if (!normalized) return null
 
+  // Extract x.y.z numeric version from strings like "OpenClaw 2026.3.24 (cff6dc9)"
+  const extracted = normalized.match(/\b(\d{4}\.\d+\.\d+|\d+\.\d+\.\d+)\b/)
+  if (extracted) return extracted[1]
+
   const numericPart = parseNumericPart(normalized)
   if (numericPart) return numericPart
 

@@ -946,8 +946,10 @@ async function runShellOnce(
   const normalizedOptions = normalizeRunShellOptions(options)
   const controlDomain = normalizedOptions.controlDomain ?? 'global'
   const spawn = await getSpawnFn()
-  const useShell = normalizedOptions.shell === true
-  const resolvedCommand = useShell ? command : resolveCommandForShelllessSpawn(command)
+  const resolvedCommand = normalizedOptions.shell === true ? command : resolveCommandForShelllessSpawn(command)
+  // On Windows, .cmd/.bat files cannot be spawned directly without a shell
+  const useShell = normalizedOptions.shell === true ||
+    (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedCommand))
   const runOnce = (env: NodeJS.ProcessEnv): Promise<CliResult> =>
     new Promise((resolve) => {
       const forceOpenShell = resolvedCommand.endsWith(".cmd") && process.platform === "win32";
@@ -960,6 +962,11 @@ async function runShellOnce(
       trackActiveProcess(proc, controlDomain)
       let stdout = ''
       let stderr = ''
+      // On Windows, CLI tools may output GBK/CP936; set encoding to handle it
+      if (process.platform === 'win32') {
+        proc.stdout?.setEncoding('utf8')
+        proc.stderr?.setEncoding('utf8')
+      }
       proc.stdout?.on('data', (d) => (stdout += d.toString()))
       proc.stderr?.on('data', (d) => (stderr += d.toString()))
       proc.on('close', (code) => {
@@ -3771,7 +3778,15 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
         '[System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")'
       ], MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs, 'env')
       if (result.ok && result.stdout.trim()) {
-        return commitPath(result.stdout.trim())
+        // Merge registry PATH with known candidate dirs (e.g. %APPDATA%\npm)
+        const registryPath = result.stdout.trim()
+        const mergedPath = buildCliPathWithCandidates({
+          platform,
+          currentPath: registryPath,
+          detectedNodeBinDir,
+          env: { ...process.env, PATH: registryPath },
+        })
+        return commitPath(mergedPath)
       }
       return commitPath(buildCliPathWithCandidates({
         platform,
@@ -3927,7 +3942,8 @@ export async function waitForCommandAvailable(
       try {
         return await runShell(command, args, MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs, {
           controlDomain,
-          shell: false,
+          // On Windows .cmd files require shell:true; safe to always enable for availability probes
+          shell: process.platform === 'win32',
         })
       } catch {
         return {

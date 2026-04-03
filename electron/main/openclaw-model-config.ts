@@ -405,7 +405,9 @@ function buildProviderValidationEnv(params: {
   const legacyEnvPatch = buildOpenClawLegacyEnvPatch(process.env)
   const env: Partial<NodeJS.ProcessEnv> = {
     ...legacyEnvPatch,
-    OPENCLAW_HOME: params.isolatedHomeDir,
+    // On Windows OPENCLAW_HOME with an empty temp dir causes CLI to fail finding
+    // required config. Use the real home dir and only override the target key.
+    ...(process.platform !== 'win32' ? { OPENCLAW_HOME: params.isolatedHomeDir } : {}),
     OPENCLAW_AUTH_STORE_READONLY: '1',
     OPENCLAW_CONFIG_PATH: undefined,
     OPENCLAW_PROFILE: undefined,
