@@ -1546,10 +1546,10 @@ function resolveChatModelSwitchFailureMessage(result: CliLikeResult): string {
     return `当前 OpenClaw 未启用模型 ${modelNotAllowedMatch[1]}，请先在 OpenClaw 中配置并允许该模型后再试`
   }
   if (/origin not allowed/i.test(merged)) {
-    return 'Gateway Control UI 拒绝了当前来源，暂时无法切换会话模型，请检查 gateway.controlUi.allowedOrigins 配置'
+    return '网关 Control UI 拒绝了当前来源，暂时无法切换会话模型，请检查 gateway.controlUi.allowedOrigins 配置'
   }
   if (/missing scope:\s*operator\.admin/i.test(merged)) {
-    return '当前 Gateway 连接缺少 operator.admin 权限，暂时无法切换会话模型'
+    return '当前网关连接缺少 operator.admin 权限，暂时无法切换会话模型'
   }
   return getCliFailureMessage(result, '切换当前会话模型失败')
 }

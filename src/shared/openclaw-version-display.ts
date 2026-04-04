@@ -23,5 +23,5 @@ export function normalizeOpenClawVersionDisplay(value: string | null | undefined
 
 export function formatOpenClawVersionLabel(value: string | null | undefined): string {
   const normalized = normalizeOpenClawVersionDisplay(value)
-  return normalized ? `OpenClaw ${normalized}` : 'OpenClaw 运行时'
+  return normalized ? `OpenClaw ${normalized}` : 'OpenClaw 运行状态'
 }

@@ -287,7 +287,7 @@ export async function issueDesiredRuntimeRevision(
       blockingReason: 'unknown_runtime_state',
       blockingDetail: null,
       lastReconcileAt: requestedAt,
-      lastReconcileSummary: `已申请运行时修订 ${desiredRevision}，等待 Gateway 消费最新变更。`,
+      lastReconcileSummary: `已申请运行状态修订 ${desiredRevision}，等待网关消费最新变更。`,
       lastActions: options.actions ? [...options.actions] : store.runtime.lastActions,
     },
   })
@@ -317,7 +317,7 @@ export async function markRuntimeRevisionInProgress(
       blockingDetail: sanitizeGatewayRuntimeReasonDetail(options.blockingDetail),
       lastReconcileAt: startedAt,
       lastReconcileSummary:
-        options.summary || `正在应用运行时修订 ${nextRevision}，等待 Gateway/Auth 链路确认消费。`,
+        options.summary || `正在应用运行状态修订 ${nextRevision}，等待网关/Auth 链路确认消费。`,
       lastActions: options.actions ? [...options.actions] : store.runtime.lastActions,
     },
   })
@@ -372,8 +372,8 @@ export async function confirmRuntimeReconcile(params: {
         lastReconcileSummary:
           params.summary ||
           (fullyApplied
-            ? `运行时修订 ${nextAppliedRevision} 已确认生效。`
-            : `运行时修订 ${nextAppliedRevision} 已部分生效，仍有待确认的变更。`),
+            ? `运行状态修订 ${nextAppliedRevision} 已确认生效。`
+            : `运行状态修订 ${nextAppliedRevision} 已部分生效，仍有待确认的变更。`),
         lastActions: params.actions ? [...params.actions] : store.runtime.lastActions,
       },
     })
@@ -394,7 +394,7 @@ export async function confirmRuntimeReconcile(params: {
       safeToRetry,
       lastReconcileAt: confirmedAt,
       lastReconcileSummary:
-        params.summary || `运行时修订 ${revision} 尚未确认完成，当前阻塞原因为 ${blockingReason}。`,
+        params.summary || `运行状态修订 ${revision} 尚未确认完成，当前阻塞原因为 ${blockingReason}。`,
       lastActions: params.actions ? [...params.actions] : store.runtime.lastActions,
     },
   })

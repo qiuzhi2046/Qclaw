@@ -124,7 +124,7 @@ export async function buildOpenClawCleanupPreview(
         )
       }
     }
-    deleteItems.push('将停止 Gateway 服务并清理 Qclaw 管理的 shell block。')
+    deleteItems.push('将停止网关服务并清理 Qclaw 管理的 shell block。')
   }
 
   if (request.actionType === 'qclaw-uninstall-remove-openclaw') {

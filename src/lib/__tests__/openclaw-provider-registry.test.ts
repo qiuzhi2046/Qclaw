@@ -75,6 +75,10 @@ describe('openclaw-provider-registry', () => {
     expect(resolveProviderEnvKey('custom-enterprise')).toBeUndefined()
   })
 
+  it('exposes the updated local provider description for ollama', () => {
+    expect(getProviderMetadata('ollama')?.description).toBe('本地 LLM 环境')
+  })
+
   it('builds dashboard catalog entries from the centralized registry', () => {
     const catalog = getKnownProviderCatalog()
     expect(catalog.find((provider) => provider.id === 'openai')).toEqual({

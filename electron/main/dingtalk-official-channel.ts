@@ -86,7 +86,7 @@ function buildGatewayResult(
     ok: Boolean(result.ok),
     running: result.running === true,
     requestedAction,
-    summary: String(result.summary || '').trim() || 'Gateway 重载结果未返回摘要',
+    summary: String(result.summary || '').trim() || '网关重载结果未返回摘要',
     ...(String(result.stateCode || '').trim() ? { stateCode: String(result.stateCode).trim() } : {}),
     ...(joinNonEmpty([result.stderr, result.stdout])
       ? { detail: joinNonEmpty([result.stderr, result.stdout]).slice(0, 2000) }
@@ -280,7 +280,7 @@ async function ensureDingtalkPluginInstalled(
       channelId: 'dingtalk',
       pluginId: context.pluginId,
       command: `openclaw plugins install ${context.packageName}`,
-      message: 'CLI 报告钉钉插件已存在，已复用当前官方插件安装',
+      message: '命令行工具报告钉钉插件已存在，已复用当前官方插件安装',
     })
     return { ok: true }
   }
@@ -319,7 +319,7 @@ async function reloadGatewayForDingtalkOperation(
   if (!reloadResult.ok || reloadResult.running !== true) {
     return {
       ok: false,
-      message: context.gatewayResult.summary || 'Gateway 启动失败',
+      message: context.gatewayResult.summary || '网关启动失败',
       code: reloadResult.code ?? 1,
     }
   }

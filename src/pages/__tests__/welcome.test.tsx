@@ -23,5 +23,8 @@ describe('Welcome', () => {
     expect(html).toContain('Openclaw权限较大，不建议使用含有重要文件的工作电脑')
     expect(html).toContain('当前Openclaw 要求 Node.js 版本高于22.16')
     expect(html).toContain('Qclaw 会自动安装最新版node，可能造成node版本覆盖')
+    expect(html).toContain('OpenClaw 命令行工具')
+    expect(html).toContain('使用 AI 服务可能产生费用，具体取决于你选择的服务商和使用量。')
+    expect(html).toContain('本地数据存储（所有配置和数据默认只保存在此电脑上）')
   })
 })

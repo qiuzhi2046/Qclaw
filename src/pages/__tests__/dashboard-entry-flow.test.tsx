@@ -153,7 +153,7 @@ describe('dashboard entry bootstrap flow', () => {
     const result = await runDashboardEntryBootstrapFlow(api)
 
     expect(result.snapshot.gatewayRunning).toBe(false)
-    expect(result.softWarnings).toContain('Gateway 状态读取失败，控制面板将先按离线快照进入：health down')
+    expect(result.softWarnings).toContain('暂时无法读取网关状态，控制面板会先按当前已知状态打开。')
 
     const html = renderToStaticMarkup(
       <MantineProvider>
@@ -180,7 +180,7 @@ describe('dashboard entry bootstrap flow', () => {
 
     const result = await runDashboardEntryBootstrapFlow(api)
 
-    expect(result.softWarnings).toContain('飞书配对状态读取失败：pairing down')
+    expect(result.softWarnings).toContain('飞书连接状态读取失败。')
     expect(result.snapshot.pairingSummary).toBeNull()
     expect(result.snapshot.modelStatus).toMatchObject({
       defaultModel: 'openai/gpt-5.4-pro',
@@ -194,7 +194,7 @@ describe('dashboard entry bootstrap flow', () => {
 
     const result = await runDashboardEntryBootstrapFlow(api)
 
-    expect(result.softWarnings).toContain('飞书运行态读取失败：runtime down')
+    expect(result.softWarnings).toContain('飞书插件信息读取失败。')
     expect(result.snapshot.pairingSummary).toBeNull()
   })
 
@@ -224,10 +224,8 @@ describe('dashboard entry bootstrap flow', () => {
 
     const result = await runDashboardEntryBootstrapFlow(api)
 
-    expect(result.softWarnings).toContain(
-      '模型上游状态暂不可用，已回退到 CLI 状态快照：control-ui-app-unavailable'
-    )
-    expect(result.softWarnings).toContain('模型状态读取失败：控制面板将先按配置快照显示模型信息。')
+    expect(result.softWarnings).toContain('暂时无法读取最新模型状态，当前先按已有配置显示模型信息。')
+    expect(result.softWarnings).toContain('模型状态暂时不可用，稍后可在控制面板中刷新。')
     expect(result.snapshot.modelStatus).toBeNull()
   })
 
@@ -262,9 +260,7 @@ describe('dashboard entry bootstrap flow', () => {
     expect(result.snapshot.modelStatus).toMatchObject({
       defaultModel: 'anthropic/claude-sonnet-4-6',
     })
-    expect(result.softWarnings).toContain(
-      '模型上游状态暂不可用，已回退到 CLI 状态快照：control-ui-app-missing-model-state'
-    )
+    expect(result.softWarnings).toContain('暂时无法读取最新模型状态，当前先按已有配置显示模型信息。')
     expect(api.getModelStatus).toHaveBeenCalledTimes(1)
   })
 
@@ -279,7 +275,7 @@ describe('dashboard entry bootstrap flow', () => {
     const result = await runDashboardEntryBootstrapFlow(api)
 
     expect(result.snapshot.gatewayRunning).toBe(false)
-    expect(result.softWarnings).toContain('Gateway 当前未就绪：Gateway 未 ready')
+    expect(result.softWarnings).toContain('网关当前未就绪：Gateway 未 ready')
   })
 
   it('treats config reads as a hard block', async () => {
@@ -288,7 +284,7 @@ describe('dashboard entry bootstrap flow', () => {
     })
 
     await expect(runDashboardEntryBootstrapFlow(api)).rejects.toMatchObject({
-      title: '共享配置暂时不可读取',
+      title: '配置暂时无法读取',
     })
   })
 })

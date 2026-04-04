@@ -26,7 +26,7 @@ const NAV_ITEMS = [
   },
   {
     to: '/channels',
-    label: 'IM 渠道',
+    label: '消息渠道',
     tooltip: tooltips.layout.navigation.channelsExplain,
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -36,7 +36,7 @@ const NAV_ITEMS = [
   },
   {
     to: '/models',
-    label: '模型与 API',
+    label: 'AI 模型',
     tooltip: tooltips.layout.navigation.modelsExplain,
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

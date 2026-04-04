@@ -72,7 +72,7 @@ describe('classifyGatewayRuntimeState', () => {
     })
 
     expect(result.stateCode).toBe('websocket_1006')
-    expect(result.summary).toBe('控制界面与本地 Gateway 的 device token 不一致')
+    expect(result.summary).toBe('控制界面与本地网关的 device token 不一致')
     expect(result.reasonDetail).toMatchObject({
       source: 'control-ui-app',
       code: 'device_token_mismatch',

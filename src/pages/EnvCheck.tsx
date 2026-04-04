@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ActionIcon, Alert, Button, Loader, Modal, Text, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { IconRefresh } from '@tabler/icons-react'
 import { ENV_CHECK_UI_POLICY, getEnvCheckSupportActionsForIssueKind, type EnvCheckSupportAction } from '../shared/env-check-policy'
 import {
   classifyMacGitToolsIssue,
@@ -338,7 +339,7 @@ export function buildOpenClawGateState(
 
   const needsTakeoverNotice = shouldShowTakeoverNotice(activeCandidate)
   const withTakeoverSuffix = (message: string): string =>
-    needsTakeoverNotice ? `${message} 原配置数据不会被覆盖，并会额外进行备份接管。` : message
+    needsTakeoverNotice ? `${message} 原配置数据不会被覆盖，并会额外备份后继续使用。` : message
 
   switch (upgradeCheck.enforcement) {
     case 'optional_upgrade':
@@ -397,7 +398,7 @@ export function buildOpenClawGateState(
         statusLabel: `需手动调整到 ${upgradeCheck.targetVersion || PINNED_OPENCLAW_VERSION}`,
         message:
           upgradeCheck.manualHint ||
-          `当前 OpenClaw 版本不在支持范围内，且当前安装来源暂不支持程序内自动纠偏，请先手动调整到 ${upgradeCheck.targetVersion || PINNED_OPENCLAW_VERSION}`,
+          `当前 OpenClaw 版本不在支持范围内，且当前安装来源暂不支持程序内自动修复，请先手动调整到 ${upgradeCheck.targetVersion || PINNED_OPENCLAW_VERSION}`,
         manualHint: upgradeCheck.manualHint,
       }
     case 'none':
@@ -409,7 +410,7 @@ export function buildOpenClawGateState(
         canUpgrade: false,
         canAutoCorrect: false,
         blocksContinue: false,
-        statusLabel: '已处于受支持上限',
+        statusLabel: '',
         message: withTakeoverSuffix('当前 OpenClaw 已是受支持上限版本'),
       }
   }
@@ -477,9 +478,9 @@ function formatCancelDomainSummary(domains: string[]): string {
 }
 
 const INITIAL_STEPS: Step[] = [
-  { id: 'node', label: 'Node.js 运行时', description: '检查 Node.js 是否已安装', status: 'pending' },
-  { id: 'openclaw', label: 'OpenClaw CLI', description: '检查或安装命令行工具', status: 'pending' },
-  { id: 'gateway', label: 'Gateway 服务', description: '记录后续 Gateway 可用性确认时机', status: 'pending' },
+  { id: 'node', label: 'Node.js', description: '检查 Node.js 是否已安装', status: 'pending' },
+  { id: 'openclaw', label: 'OpenClaw 命令行工具', description: '检查或安装命令行工具', status: 'pending' },
+  { id: 'gateway', label: '网关服务', description: '记录后续网关可用性确认时机', status: 'pending' },
 ]
 
 function createInitialSteps(): Step[] {
@@ -490,7 +491,7 @@ function buildDeferredGatewayStepState(): Pick<Step, 'status' | 'version' | 'des
   return {
     status: 'ok',
     version: '后续确认',
-    description: '认证和渠道配置完成后再确认 Gateway 可用性',
+    description: '认证和渠道配置完成后再确认网关可用性',
     progress: 100,
   }
 }
@@ -534,7 +535,7 @@ function TakeoverNotification({
     for (const failure of failures) {
       notifications.show({
         id: `takeover-fail-${failure.candidateId}`,
-        title: '备份失败',
+        title: '自动备份失败',
         message: formatTakeoverFailureManualBackupWarning(failure),
         color: 'red',
         autoClose: false,
@@ -894,7 +895,7 @@ export default function EnvCheck({
         updateStep('openclaw', {
           status: 'pending-install',
           version: nextGateState.activeCandidate?.version || activeCandidate.version,
-          description: '你未接受 OpenClaw 自动版本处理，Qclaw 即将退出。',
+          description: '你未接受 OpenClaw 自动版本调整，Qclaw 即将退出。',
           progress: 100,
         })
         void window.api.quitApp().catch(() => null)
@@ -909,7 +910,7 @@ export default function EnvCheck({
 
       const correctionResult = await window.api.runOpenClawUpgrade()
       if (!correctionResult.ok) {
-        const failureMessage = correctionResult.message || 'OpenClaw 版本自动纠偏失败'
+        const failureMessage = correctionResult.message || 'OpenClaw 版本自动修复失败'
         setOpenClawUpgradeError(failureMessage)
         setOpenClawGateState(nextGateState)
         setIsRefreshingOpenClawVersion(false)
@@ -1033,9 +1034,10 @@ export default function EnvCheck({
         autoClose: 5000,
       })
     } catch (error) {
+      console.error('record manual backup acknowledgment failed', error)
       notifications.show({
         title: '继续接管失败',
-        message: error instanceof Error ? error.message : String(error),
+        message: '未能记录手动备份确认，请稍后重试。',
         color: 'red',
         autoClose: 6000,
       })
@@ -1058,15 +1060,16 @@ export default function EnvCheck({
       setHistoryOnlyRecoveryConfirmOpened(false)
       notifications.show({
         title: '已记录手动备份确认',
-        message: '将重新执行环境检查，并继续恢复历史 OpenClaw 运行环境。',
+        message: '将重新执行环境检查，并继续恢复历史 OpenClaw 环境。',
         color: 'brand',
         autoClose: 5000,
       })
       resetEnvCheck(runAttempt)
     } catch (error) {
+      console.error('record history recovery manual backup acknowledgment failed', error)
       notifications.show({
         title: '继续恢复失败',
-        message: error instanceof Error ? error.message : String(error),
+        message: '未能记录手动备份确认，请稍后重试。',
         color: 'red',
         autoClose: 6000,
       })
@@ -1079,7 +1082,7 @@ export default function EnvCheck({
     if (isRunning || isRefreshingOpenClawVersion || isUpgradingOpenClaw || activeTakeoverBackupBlocked) return
     setIsUpgradingOpenClaw(true)
     setOpenClawUpgradeError('')
-    updateStep('openclaw', { status: 'installing', description: '正在升级 OpenClaw CLI...', progress: 92 })
+    updateStep('openclaw', { status: 'installing', description: '正在升级 OpenClaw 命令行工具...', progress: 92 })
 
     try {
       const upgradeResult = await window.api.runOpenClawUpgrade()
@@ -1090,8 +1093,8 @@ export default function EnvCheck({
       await window.api.refreshEnvironment()
       resetEnvCheck(runAttempt)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setOpenClawUpgradeError(message)
+      console.error('openclaw upgrade failed', error)
+      setOpenClawUpgradeError('OpenClaw 升级失败，请稍后重试。')
       updateStep('openclaw', {
         status: openClawGateState?.blocksContinue ? 'pending-install' : 'ok',
         description: openClawGateState?.message || 'OpenClaw 升级失败，请稍后重试',
@@ -1114,7 +1117,7 @@ export default function EnvCheck({
     const recoveredDiscovery = await window.api.discoverOpenClaw().catch(() => null)
     const recoveredCandidate = resolveActiveOpenClawCandidate(recoveredDiscovery)
     if (!recoveredDiscovery || !recoveredCandidate) {
-      showFatalMessage('历史 OpenClaw 运行环境补装后，仍无法识别可接管的安装。请重试或检查旧数据目录是否完整。')
+      showFatalMessage('历史 OpenClaw 环境补装后，仍无法识别可接管的安装。请重试或检查旧数据目录是否完整。')
       return null
     }
 
@@ -1161,7 +1164,7 @@ export default function EnvCheck({
     updateStep('openclaw', {
       status: 'ok',
       version: managedCandidate.version,
-      description: '已恢复历史 OpenClaw 运行环境并完成备份接管',
+      description: '已恢复历史 OpenClaw 环境，并完成备份后继续使用',
       progress: 100,
     })
     setCurrentStep(2)
@@ -1180,7 +1183,8 @@ export default function EnvCheck({
       const canceledSummary = formatCancelDomainSummary(cancelResult.canceledDomains)
       const failedSummary = formatCancelDomainSummary(cancelResult.failedDomains)
       if (cancelResult.failedDomains.length > 0) {
-        showFatalMessage(`操作已取消。已停止域：${canceledSummary}；停止失败域：${failedSummary}`)
+        console.warn('cancel command partially failed', { canceledSummary, failedSummary, cancelResult })
+        showFatalMessage('已停止部分操作，但仍有任务未能停止，请稍后重试。')
         return
       }
 
@@ -1191,11 +1195,12 @@ export default function EnvCheck({
       setIsRunning(false)
 
       if (canceled) {
-        showFatalMessage(`操作已取消。已停止域：${canceledSummary}`)
+        console.warn('cancel command stopped active work', { canceledSummary, cancelResult })
+        showFatalMessage('已停止当前操作。')
         return
       }
 
-      showFatalMessage('当前没有可取消的运行任务。')
+      showFatalMessage('当前没有正在进行的操作。')
     }
   }
 
@@ -1265,9 +1270,10 @@ export default function EnvCheck({
         throw new Error(`升级后版本仍低于要求（当前: ${recheckResult.version}，要求: >= ${requiredNodeVersion}）`)
       }
     } catch (error) {
+      console.error('manual node upgrade failed', error)
       updateStep('node', {
         status: 'pending-install',
-        error: `升级失败: ${error instanceof Error ? error.message : String(error)}`
+        error: '升级失败，请稍后重试。'
       })
       setIsRunning(false)
     }
@@ -1289,7 +1295,7 @@ export default function EnvCheck({
       return
     }
     if (!window.api) {
-      setFatalIssue({ message: '桌面运行环境初始化失败（window.api 不可用），请重启应用重试。' })
+      setFatalIssue({ message: '桌面运行环境初始化失败，请重启应用后重试。' })
       return
     }
     setIsRunning(true)
@@ -1352,9 +1358,9 @@ export default function EnvCheck({
       try {
         nodeInstallPlan = await window.api.resolveNodeInstallPlan()
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        console.error('resolve latest Node install info failed', error)
         updateStep('node', { status: 'error', error: '无法获取最新版本' })
-        showFatalMessage(`无法获取最新 Node.js 稳定版安装信息，请检查网络后重试。${message ? ` 原始错误：${message}` : ''}`, 'download-failed')
+        showFatalMessage('暂时无法获取 Node.js 安装信息，请检查网络后重试。', 'download-failed')
         setIsRunning(false)
         return
       }
@@ -1390,8 +1396,8 @@ export default function EnvCheck({
       setCurrentStep(1)
     }
 
-    // 第二步：检测 OpenClaw CLI
-    updateStep('openclaw', { status: 'checking', description: '正在检查 OpenClaw CLI...', progress: needNode ? 25 : 20 })
+    // 第二步：检测 OpenClaw 命令行工具
+    updateStep('openclaw', { status: 'checking', description: '正在检查 OpenClaw 命令行工具...', progress: needNode ? 25 : 20 })
     await delay(envCheckTiming.transitionShortMs)
     const openclawResult = await window.api.checkOpenClaw()
     const initialDiscovery = await window.api.discoverOpenClaw().catch(() => null)
@@ -1420,13 +1426,13 @@ export default function EnvCheck({
     if (installDecision.requiresRecovery) {
       updateStep('openclaw', {
         status: 'pending-install',
-        description: '检测到历史 OpenClaw 数据，待恢复运行环境',
+        description: '检测到历史 OpenClaw 数据，待恢复 OpenClaw 环境',
         progress: needNode ? 30 : 25,
       })
     } else if (needOpenClawInstall) {
       updateStep('openclaw', {
         status: 'pending-install',
-        description: '未检测到 OpenClaw CLI，待安装',
+        description: '未检测到 OpenClaw 命令行工具，待安装',
         progress: needNode ? 30 : 25,
       })
     } else {
@@ -1434,13 +1440,13 @@ export default function EnvCheck({
       setCurrentStep(2)
     }
 
-    // 如果都已安装，直接记录 Gateway 会在后续配置完成后再确认
+    // 如果都已安装，直接记录网关会在后续配置完成后再确认
     if (!needNode && !shouldInstallOpenClawRuntime) {
       const gateState = await inspectExistingOpenClaw(55)
       await delay(envCheckTiming.transitionStandardMs)
       updateStep('gateway', {
         status: 'checking',
-        description: '当前阶段跳过 Gateway 运行态检查，后续流程会自动确认...',
+        description: '当前阶段跳过网关运行状态检查，后续流程会自动确认...',
         progress: 0,
       })
       await delay(envCheckTiming.transitionStandardMs)
@@ -1505,7 +1511,7 @@ export default function EnvCheck({
     if (shouldInstallOpenClawRuntime) {
       updateStep('openclaw', {
         status: 'installing',
-        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 运行环境...' : '等待安装...',
+        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 环境...' : '等待安装...',
         progress: needNode ? 55 : 45,
       })
     }
@@ -1516,7 +1522,7 @@ export default function EnvCheck({
     } else if (installProgressStepId === 'openclaw') {
       updateStep('openclaw', {
         status: 'installing',
-        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 运行环境...' : '正在安装 OpenClaw CLI...',
+        description: needOpenClawRuntimeRecovery ? '正在恢复 OpenClaw 环境...' : '正在安装 OpenClaw 命令行工具...',
         progress: 60,
       })
     }
@@ -1543,7 +1549,8 @@ export default function EnvCheck({
         updateStep('openclaw', { status: 'error', error: '安装失败' })
       }
       if (!needNode) {
-        showFatalMessage(`安装失败: ${errDetail}`)
+        console.error('installer failed', errDetail)
+        showFatalMessage('安装失败，请稍后重试。')
       }
       setIsRunning(false)
       return
@@ -1585,13 +1592,13 @@ export default function EnvCheck({
 
       updateStep('openclaw', {
         status: 'checking',
-        description: needOpenClawRuntimeRecovery ? '正在验证 OpenClaw 运行环境...' : '重新检测 OpenClaw CLI...',
+        description: needOpenClawRuntimeRecovery ? '正在验证 OpenClaw 环境...' : '重新检测 OpenClaw 命令行工具...',
         progress: 90,
       })
       const newOpenclawResult = await window.api.checkOpenClaw()
       if (!newOpenclawResult.installed) {
         updateStep('openclaw', { status: 'error', error: '安装后仍无法检测到' })
-        showFatalMessage('OpenClaw CLI 安装异常，请重启应用重试')
+        showFatalMessage('OpenClaw 未能正常识别，请重启应用后重试')
         setIsRunning(false)
         return
       }
@@ -1616,10 +1623,10 @@ export default function EnvCheck({
 
     await delay(envCheckTiming.transitionShortMs)
 
-    // 第三步：记录 Gateway 会在后续配置完成后再确认
+    // 第三步：记录网关会在后续配置完成后再确认
     updateStep('gateway', {
       status: 'checking',
-      description: '当前阶段跳过 Gateway 运行态检查，后续流程会自动确认...',
+      description: '当前阶段跳过网关运行状态检查，后续流程会自动确认...',
       progress: 0,
     })
     await delay(envCheckTiming.transitionStandardMs)
@@ -1638,8 +1645,8 @@ export default function EnvCheck({
       discoveryResult: finalDiscoveryResult,
     })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      showFatalMessage(`环境检测过程中发生异常：${message}`)
+      console.error('env check failed', err)
+      showFatalMessage('环境检查失败，请稍后重试。')
       setIsRunning(false)
     }
   }
@@ -1718,7 +1725,7 @@ export default function EnvCheck({
               loading={pluginRepairRunning}
               onClick={() => { void onRepairPlugins?.() }}
             >
-              修复坏插件环境
+              修复损坏插件环境
             </Button>
           </Tooltip>
         </div>
@@ -1729,7 +1736,7 @@ export default function EnvCheck({
           color="yellow"
           variant="light"
           mb="sm"
-          title="已自动隔离坏插件"
+          title="已自动隔离异常插件"
           withCloseButton
           onClose={() => setPluginRepairNoticeVisible(false)}
         >
@@ -1744,7 +1751,7 @@ export default function EnvCheck({
           color="red"
           variant="light"
           mb="sm"
-          title="坏插件环境修复失败"
+          title="插件问题修复失败"
           withCloseButton
           onClose={() => setPluginRepairErrorVisible(false)}
         >
@@ -1808,6 +1815,17 @@ export default function EnvCheck({
                   {step.error || step.description}
                 </div>
               </div>
+              {step.id === 'openclaw' && openClawGateState?.activeCandidate && !isRunning && (
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => void handleOpenClawRefresh()}
+                  disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
+                  title="刷新 OpenClaw 版本"
+                >
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              )}
               {step.version && step.status === 'ok' && (
                 <div className="text-xs app-text-muted app-bg-tertiary px-2 py-1 rounded">
                   {step.version}
@@ -1844,33 +1862,17 @@ export default function EnvCheck({
                   {openClawGateState.statusLabel}
                 </div>
               )}
-      {step.id === 'openclaw' && openClawGateState?.activeCandidate && !isRunning && (
-                <>
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    onClick={() => void handleOpenClawRefresh()}
-                    disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
-                    title="刷新 OpenClaw 版本"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                      <path d="M21 3v5h-5" />
-                    </svg>
-                  </ActionIcon>
-                  {canShowOpenClawUpgradeAction(openClawGateState, activeTakeoverBackupBlocked) && (
-                    <Button
-                      size="xs"
-                      variant="light"
-                      color="green"
-                      onClick={() => void handleOpenClawUpgrade()}
-                      disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
-                      loading={isUpgradingOpenClaw}
-                    >
-                      {openClawGateState.canAutoCorrect ? '重试修正' : '一键升级'}
-                    </Button>
-                  )}
-                </>
+              {step.id === 'openclaw' && openClawGateState?.activeCandidate && !isRunning && canShowOpenClawUpgradeAction(openClawGateState, activeTakeoverBackupBlocked) && (
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="green"
+                  onClick={() => void handleOpenClawUpgrade()}
+                  disabled={isRefreshingOpenClawVersion || isUpgradingOpenClaw}
+                  loading={isUpgradingOpenClaw}
+                >
+                  {openClawGateState.canAutoCorrect ? '重试修复' : '一键升级'}
+                </Button>
               )}
             </div>
           </Tooltip>
@@ -2006,7 +2008,7 @@ export default function EnvCheck({
         >
           <div className="space-y-4">
             <Text size="sm">
-              请确认你已经完成手动备份，再继续恢复历史 OpenClaw 运行环境。
+              请确认你已经完成手动备份，再继续恢复历史 OpenClaw 环境。
             </Text>
             <Text size="xs" c="dimmed">
               {formatTakeoverFailureManualBackupWarning(historyOnlyRecoveryFailure.failure)}
@@ -2046,13 +2048,8 @@ export default function EnvCheck({
             {formatTakeoverFailureManualBackupWarning(activeTakeoverFailure)}
           </Text>
           <Text size="xs" c="dimmed" mt="xs">
-            为了避免在没有兜底备份的情况下直接接管旧安装，Qclaw 先阻止进入控制面板。你可以重试自动备份；如果已经按上面的路径完成手动备份，也可以继续接管。
+            为了避免在没有备份的情况下直接接管旧安装，Qclaw 暂时不会继续。你可以重试自动备份；如果已经按上面的路径完成手动备份，也可以继续。
           </Text>
-          {activeTakeoverFailure.message && activeTakeoverFailure.message !== '自动备份失败，请稍后重试。' && (
-            <Text size="xs" c="yellow" mt="xs">
-              系统返回：{activeTakeoverFailure.message}
-            </Text>
-          )}
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="xs"

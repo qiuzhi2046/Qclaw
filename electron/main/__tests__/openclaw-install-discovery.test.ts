@@ -322,6 +322,6 @@ describe('discoverOpenClawInstallations', () => {
         reason: 'default-home-dir',
       },
     ])
-    expect(result.warnings).toContain('检测到历史 OpenClaw 数据，但当前机器缺少可执行 OpenClaw 运行环境。')
+    expect(result.warnings).toContain('检测到历史 OpenClaw 数据，但当前机器缺少可执行的 OpenClaw 环境。')
   })
 })

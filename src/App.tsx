@@ -55,7 +55,7 @@ type SetupStep = 'api-keys' | 'channel-connect' | 'pairing-code'
 
 const SETUP_STEPS: { key: SetupStep; label: string }[] = [
   { key: 'api-keys', label: 'AI 提供商' },
-  { key: 'channel-connect', label: 'IM 渠道' },
+  { key: 'channel-connect', label: '消息渠道' },
   { key: 'pairing-code', label: '配对' },
 ]
 const MODELS_ROUTE_HASH = '#/models'
@@ -143,11 +143,11 @@ function describeBlockingReason(reason: GatewayBlockingReason): string {
     case 'machine_local_auth_missing':
       return '本机认证资料缺失'
     case 'runtime_token_stale':
-      return '运行时令牌仍是旧值'
+      return '当前生效的令牌仍是旧值'
     case 'provider_plugin_not_ready':
-      return 'provider plugin 还未完成运行时就绪'
+      return '提供商插件还未完成就绪'
     case 'control_ui_handshake_failed':
-      return '控制界面与 Gateway 握手失败'
+      return '控制界面与网关握手失败'
     case 'service_generation_stale':
       return '守护进程仍在使用旧 generation'
     case 'legacy_env_alias_detected':
@@ -155,7 +155,7 @@ function describeBlockingReason(reason: GatewayBlockingReason): string {
     case 'unknown_future_version':
       return '当前 OpenClaw 版本超出已审计范围'
     case 'unknown_runtime_state':
-      return '运行时状态仍无法可靠确认'
+      return '运行状态仍无法可靠确认'
     default:
       return '无'
   }
@@ -200,21 +200,21 @@ export function buildOpenClaw322Notice(
 
   if (runtimeNeedsAttention && runtime) {
     if (runtime.stateCode === 'blocked') {
-      title = is322Band ? 'OpenClaw 3.22 收敛被阻塞' : `${titleBase} 运行时被阻塞`
+      title = is322Band ? 'OpenClaw 3.22 收敛被阻塞' : `${titleBase} 运行状态被阻塞`
       color = 'red'
     } else if (runtime.stateCode === 'degraded') {
-      title = is322Band ? 'OpenClaw 3.22 收敛存在降级项' : `${titleBase} 运行时存在降级项`
+      title = is322Band ? 'OpenClaw 3.22 收敛存在降级项' : `${titleBase} 运行状态存在降级项`
       color = 'yellow'
     } else {
-      title = is322Band ? 'OpenClaw 3.22 正在收敛运行时状态' : `${titleBase} 正在收敛运行时状态`
+      title = is322Band ? 'OpenClaw 3.22 正在收敛运行状态' : `${titleBase} 正在收敛运行状态`
       color = 'blue'
     }
 
     const runtimeSummary = String(runtime.lastReconcileSummary || compatibility?.summary || '').trim()
     if (runtimeSummary) {
-      messageParts.push(`运行时状态：${describeRuntimeStateCode(runtime.stateCode)}。${runtimeSummary}`)
+      messageParts.push(`运行状态：${describeRuntimeStateCode(runtime.stateCode)}。${runtimeSummary}`)
     } else {
-      messageParts.push(`运行时状态：${describeRuntimeStateCode(runtime.stateCode)}。`)
+      messageParts.push(`运行状态：${describeRuntimeStateCode(runtime.stateCode)}。`)
     }
 
     if (runtime.blockingReason !== 'none') {
@@ -449,7 +449,7 @@ function App() {
         if (result.ok && result.repaired) {
           notifications.show({
             color: 'yellow',
-            title: trigger === 'startup' ? '已自动修复坏插件环境' : '坏插件环境已修复',
+            title: trigger === 'startup' ? '已自动修复损坏插件环境' : '损坏插件环境已修复',
             message: result.summary,
             autoClose: 6000,
           })
@@ -457,7 +457,7 @@ function App() {
           notifications.show({
             color: 'red',
             title: trigger === 'startup' ? '启动时插件环境修复失败' : '插件环境修复失败',
-            message: result.summary || result.stderr || '坏插件环境修复失败，请稍后重试。',
+            message: result.summary || result.stderr || '损坏插件环境修复失败，请稍后重试。',
             autoClose: 6000,
           })
         }
@@ -675,7 +675,7 @@ function App() {
 
   if (appState === 'welcome') {
     return renderWithContactModal(renderFrame(
-      <div className="w-full max-w-md px-2">
+      <div className="w-full max-w-xl px-2 pb-6">
         <Welcome onAccept={() => setAppState('env-check')} />
       </div>
     , false))

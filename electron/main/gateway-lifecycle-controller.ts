@@ -120,7 +120,7 @@ async function waitForGatewayHealthyAfterReload(
     stderr: '',
     code: null,
     stateCode: 'gateway_not_running',
-    summary: 'Gateway 重载后尚未恢复可用',
+    summary: '网关重载后尚未恢复可用',
   }
 
   const readiness = await pollWithBackoff({
@@ -132,7 +132,7 @@ async function waitForGatewayHealthyAfterReload(
         stderr: '',
         code: null,
         stateCode: 'gateway_not_running',
-        summary: 'Gateway 重载后尚未恢复可用',
+        summary: '网关重载后尚未恢复可用',
       }))
       return lastHealth
     },
@@ -146,7 +146,7 @@ async function waitForGatewayHealthyAfterReload(
       code: 0,
       running: true,
       stateCode: 'healthy',
-      summary: readiness.value.summary || 'Gateway 已重载并确认可用',
+      summary: readiness.value.summary || '网关已重载并确认可用',
       stdout: readiness.value.raw || restartResult.stdout,
       stderr: readiness.value.stderr || restartResult.stderr,
     }
@@ -157,7 +157,7 @@ async function waitForGatewayHealthyAfterReload(
     ok: false,
     running: false,
     stdout: failedHealth.raw || restartResult.stdout,
-    stderr: failedHealth.stderr || restartResult.stderr || 'Gateway 重载后健康检查未通过',
+    stderr: failedHealth.stderr || restartResult.stderr || '网关重载后健康检查未通过',
     diagnostics: {
       lastHealth: failedHealth,
     },

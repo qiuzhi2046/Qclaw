@@ -56,7 +56,7 @@ describe('guardedWriteEnvFileWithGatewayApply', () => {
 
     expect(result.ok).toBe(true)
     expect(result.wrote).toBe(true)
-    expect(result.message).toContain('环境变量已保存，但运行时生效失败')
+    expect(result.message).toContain('环境变量已保存，但运行状态同步失败')
     expect(result.gatewayApply).toEqual({
       ok: false,
       requestedAction: 'hot-reload',

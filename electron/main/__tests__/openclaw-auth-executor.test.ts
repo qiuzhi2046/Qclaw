@@ -397,7 +397,7 @@ describe('executeAuthRoute', () => {
     )
 
     expect(result.ok).toBe(false)
-    expect(result.message).toContain('自动重启 gateway')
+    expect(result.message).toContain('自动重启网关')
     expect(result.message).toContain('Unknown provider "qwen-portal"')
     expect(result.message).toContain('配置写入失败，请检查本机权限后重试。')
     expect(runStreamingCommand).toHaveBeenCalledTimes(1)
@@ -1834,7 +1834,7 @@ describe('executeAuthRoute', () => {
 
     expect(upsertApiKeyAuthProfileMock).not.toHaveBeenCalled()
     expect(result.ok).toBe(false)
-    expect(result.message).toContain('Provider ID')
+    expect(result.message).toContain('提供商 ID')
   })
 
   it('fails closed when multiple configured providers share the same endpoint and model without an explicit provider id', async () => {
@@ -1885,7 +1885,7 @@ describe('executeAuthRoute', () => {
 
     expect(upsertApiKeyAuthProfileMock).not.toHaveBeenCalled()
     expect(result.ok).toBe(false)
-    expect(result.message).toContain('Provider ID')
+    expect(result.message).toContain('提供商 ID')
   })
 
   it('fails closed when custom provider onboarding has not yet materialized a configured provider id', async () => {
@@ -1928,7 +1928,7 @@ describe('executeAuthRoute', () => {
 
     expect(upsertApiKeyAuthProfileMock).not.toHaveBeenCalled()
     expect(result.ok).toBe(false)
-    expect(result.message).toContain('Provider ID')
+    expect(result.message).toContain('提供商 ID')
   })
 
   it('hot-reloads secrets after successful custom onboarding when gateway.auth.token changes', async () => {

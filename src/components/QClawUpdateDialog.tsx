@@ -108,7 +108,7 @@ export default function QClawUpdateDialog({
               <Stack gap={8} mt="md">
                 <Text size="sm">不会改动 OpenClaw 程序本体</Text>
                 <Text size="sm">不会改动 OpenClaw 配置和记忆数据</Text>
-                <Text size="sm">不会主动停止当前 OpenClaw 运行态</Text>
+                <Text size="sm">不会主动停止当前 OpenClaw 运行状态</Text>
                 <Text size="sm">{status.configured ? '自动更新配置已接通' : '当前自动更新配置尚未接通'}</Text>
               </Stack>
             </Paper>

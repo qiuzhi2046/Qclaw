@@ -78,7 +78,7 @@ function formatLocalConnectionFailure(
   }
 
   if (failureCode === 'ENOTFOUND') {
-    return `无法解析 ${target.host}。请检查 Base URL 是否填写正确。`
+    return `无法解析 ${target.host}。请检查接口地址是否填写正确。`
   }
 
   if (failureCode === 'ECONNRESET') {
@@ -97,7 +97,7 @@ export async function testLocalConnection(
 ): Promise<LocalConnectionTestResult> {
   const { provider, baseUrl, apiKey } = input
   if (!baseUrl) {
-    return { ok: false, reachable: false, error: 'Base URL is required' }
+    return { ok: false, reachable: false, error: '接口地址不能为空' }
   }
 
   const url = provider === 'ollama'
@@ -525,7 +525,7 @@ export async function upsertApiKeyAuthProfile(
       updated: false,
       profileId,
       authStorePath: input.authStorePath || options.authStorePath,
-      error: 'Provider is required',
+      error: 'AI 提供商不能为空',
     }
   }
 

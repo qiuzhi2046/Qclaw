@@ -999,7 +999,7 @@ export function registerIpcHandlers() {
     const locations = await getOpenClawSkillLocations()
     const result = await runShell(
       'npx',
-      ['-y', 'clawhub', 'search', query, '--limit', String(limit)],
+      ['-y', 'clawhub', 'search', query, '--limit', String(limit), '--registry', 'https://mirror-cn.clawhub.com'],
       undefined,
       { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' }
     )

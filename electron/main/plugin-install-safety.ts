@@ -483,15 +483,15 @@ export function buildIncompatiblePluginRepairSummary(
   reconcileResult: ReconcileIncompatibleExtensionsResult
 ): string {
   if (reconcileResult.quarantinedPluginIds.length > 0) {
-    return `已自动隔离 ${reconcileResult.quarantinedPluginIds.length} 个坏插件并清理相关配置。`
+    return `已自动隔离 ${reconcileResult.quarantinedPluginIds.length} 个损坏插件并清理相关配置。`
   }
   if (reconcileResult.prunedPluginIds.length > 0) {
-    return `已自动清理 ${reconcileResult.prunedPluginIds.length} 个坏插件残留配置。`
+    return `已自动清理 ${reconcileResult.prunedPluginIds.length} 个损坏插件残留配置。`
   }
   if (reconcileResult.quarantinedPluginIds.length === 0) {
-    return '未发现坏插件。'
+    return '未发现损坏插件。'
   }
-  return '未发现坏插件。'
+  return '未发现损坏插件。'
 }
 
 export async function repairIncompatibleExtensionPlugins(
@@ -504,10 +504,10 @@ export async function repairIncompatibleExtensionPlugins(
         ok: false,
         repaired: reconcileResult.quarantinedPluginIds.length > 0 || reconcileResult.prunedPluginIds.length > 0,
         summary: reconcileResult.failureKind === 'permission-denied'
-          ? '坏插件隔离失败，请检查本机权限后重试。'
+          ? '损坏插件隔离失败，请检查本机权限后重试。'
           : reconcileResult.failureKind === 'partial-quarantine'
-            ? '坏插件隔离未完成，请重试。'
-            : '坏插件隔离失败，请重试。',
+            ? '损坏插件隔离未完成，请重试。'
+            : '损坏插件隔离失败，请重试。',
         stderr: '',
         ...reconcileResult,
       }
@@ -527,7 +527,7 @@ export async function repairIncompatibleExtensionPlugins(
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
       prunedPluginIds: [],
-      summary: '修复坏插件环境失败，请重试。',
+      summary: '修复损坏插件环境失败，请重试。',
       stderr: error instanceof Error ? error.message : String(error),
     }
   }

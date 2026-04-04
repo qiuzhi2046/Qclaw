@@ -38,6 +38,31 @@ describe('listFeishuBots', () => {
     expect(bots[1].accountId).toBe('sales')
     expect(bots[1].agentId).toBe('feishu-sales')
   })
+
+  it('normalizes legacy default bot labels from existing config', () => {
+    const config = {
+      channels: {
+        feishu: {
+          enabled: true,
+          appId: 'cli_default',
+          appSecret: 'secret-default',
+          name: '默认 Bot',
+          accounts: {
+            sales: {
+              enabled: true,
+              name: 'Bot sales',
+              appId: 'cli_sales',
+              appSecret: 'secret-sales',
+            },
+          },
+        },
+      },
+    }
+
+    const bots = listFeishuBots(config)
+    expect(bots[0].name).toBe('机器人')
+    expect(bots[1].name).toBe('机器人 sales')
+  })
 })
 
 describe('listResidualLegacyFeishuAgentIds', () => {
@@ -99,6 +124,33 @@ describe('addFeishuBotConfig', () => {
         expect.objectContaining({ match: { channel: 'feishu', accountId } }),
       ])
     )
+  })
+
+  it('preserves SecretRef-style secrets for newly added account bots', () => {
+    const secretRef = {
+      source: 'file',
+      provider: 'lark-secrets',
+      id: '/lark/appSecret',
+    }
+
+    const { nextConfig, accountId } = addFeishuBotConfig(
+      {
+        channels: {
+          feishu: {
+            enabled: true,
+            appId: 'cli_default',
+            appSecret: 'secret-default',
+          },
+        },
+      },
+      {
+        name: '客服机器人',
+        appId: 'cli_service',
+        appSecret: secretRef,
+      }
+    )
+
+    expect(nextConfig.channels.feishu.accounts[accountId].appSecret).toEqual(secretRef)
   })
 })
 
@@ -195,6 +247,40 @@ describe('activateFeishuBotConfig', () => {
       ])
     )
     expect(next.plugins).toBeUndefined()
+  })
+
+  it('accepts SecretRef-style secrets for account bots', () => {
+    const next = activateFeishuBotConfig(
+      {
+        channels: {
+          feishu: {
+            enabled: true,
+            appId: 'cli_default',
+            appSecret: 'secret-default',
+            accounts: {
+              support: {
+                enabled: true,
+                name: '客服机器人',
+                appId: 'cli_support',
+                appSecret: {
+                  source: 'file',
+                  provider: 'lark-secrets',
+                  id: '/lark/appSecret',
+                },
+              },
+            },
+          },
+        },
+      },
+      'support'
+    )
+
+    expect(next.channels.feishu.accounts.support.appSecret).toEqual({
+      source: 'file',
+      provider: 'lark-secrets',
+      id: '/lark/appSecret',
+    })
+    expect(next.session.dmScope).toBe('per-account-channel-peer')
   })
 })
 

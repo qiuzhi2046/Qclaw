@@ -3,8 +3,8 @@
  */
 import type { ChildProcess } from 'node:child_process'
 import { homedir, tmpdir, userInfo } from 'os'
-import { dirname, join } from 'path'
-import { access, readFile, writeFile, mkdir, stat, unlink } from 'fs/promises'
+import { dirname, join, resolve as resolvePath } from 'path'
+import { access, readFile, writeFile, mkdir, stat, lstat, unlink } from 'fs/promises'
 import { createWriteStream, existsSync } from 'fs'
 import https from 'https'
 import { atomicWriteJson } from './atomic-write'
@@ -537,7 +537,7 @@ export async function repairIncompatibleExtensionPlugins(
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
       prunedPluginIds: [],
-      summary: '未能定位 OpenClaw 状态目录，暂时无法修复坏插件环境。',
+      summary: '未能定位 OpenClaw 状态目录，暂时无法修复损坏插件环境。',
       stderr: 'OpenClaw homeDir unavailable',
     }
   }
@@ -638,7 +638,7 @@ export async function openOAuthUrl(url?: string): Promise<CliResult> {
     return {
       ok: false,
       stdout: '',
-      stderr: 'No available OAuth URL to open',
+      stderr: '当前没有可打开的浏览器授权登录链接',
       code: 1,
     }
   }
@@ -706,7 +706,7 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
       return {
         ok: false,
         stdout: '',
-        stderr: openClawCapability.message || 'OpenClaw CLI command is unavailable',
+        stderr: openClawCapability.message || 'OpenClaw 命令行工具命令不可用',
         code: 1,
       }
     }
@@ -1227,7 +1227,7 @@ export async function prepareMacGitTools(): Promise<MacGitToolsPrepareResult> {
       ok: false,
       stdout: [prepareResult.stdout, recheckResult.stdout].filter(Boolean).join('\n'),
       stderr: [
-        '已尝试触发 Xcode CLI 系统安装弹窗。如果没有弹窗，请点击屏幕右下角的安装图标继续安装；安装完成后，点击“重试识别”刷新状态。',
+        '已尝试触发 Xcode 命令行工具系统安装弹窗。如果没有弹窗，请点击屏幕右下角的安装图标继续安装；安装完成后，点击“重试识别”刷新状态。',
         detail ? `\n原始错误：${detail}` : '',
       ]
         .filter(Boolean)
@@ -1642,7 +1642,7 @@ function maybeAttachMirrorDetailsToElevatedInstallResult(
     result,
     buildUnknownOpenClawMirrorAttempts(),
     {
-      operationLabel: 'OpenClaw CLI 安装',
+      operationLabel: 'OpenClaw 命令行工具安装',
       version,
     }
   )
@@ -1668,7 +1668,7 @@ async function runMacPrivilegedOpenClawInstall(
     operation: 'install',
     lifecycleCommand,
     prompt:
-      'Qclaw 需要安装 OpenClaw CLI 命令行工具。\n\n这是连接 AI 服务和 IM 渠道的核心组件。\n\n请输入您的 Mac 登录密码以继续。',
+      'Qclaw 需要安装 OpenClaw 命令行工具。\n\n这是连接 AI 服务和消息渠道的核心组件。\n\n请输入您的 Mac 登录密码以继续。',
     timeoutMs: buildMirrorAwareTimeoutMs(MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs),
     controlDomain: 'env-setup',
     qclawSafeWorkDir: workingDirectory,
@@ -1710,7 +1710,7 @@ async function installOpenClawOnMac(
         MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs,
         'env-setup'
       ),
-    'OpenClaw CLI 安装',
+    'OpenClaw 命令行工具安装',
     npmCommandOptions
   )
 
@@ -1821,7 +1821,7 @@ async function installNodeWithAdmin(installerPath: string): Promise<CliResult> {
     return runDirect('osascript', [
       '-e',
       buildAppleScriptDoShellScript(installCommand, {
-        prompt: 'Qclaw 需要安装 Node.js 运行环境。\n\n请输入您的 Mac 登录密码以继续安装。',
+        prompt: 'Qclaw 需要安装 Node.js。\n\n请输入您的 Mac 登录密码以继续安装。',
       })
     ], MAIN_RUNTIME_POLICY.node.installNodeTimeoutMs, 'env-setup')
   } else if (process.platform === 'win32') {
@@ -1911,7 +1911,7 @@ export async function installOpenClaw(): Promise<CliResult> {
     if (isWin) {
       const capabilityError = await guardPlatformCommands(['npm'])
       if (capabilityError) return capabilityError
-      const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw CLI 安装')
+      const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw 命令行工具安装')
       if ('error' in managedNpmOptionsResult) return managedNpmOptionsResult.error
       // Windows: npm install -g 不需要管理员权限（安装到 %APPDATA%\npm）
       const result = await installOpenClawWithNpmMirrorFallback(
@@ -1923,7 +1923,7 @@ export async function installOpenClaw(): Promise<CliResult> {
             MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs,
             'env-setup'
           ),
-        'OpenClaw CLI 安装',
+        'OpenClaw 命令行工具安装',
         managedNpmOptionsResult.options
       )
       return finalizeInstallResult(result, {
@@ -1937,7 +1937,7 @@ export async function installOpenClaw(): Promise<CliResult> {
 
     const capabilityError = await guardPlatformCommands(['npm'])
     if (capabilityError) return capabilityError
-    const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw CLI 安装')
+    const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw 命令行工具安装')
     if ('error' in managedNpmOptionsResult) return managedNpmOptionsResult.error
     return installOpenClawOnMac(managedNpmOptionsResult.options, {
       expectNode: false,
@@ -1992,7 +1992,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
       if (needOpenClaw) {
         const capabilityError = await guardPlatformCommands(['npm'])
         if (capabilityError) return capabilityError
-        const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw CLI 安装')
+        const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw 命令行工具安装')
         if ('error' in managedNpmOptionsResult) return managedNpmOptionsResult.error
         const result = await installOpenClawWithNpmMirrorFallback(
           PINNED_OPENCLAW_VERSION,
@@ -2003,7 +2003,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
               MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs,
               'env-setup'
             ),
-          'OpenClaw CLI 安装',
+          'OpenClaw 命令行工具安装',
           managedNpmOptionsResult.options
         )
         return finalizeInstallResult(result, {
@@ -2023,7 +2023,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
     if (needOpenClaw) {
       const gitPreflight = await guardMacOpenClawGitPreflight()
       if (gitPreflight) return gitPreflight
-      const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw CLI 安装')
+      const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw 命令行工具安装')
       if ('error' in managedNpmOptionsResult) return managedNpmOptionsResult.error
       openClawNpmCommandOptions = managedNpmOptionsResult.options
     }
@@ -2086,7 +2086,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
                 MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs,
                 'env-setup'
               ),
-            'OpenClaw CLI 安装',
+            'OpenClaw 命令行工具安装',
             openClawNpmCommandOptions as OpenClawNpmCommandOptions
           )
           return finalizeInstallResult(npmResult, { expectNode: true, expectOpenClaw: true })
@@ -2130,7 +2130,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
 
     if (needNode && nodeInstallerPath) {
       commands.push(`installer -pkg '${nodeInstallerPath}' -target /`)
-      components.push('Node.js 运行环境')
+      components.push('Node.js')
     }
 
     if (needOpenClaw && !installOpenClawAfterNode) {
@@ -2148,7 +2148,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
           workingDirectory: safeWorkingDirectory,
         })
       )
-      components.push('OpenClaw CLI 命令行工具')
+      components.push('OpenClaw 命令行工具')
     }
 
     const cmd = prefixPosixCommandWithWorkingDirectory(commands.join(' && '), safeWorkingDirectory)
@@ -2166,7 +2166,7 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
           result,
           buildUnknownOpenClawMirrorAttempts(),
           {
-            operationLabel: 'OpenClaw CLI 安装',
+            operationLabel: 'OpenClaw 命令行工具安装',
             version: PINNED_OPENCLAW_VERSION,
           }
         )
@@ -2235,7 +2235,7 @@ export async function gatewayHealth(): Promise<GatewayHealthCheckResult> {
     stderr: r.stderr,
     code: r.code,
     stateCode: r.ok ? 'healthy' : classification.stateCode,
-    summary: r.ok ? 'Gateway 已确认可用' : classification.summary,
+    summary: r.ok ? '网关已确认可用' : classification.summary,
   }
 }
 
@@ -2605,6 +2605,124 @@ export async function validateFeishuCredentials(
   }
 }
 
+function isConfigSecretRefLike(
+  value: unknown
+): value is { source: 'env' | 'file'; provider: string; id: string } {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (
+      (value as Record<string, unknown>).source === 'env'
+      || (value as Record<string, unknown>).source === 'file'
+    )
+    && typeof (value as Record<string, unknown>).provider === 'string'
+    && typeof (value as Record<string, unknown>).id === 'string'
+}
+
+function isSecretFileModeSecure(mode: number): boolean {
+  return (mode & 0o077) === 0
+}
+
+function normalizeResolvedSecretValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized || null
+}
+
+function resolveUserPathForConfigSecret(input: string): string {
+  if (input === '~') return homedir()
+  if (input.startsWith('~/')) {
+    return join(homedir(), input.slice(2))
+  }
+  return resolvePath(input)
+}
+
+function getConfigSecretByJsonPointer(obj: unknown, pointer: string): unknown {
+  if (!pointer || pointer === '/' || pointer === '') return obj
+  const tokens = pointer.split('/').slice(1)
+  let current: unknown = obj
+  for (const token of tokens) {
+    const unescaped = token.replace(/~1/g, '/').replace(/~0/g, '~')
+    if (!current || typeof current !== 'object' || Array.isArray(current)) {
+      return undefined
+    }
+    current = (current as Record<string, unknown>)[unescaped]
+  }
+  return current
+}
+
+function hasConfiguredSecretInput(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0
+  }
+  return isConfigSecretRefLike(value)
+}
+
+async function resolveConfiguredSecretValue(
+  input: unknown,
+  configOverride?: Record<string, any> | null
+): Promise<string | null> {
+  if (typeof input === 'string') {
+    const normalized = input.trim()
+    return normalized || null
+  }
+
+  if (!isConfigSecretRefLike(input)) return null
+
+  if (input.source === 'env') {
+    const envVar = String(input.id || '').trim()
+    if (!envVar) return null
+    const envValue = String(process.env[envVar] || '').trim()
+    if (envValue) return envValue
+    const envFile = await readEnvFile().catch(() => ({} as Record<string, string>))
+    const fileValue = String(envFile?.[envVar] || '').trim()
+    return fileValue || null
+  }
+
+  if (input.source === 'file') {
+    const config = configOverride ?? (await readConfig().catch(() => null))
+    const providers = config?.secrets?.providers
+    const provider =
+      providers && typeof providers === 'object'
+        ? (providers[input.provider] as Record<string, unknown> | undefined)
+        : undefined
+    if (!provider || provider.source !== 'file') return null
+
+    const filePath = String(provider.path || '').trim()
+    if (!filePath) return null
+
+    try {
+      const resolvedFilePath = resolveUserPathForConfigSecret(filePath)
+      const fileStat = await lstat(resolvedFilePath)
+      if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+        return null
+      }
+      if (process.platform !== 'win32' && !isSecretFileModeSecure(fileStat.mode)) {
+        return null
+      }
+
+      const raw = await readFile(resolvedFilePath, 'utf8')
+      const parsed = JSON.parse(raw) as unknown
+      if (provider.mode === 'singleValue') {
+        return normalizeResolvedSecretValue(parsed)
+      }
+      const resolved = getConfigSecretByJsonPointer(parsed, String(input.id || '').trim())
+      return normalizeResolvedSecretValue(resolved)
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+export async function resolveConfigSecretValue(
+  input: unknown,
+  configOverride?: Record<string, any> | null
+): Promise<string | null> {
+  return resolveConfiguredSecretValue(input, configOverride)
+}
+
 async function resolveFeishuAccountCredentials(accountId?: string): Promise<{
   appId: string
   appSecret: string
@@ -2622,7 +2740,7 @@ async function resolveFeishuAccountCredentials(accountId?: string): Promise<{
   const merged = accountOverride ? { ...feishu, ...accountOverride } : feishu
 
   const appId = String(merged.appId || '').trim()
-  const appSecret = String(merged.appSecret || '').trim()
+  const appSecret = await resolveConfiguredSecretValue(merged.appSecret, config)
   if (!appId || !appSecret) return null
 
   return {
@@ -2981,7 +3099,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
 
   const bots: Array<{ accountId: string; enabled: boolean; credentialsComplete: boolean }> = []
   if (feishu && typeof feishu === 'object') {
-    const defaultCredentialsComplete = Boolean(normalizeText(feishu.appId) && normalizeText(feishu.appSecret))
+    const defaultCredentialsComplete = Boolean(normalizeText(feishu.appId) && hasConfiguredSecretInput(feishu.appSecret))
     if (defaultCredentialsComplete) {
       bots.push({
         accountId: 'default',
@@ -2994,7 +3112,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
     if (accounts && typeof accounts === 'object') {
       for (const [accountId, rawAccount] of Object.entries(accounts)) {
         const account = rawAccount as Record<string, any>
-        const credentialsComplete = Boolean(normalizeText(account.appId) && normalizeText(account.appSecret))
+        const credentialsComplete = Boolean(normalizeText(account.appId) && hasConfiguredSecretInput(account.appSecret))
         if (!credentialsComplete) continue
         bots.push({
           accountId,
@@ -3018,7 +3136,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
     )
 
     if (!bot.enabled) {
-      issues.push('该 Bot 当前被禁用。')
+      issues.push('该机器人当前被禁用。')
     }
     if (!bot.credentialsComplete) {
       issues.push('缺少完整的 App ID / App Secret。')
@@ -3041,7 +3159,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
       issues.push(`检测到 accountId=${bot.accountId} 的冲突绑定。`)
     }
     if (!gateway.running) {
-      issues.push('Gateway 当前未运行。')
+      issues.push('网关当前未运行。')
     }
 
     let runtimeState: FeishuBotRuntimeStatus['runtimeState'] = 'online'
@@ -3051,7 +3169,7 @@ export async function getFeishuBotRuntimeStatuses(): Promise<Record<string, Feis
       summary = '已禁用'
     } else if (!gateway.running) {
       runtimeState = 'offline'
-      summary = 'Gateway 未运行'
+      summary = '网关未运行'
     } else if (issues.length > 0) {
       runtimeState = 'degraded'
       summary = issues[0] || '配置存在漂移'
@@ -3555,7 +3673,7 @@ export async function uninstallOpenClawNpmGlobalPackage(): Promise<CliResult> {
   if (isWin) {
     const uninstallCapability = await guardPlatformCommands(['npm'])
     if (uninstallCapability) {
-      errors.push(`卸载 OpenClaw CLI 失败: ${uninstallCapability.stderr}`)
+      errors.push(`卸载 OpenClaw 命令行工具失败: ${uninstallCapability.stderr}`)
     } else {
       const uninstallResult = await runShell(
         'npm',
@@ -3564,13 +3682,13 @@ export async function uninstallOpenClawNpmGlobalPackage(): Promise<CliResult> {
         'upgrade'
       )
       if (!uninstallResult.ok && !uninstallResult.stderr.includes('not installed')) {
-        errors.push(`卸载 OpenClaw CLI 失败: ${uninstallResult.stderr}`)
+        errors.push(`卸载 OpenClaw 命令行工具失败: ${uninstallResult.stderr}`)
       }
     }
   } else {
     const uninstallCapability = await guardPlatformCommands(['osascript', 'npm'])
     if (uninstallCapability) {
-      errors.push(`卸载 OpenClaw CLI 失败: ${uninstallCapability.stderr}`)
+      errors.push(`卸载 OpenClaw 命令行工具失败: ${uninstallCapability.stderr}`)
     } else {
       const uninstallWorkingDirectory = resolveManagedSpawnCwd()
       let uninstallNpmOptions: OpenClawNpmCommandOptions | null = null
@@ -3582,7 +3700,7 @@ export async function uninstallOpenClawNpmGlobalPackage(): Promise<CliResult> {
         ).commandOptions
       } catch (error) {
         errors.push(
-          `卸载 OpenClaw CLI 失败: 无法初始化安装隔离环境。${
+          `卸载 OpenClaw 命令行工具失败: 无法初始化安装隔离环境。${
             error instanceof Error ? error.message : String(error || '')
           }`
         )
@@ -3610,7 +3728,7 @@ export async function uninstallOpenClawNpmGlobalPackage(): Promise<CliResult> {
         const uninstallResult = await runMacOpenClawElevatedLifecycleTransaction({
           operation: 'uninstall',
           lifecycleCommand: cmd,
-          prompt: 'Qclaw 需要卸载 OpenClaw CLI。\n\n请输入您的 Mac 登录密码以继续。',
+          prompt: 'Qclaw 需要卸载 OpenClaw 命令行工具。\n\n请输入您的 Mac 登录密码以继续。',
           timeoutMs: MAIN_RUNTIME_POLICY.cli.npmUninstallTimeoutMs,
           controlDomain: 'upgrade',
           binaryPath: uninstallBinaryPath || undefined,
@@ -3621,7 +3739,7 @@ export async function uninstallOpenClawNpmGlobalPackage(): Promise<CliResult> {
         })
 
         if (!uninstallResult.ok && !uninstallResult.stderr.includes('not installed')) {
-          errors.push(`卸载 OpenClaw CLI 失败: ${uninstallResult.stderr}`)
+          errors.push(`卸载 OpenClaw 命令行工具失败: ${uninstallResult.stderr}`)
         }
       }
     }
@@ -3812,7 +3930,7 @@ async function finalizeInstallResult(
       'env-setup'
     )
     if (!openClawReady.ok) {
-      readinessErrors.push(buildCommandReadyError('OpenClaw CLI', openClawReady))
+      readinessErrors.push(buildCommandReadyError('OpenClaw 命令行工具', openClawReady))
     }
   }
 

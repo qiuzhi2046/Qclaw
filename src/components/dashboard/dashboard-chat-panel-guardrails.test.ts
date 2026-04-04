@@ -46,4 +46,26 @@ describe('dashboard chat panel guardrails', () => {
     expect(source).not.toContain("activeSessionStatus.willForkOnSend ? '新会话' : '继续会话'")
     expect(source).not.toContain('首次发送时自动创建会话')
   })
+
+  it('does not keep the redundant direct-chat helper copy or session metadata copy', () => {
+    const source = readDashboardChatPanelSource()
+
+    expect(source).not.toContain('直接对话')
+    expect(source).not.toContain('展示最近 OpenClaw / Qclaw 会话，并明确区分本地会话与历史来源会话。')
+    expect(source).not.toContain('当前会话暂不支持切换模型 · Enter 发送 · Shift+Enter 换行')
+    expect(source).not.toContain('当前渠道会话暂不支持在这里原地切模型')
+    expect(source).not.toContain('历史模型：')
+    expect(source).not.toContain('session.sessionId.slice(0, 8)')
+    expect(source).not.toContain('formatSessionUsage(session)')
+    expect(source).not.toContain('historySummary.modelDetail &&')
+    expect(source).not.toContain('session.modelSwitchBlockedReason')
+    expect(source).not.toContain('{composerHint}')
+  })
+
+  it('keeps the session model placeholder copy readable for first-message flows', () => {
+    const source = readDashboardChatPanelSource()
+
+    expect(source).toContain('发送首条消息后可切换')
+    expect(source).not.toContain('\uFFFD')
+  })
 })

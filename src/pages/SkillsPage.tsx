@@ -606,35 +606,6 @@ export default function SkillsPage() {
 
   return (
     <div className="p-6 h-full overflow-y-auto">
-      {/* Header */}
-      <Group justify="space-between" mb="xs">
-        <div>
-          <Tooltip label={tooltips.skillsPage.overview} withArrow multiline maw={320}>
-            <h1 className="text-xl font-bold app-text-primary inline-block">Skills 管理</h1>
-          </Tooltip>
-          <Text size="xs" c="dimmed">查看和配置 OpenClaw Skills</Text>
-        </div>
-        <Tooltip label="刷新" withArrow>
-          <ActionIcon
-            variant="subtle"
-            size="lg"
-            loading={refreshing}
-            disabled={skillInstallUiLocked}
-            onClick={async () => {
-              setRefreshing(true)
-              try {
-                await fetchSkills({ background: true })
-              } finally {
-                setRefreshing(false)
-              }
-            }}
-            className="cursor-pointer"
-          >
-            <IconRefresh size={18} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
-
       {error && (
         <Alert color="red" mb="md" onClose={() => setError('')} withCloseButton>
           {error}
@@ -645,57 +616,6 @@ export default function SkillsPage() {
         <Alert color="blue" mb="md" onClose={() => setNotice('')} withCloseButton>
           {notice}
         </Alert>
-      )}
-
-      {(skillLocations.managedSkillsDir || skillLocations.workspaceSkillsDir) && (
-        <Paper
-          withBorder
-          radius="lg"
-          mb="md"
-          p="xs"
-          bg={computedColorScheme === 'dark' ? 'dark.6' : 'gray.0'}
-        >
-          <Paper
-            component="button"
-            type="button"
-            withBorder
-            radius="md"
-            p="md"
-            onClick={() => setScanDirectoriesCollapsed((value) => !value)}
-            className="w-full flex items-center justify-between text-left cursor-pointer"
-            bg={computedColorScheme === 'dark' ? 'dark.5' : 'white'}
-          >
-            <Text size="sm" fw={700}>当前 Skills 扫描目录</Text>
-            <IconChevronRight
-              size={16}
-              className="app-text-muted"
-              style={{
-                transform: scanDirectoriesCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                transition: 'transform 0.2s',
-              }}
-            />
-          </Paper>
-
-          <Collapse in={!scanDirectoriesCollapsed}>
-            <div className="px-3 pt-3 pb-3">
-              <Stack gap={4}>
-                {skillLocations.managedSkillsDir && (
-                  <Text size="xs">
-                    共享安装目录：<Code>{skillLocations.managedSkillsDir}</Code>
-                  </Text>
-                )}
-                {skillLocations.workspaceSkillsDir && (
-                  <Text size="xs">
-                    工作区目录：<Code>{skillLocations.workspaceSkillsDir}</Code>
-                  </Text>
-                )}
-                <Text size="xs" c="dimmed">
-                  本页面安装 Skill 时会优先走官方 `openclaw skills install`，不可用时再回退到 ClawHub，并优先安装到当前 OpenClaw workspace。
-                </Text>
-              </Stack>
-            </div>
-          </Collapse>
-        </Paper>
       )}
 
       {/* Search */}
@@ -807,9 +727,30 @@ export default function SkillsPage() {
       )}
 
       {/* Statistics */}
-      <Text size="xs" c="dimmed" mb="md">
-        共 {stats.total} 个 · {stats.available} 可用 · {stats.disabled} 已禁用
-      </Text>
+      <Group justify="space-between" mb="md">
+        <Text size="xs" c="dimmed">
+          共 {stats.total} 个 · {stats.available} 可用 · {stats.disabled} 已禁用
+        </Text>
+        <Tooltip label="刷新" withArrow>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            loading={refreshing}
+            disabled={skillInstallUiLocked}
+            onClick={async () => {
+              setRefreshing(true)
+              try {
+                await fetchSkills({ background: true })
+              } finally {
+                setRefreshing(false)
+              }
+            }}
+            className="cursor-pointer"
+          >
+            <IconRefresh size={16} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
 
       {/* Recommended Skills */}
       {(() => {
@@ -953,6 +894,56 @@ export default function SkillsPage() {
             })
           )}
         </div>
+      )}
+
+      {(skillLocations.managedSkillsDir || skillLocations.workspaceSkillsDir) && (
+        <Paper
+          withBorder
+          radius="md"
+          mt="md"
+          bg={computedColorScheme === 'dark' ? 'dark.6' : 'gray.0'}
+          style={{ overflow: 'hidden' }}
+        >
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setScanDirectoriesCollapsed((value) => !value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setScanDirectoriesCollapsed((value) => !value) }}
+            className="w-full cursor-pointer"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--mantine-spacing-md)', gap: 'var(--mantine-spacing-sm)' }}
+          >
+            <Text size="sm" fw={600}>当前 Skills 扫描目录</Text>
+            <IconChevronRight
+              size={16}
+              className="app-text-muted"
+              style={{
+                transform: scanDirectoriesCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                transition: 'transform 0.2s',
+                flexShrink: 0,
+              }}
+            />
+          </div>
+
+          <Collapse in={!scanDirectoriesCollapsed}>
+            <div className="px-4 pb-3" style={{ borderTop: '1px solid var(--app-border-light)' }}>
+              <Stack gap={4} mt="sm">
+                {skillLocations.managedSkillsDir && (
+                  <Text size="xs">
+                    共享安装目录：<Code>{skillLocations.managedSkillsDir}</Code>
+                  </Text>
+                )}
+                {skillLocations.workspaceSkillsDir && (
+                  <Text size="xs">
+                    工作区目录：<Code>{skillLocations.workspaceSkillsDir}</Code>
+                  </Text>
+                )}
+                <Text size="xs" c="dimmed">
+                  本页面安装 Skill 时会优先走官方 `openclaw skills install`，不可用时再回退到 ClawHub，并优先安装到当前 OpenClaw workspace。
+                </Text>
+              </Stack>
+            </div>
+          </Collapse>
+        </Paper>
       )}
 
       {/* Detail Modal */}

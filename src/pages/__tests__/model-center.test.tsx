@@ -45,6 +45,7 @@ import {
   shouldShowOAuthFallbackPanel,
   shouldShowManualOAuthLink,
 } from '../ModelCenter'
+import modelCenterSource from '../ModelCenter.tsx?raw'
 
 const CAPABILITIES: OpenClawCapabilities = {
   version: 'OpenClaw 2026.3.8',
@@ -211,12 +212,12 @@ describe('buildProviderOptions', () => {
     expect(customProvider).toMatchObject({
       id: 'custom',
       name: '手动配置兼容 API',
-      hint: '手动填写 Base URL、Model ID 和认证信息，适合通用 OpenAI / Anthropic 兼容接口。',
+      hint: '手动填写接口地址、Model ID 和认证信息，适合通用 OpenAI / Anthropic 兼容接口。',
     })
     expect(customProvider?.methods[0]).toMatchObject({
       id: 'custom-api-key',
       label: '手动填写接口信息',
-      hint: '填写 Base URL、Model ID 和认证信息后，按兼容协议写入 OpenClaw。',
+      hint: '填写接口地址、Model ID 和认证信息后，按兼容协议写入 OpenClaw。',
     })
   })
 
@@ -250,7 +251,20 @@ describe('buildProviderOptions', () => {
     const apiKeyMethod = providers[0]?.methods.find((method) => method.id === 'openai-api-key')
 
     expect(apiKeyMethod?.supported).toBe(false)
-    expect(apiKeyMethod?.disabledReason).toContain('CLI flag')
+    expect(apiKeyMethod?.disabledReason).toContain('命令行参数')
+  })
+})
+
+describe('ModelCenter source copy cleanup', () => {
+  it('does not keep the redundant provider setup helper copy in the page source', () => {
+    expect(modelCenterSource).not.toContain('从 OpenClaw 能力中动态加载提供商与认证方式')
+    expect(modelCenterSource).not.toContain('元数据来源：')
+  })
+
+  it('does not render provider and auth hint helper text below the selects', () => {
+    expect(modelCenterSource).not.toMatch(/\{selectedProvider\?\.hint && <Text/)
+    expect(modelCenterSource).not.toMatch(/\{selectedMethod\?\.hint && <Text/)
+    expect(modelCenterSource).not.toMatch(/\.extraOptions\.find\(\(option\) => normalizeMethodId\(option\.id\) === normalizeMethodId\(selectedExtraOption\)\)\s*\?\.hint/)
   })
 })
 
@@ -1673,7 +1687,7 @@ describe('buildBusyStateDisplay', () => {
       elapsedSeconds: 42,
       canceling: false,
     })
-    expect(display.title).toContain('OAuth')
+    expect(display.title).toContain('浏览器授权登录')
     expect(display.elapsed).toBe('00:42')
   })
 
@@ -1708,10 +1722,10 @@ describe('buildBusyStateDisplay', () => {
 })
 
 describe('getLocalDiscoveryDisplay', () => {
-  it('prompts the user to fill Base URL before discovery', () => {
+  it('prompts the user to fill the endpoint before discovery', () => {
     expect(getLocalDiscoveryDisplay({ testing: false }, false, null, false)).toEqual({
       buttonColor: 'brand',
-      message: '填写 Base URL 后可获取本地模型',
+      message: '填写接口地址后可获取本地模型',
       messageColor: 'dimmed',
     })
   })
@@ -1806,7 +1820,7 @@ describe('resolveModelCenterMethodDisplayCopy', () => {
       })
     ).toEqual({
       label: '手动填写接口信息',
-      hint: '填写 Base URL、Model ID 和认证信息后，按兼容协议写入 OpenClaw。',
+      hint: '填写接口地址、Model ID 和认证信息后，按兼容协议写入 OpenClaw。',
     })
   })
 })

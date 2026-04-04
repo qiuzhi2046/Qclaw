@@ -180,7 +180,7 @@ export default function FeishuBotManagerModal({
       applyFeishuInstallerSnapshot(snapshot)
       await refreshFeishuBotsFromConfig()
     } catch (e: any) {
-      setBotError(e?.message || '刷新飞书 Bot 列表失败')
+      setBotError(e?.message || '刷新飞书机器人列表失败')
     } finally {
       setBotListRefreshing(false)
     }
@@ -348,11 +348,11 @@ export default function FeishuBotManagerModal({
         reason: 'dashboard-delete-feishu-bot',
       })
       if (!writeResult.ok) {
-        throw new Error(writeResult.message || '删除飞书 Bot 配置失败')
+        throw new Error(writeResult.message || '删除飞书机器人配置失败')
       }
       await refreshFeishuBotsFromConfig()
     } catch (e: any) {
-      setBotError(e?.message || '删除飞书 Bot 失败')
+      setBotError(e?.message || '删除飞书机器人失败')
     } finally {
       setDeletingBotId('')
     }
@@ -375,11 +375,11 @@ export default function FeishuBotManagerModal({
         reason: 'unknown',
       })
       if (!writeResult.ok) {
-        throw new Error(writeResult.message || '修复飞书多 Bot 隔离写入失败')
+        throw new Error(writeResult.message || '修复飞书多机器人隔离写入失败')
       }
       await refreshFeishuBotsFromConfig()
     } catch (e: any) {
-      setBotError(e?.message || '修复飞书多 Bot 隔离失败')
+      setBotError(e?.message || '修复飞书多机器人隔离失败')
     } finally {
       setRepairingIsolation(false)
     }
@@ -399,7 +399,7 @@ export default function FeishuBotManagerModal({
       size="xl"
       title={
         <Group gap="xs">
-          <Text size="sm" fw={600}>飞书 Bot 管理</Text>
+          <Text size="sm" fw={600}>飞书机器人管理</Text>
           <Tooltip label="刷新列表" withArrow>
             <ActionIcon
               variant="subtle"
@@ -415,11 +415,11 @@ export default function FeishuBotManagerModal({
       }
     >
       <div className="space-y-3">
-        {/* Bot 列表 */}
+        {/* 机器人列表 */}
         <ScrollArea.Autosize mah={200}>
           <div className="space-y-1.5">
             {feishuBotsOrdered.length === 0 && (
-              <Text size="xs" c="dimmed" ta="center" py="md">还没有已配置的飞书 Bot</Text>
+              <Text size="xs" c="dimmed" ta="center" py="md">还没有已配置的飞书机器人</Text>
             )}
 
             {feishuBotsOrdered.map((bot) => {
@@ -473,10 +473,10 @@ export default function FeishuBotManagerModal({
           </div>
         </ScrollArea.Autosize>
 
-        {/* 多 Bot 隔离 */}
+        {/* 多机器人隔离 */}
         <Group justify="space-between" wrap="nowrap" className="border app-border rounded-lg px-3 py-2.5">
           <div style={{ minWidth: 0, flex: 1 }}>
-            <Text size="xs" fw={500} className="app-text-primary">多 Bot 隔离状态</Text>
+            <Text size="xs" fw={500} className="app-text-primary">多机器人隔离状态</Text>
             <Text size="xs" c="dimmed">
               {isolationDrift.needsRepair
                 ? '检测到隔离配置不完整'

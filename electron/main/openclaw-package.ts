@@ -117,7 +117,7 @@ function toActionableCommandLookupError(commandName: string, error: unknown): Er
   const message = error instanceof Error ? error.message : String(error || '')
   if (isCommandLookupMiss(commandName, message)) {
     return new Error(
-      `Unable to locate the ${commandName} command. Complete OpenClaw CLI installation in Env Check and restart Qclaw.`
+      `无法定位 ${commandName} 命令。请先在环境检查中完成 OpenClaw 命令行工具安装，然后重启 Qclaw。`
     )
   }
   return new Error(message || `Unable to resolve command path for ${commandName}`)

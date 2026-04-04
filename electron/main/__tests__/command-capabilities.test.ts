@@ -46,7 +46,7 @@ describe('probePlatformCommandCapability', () => {
 
     expect(result.supported).toBe(true)
     expect(result.available).toBe(false)
-    expect(result.message).toMatch(/interactive oauth/i)
+    expect(result.message).toContain('交互式浏览器授权登录')
     expect(result.command).toBe('script')
   })
 
@@ -61,7 +61,7 @@ describe('probePlatformCommandCapability', () => {
 
     expect(result.supported).toBe(true)
     expect(result.available).toBe(false)
-    expect(result.message).toMatch(/gemini cli oauth/i)
+    expect(result.message).toContain('Gemini 浏览器授权登录')
     expect(result.command).toBe('expect')
   })
 

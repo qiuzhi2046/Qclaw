@@ -43,7 +43,7 @@ describe('buildOpenClaw322Notice', () => {
       gatewayRunning: null,
     })
 
-    expect(notice?.title).toBe('OpenClaw 2026.3.24 运行时被阻塞')
+    expect(notice?.title).toBe('OpenClaw 2026.3.24 运行状态被阻塞')
     expect(notice?.message).toContain('当前检测到 OpenClaw 2026.3.24。')
     expect(notice?.message).not.toContain('当前检测到 OpenClaw 2026.3.28。')
   })
@@ -89,7 +89,7 @@ describe('buildOpenClaw322Notice', () => {
       gatewayRunning: null,
     })
 
-    expect(notice?.title).toBe('OpenClaw 2026.3.24 运行时被阻塞')
+    expect(notice?.title).toBe('OpenClaw 2026.3.24 运行状态被阻塞')
     expect(notice?.message).toContain('当前检测到 OpenClaw 2026.3.24。')
     expect(notice?.message).not.toContain('OpenClaw OpenClaw')
     expect(notice?.message).not.toContain('(cff6dc9)')
@@ -171,7 +171,7 @@ describe('buildOpenClaw322Notice', () => {
     })
 
     expect(notice).toMatchObject({
-      title: 'OpenClaw 2026.3.28 运行时被阻塞',
+      title: 'OpenClaw 2026.3.28 运行状态被阻塞',
       color: 'red',
     })
     expect(notice?.message).toContain('当前检测到 OpenClaw 2026.3.28。')

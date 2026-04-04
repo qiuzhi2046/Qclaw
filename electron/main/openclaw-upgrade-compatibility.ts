@@ -115,7 +115,7 @@ function build2026_3_22CompatibilitySuffix(warningCodes: string[]): string {
 
   const details: string[] = []
   if (warningCodes.includes('runtime_reconcile_required')) {
-    details.push('需要重新确认 Gateway/Auth 运行时是否已消费最新配置')
+    details.push('需要重新确认网关/Auth 运行状态是否已消费最新配置')
   }
   if (warningCodes.includes('legacy_env_alias_removed_in_2026_3_22')) {
     details.push('3.22 已移除 legacy env alias，不能把 alias 漂移误判成单一 gateway 故障')
@@ -138,7 +138,7 @@ function build2026_3_24CompatibilitySuffix(warningCodes: string[]): string {
 
   const details: string[] = []
   if (warningCodes.includes('runtime_reconcile_required')) {
-    details.push('需要重新确认 Gateway/Auth 运行时是否已消费当前 pinned 版本的配置')
+    details.push('需要重新确认网关/Auth 运行状态是否已消费当前 pinned 版本的配置')
   }
   if (warningCodes.includes('official_doctor_fix_migration_prioritized_in_2026_3_24_pin_window')) {
     details.push('回退到 3.24 时应优先复用官方 doctor --fix 迁移路径')

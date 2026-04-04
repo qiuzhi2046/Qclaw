@@ -136,7 +136,7 @@ describe('resolveOpenClawBinaryPath', () => {
         env: buildTestEnv(),
         fileExists: () => false,
       })
-    ).rejects.toThrow(/Unable to locate the openclaw command/i)
+    ).rejects.toThrow('无法定位 openclaw 命令。请先在环境检查中完成 OpenClaw 命令行工具安装，然后重启 Qclaw。')
   })
 
   it('prefers npm prefix bins before static fallback directories when command lookup misses', async () => {

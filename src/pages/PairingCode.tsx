@@ -70,9 +70,17 @@ export default function PairingCode({
   }, [])
 
   const channelInfo = CHANNEL_INFO[channel] || CHANNEL_INFO.feishu
+  const normalizedFeishuBotLabel =
+    channel === 'feishu' && accountName
+      ? accountId === 'default' && /^默认\s*bot$/i.test(accountName.trim())
+        ? '机器人'
+        : accountId && accountName.trim().toLowerCase() === `bot ${accountId}`.toLowerCase()
+          ? `机器人 ${accountId}`
+          : accountName
+      : accountName
   const feishuBotLabel =
     channel === 'feishu'
-      ? accountName || (accountId === 'default' ? '默认 Bot' : accountId ? `Bot ${accountId}` : '')
+      ? normalizedFeishuBotLabel || (accountId === 'default' ? '机器人' : accountId ? `机器人 ${accountId}` : '')
       : ''
   const parsedInput = parsePairingInput(code)
   const canPair = isPairingCodeReady(parsedInput.code)
@@ -151,7 +159,7 @@ export default function PairingCode({
         <Text size="lg" fw={600} ta="center">配置完成！</Text>
         <Text size="sm" c="dimmed" ta="center">
           {channel === 'feishu' && feishuBotLabel
-            ? `OpenClaw 已成功完成飞书 Bot「${feishuBotLabel}」的配对，现在可以开始对话了。`
+            ? `OpenClaw 已成功完成飞书机器人「${feishuBotLabel}」的配对，现在可以开始对话了。`
             : `OpenClaw 已成功连接${channelInfo.name}，现在可以在${channelInfo.name}中和您的 AI 助手对话了。`}
         </Text>
 
@@ -159,7 +167,7 @@ export default function PairingCode({
           <Text size="xs" c="dimmed" style={{ lineHeight: 1.8 }}>
             接下来您可以：
             <br />• 在{channelInfo.name}中给机器人发消息开始对话
-            <br />• Gateway 已在后台运行，开机自启动
+            <br />• 网关已在后台运行，开机自启动
             <br />• 如需修改配置，编辑 <Text span ff="monospace" c="brand">{openClawConfigDisplayPath}</Text>
           </Text>
         </Card>
@@ -183,8 +191,8 @@ export default function PairingCode({
     <Stack gap="sm" w="100%">
       <Text size="lg" fw={600}>输入配对码</Text>
       {channel === 'feishu' && feishuBotLabel && (
-        <Alert color="blue" variant="light" title="当前正在配对的 Bot">
-          {accountId ? `飞书 Bot：${feishuBotLabel}（accountId: ${accountId}）` : `飞书 Bot：${feishuBotLabel}`}
+        <Alert color="blue" variant="light" title="当前正在配对的机器人">
+          {accountId ? `飞书机器人：${feishuBotLabel}（accountId: ${accountId}）` : `飞书机器人：${feishuBotLabel}`}
         </Alert>
       )}
       <Text size="sm" c="dimmed" mb="xs">

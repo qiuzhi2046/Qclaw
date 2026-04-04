@@ -53,7 +53,7 @@ export async function guardedWriteEnvFileWithGatewayApply(
       ...writeResult,
       message: appendMessage(
         writeResult.message,
-        `环境变量已保存，但运行时生效失败（action=${decision.action}）。请稍后手动重载 Gateway。`
+        `环境变量已保存，但运行状态同步失败（action=${decision.action}）。请稍后手动重载网关。`
       ),
       gatewayApply: applyResult,
     }

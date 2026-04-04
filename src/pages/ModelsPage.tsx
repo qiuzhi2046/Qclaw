@@ -831,7 +831,7 @@ export async function verifyProviderRemovalState(
   },
   deps: ProviderRemovalVerificationDeps
 ): Promise<ProviderRemovalVerification> {
-  const providerDisplayName = String(input.provider?.name || input.provider?.id || '').trim() || '该服务商'
+  const providerDisplayName = String(input.provider?.name || input.provider?.id || '').trim() || '该 AI 提供商'
   const [latestEnv, latestConfigRaw, upstreamState] = await Promise.all([
     deps.readEnvFile().catch(() => ({})),
     deps.readConfig().catch(() => null),
@@ -887,27 +887,27 @@ export async function verifyProviderRemovalState(
   if (residual.source === 'status' && residual.authStorePath) {
     return {
       ok: false as const,
-      message: `服务商「${providerDisplayName}」的本地配置已删除，但运行态认证仍残留在 ${residual.authStorePath}`,
+      message: `AI 提供商「${providerDisplayName}」的本地配置已删除，但运行状态认证仍残留在 ${residual.authStorePath}`,
       authStorePath: residual.authStorePath,
     }
   }
   if (residual.source === 'status') {
     return {
       ok: false as const,
-      message: `服务商「${providerDisplayName}」的本地配置已删除，但运行态仍检测到认证信息`,
+      message: `AI 提供商「${providerDisplayName}」的本地配置已删除，但运行状态仍检测到认证信息`,
       authStorePath,
     }
   }
   if (residual.source === 'config') {
     return {
       ok: false as const,
-      message: `服务商「${providerDisplayName}」在配置文件中仍被识别为已配置`,
+      message: `AI 提供商「${providerDisplayName}」在配置文件中仍被识别为已配置`,
     }
   }
   if (residual.source === 'env') {
     return {
       ok: false as const,
-      message: `服务商「${providerDisplayName}」的环境变量密钥仍未清空`,
+      message: `AI 提供商「${providerDisplayName}」的环境变量密钥仍未清空`,
     }
   }
 
@@ -928,14 +928,14 @@ export async function verifyProviderRemovalState(
       if (!latestUpstreamStatus) {
         return {
           ok: false as const,
-          message: `服务商「${providerDisplayName}」的本地配置已删除，但当前无法确认认证档案是否已清理：${inspectResult.error || '请稍后重试'}`,
+          message: `AI 提供商「${providerDisplayName}」的本地配置已删除，但当前无法确认认证档案是否已清理：${inspectResult.error || '请稍后重试'}`,
           authStorePath,
         }
       }
     } else if (inspectResult.present) {
       return {
         ok: false as const,
-        message: `服务商「${providerDisplayName}」的认证档案仍残留在 ${inspectResult.authStorePath || authStorePath}`,
+        message: `AI 提供商「${providerDisplayName}」的认证档案仍残留在 ${inspectResult.authStorePath || authStorePath}`,
         authStorePath: inspectResult.authStorePath || authStorePath,
       }
     }
@@ -944,7 +944,7 @@ export async function verifyProviderRemovalState(
   if (!latestUpstreamStatus) {
     return {
       ok: false as const,
-      message: `服务商「${providerDisplayName}」的本地配置已删除，但当前无法确认运行态是否仍会从上游或外部 CLI 认证中恢复。`,
+      message: `AI 提供商「${providerDisplayName}」的本地配置已删除，但当前无法确认运行状态是否仍会从上游或外部命令行工具认证中恢复。`,
       authStorePath,
     }
   }
@@ -1271,20 +1271,20 @@ export default function ModelsPage() {
         return { attempted: false }
       }
 
-      const providerDisplayName = String(provider?.name || provider?.id || '').trim() || '该服务商'
+      const providerDisplayName = String(provider?.name || provider?.id || '').trim() || '该 AI 提供商'
       const confirmed = window.confirm(
-        `服务商「${providerDisplayName}」仍会从外部 Codex 登录自动恢复。\n\n要彻底删除，Qclaw 需要同时退出这台 Mac 上的 Codex 登录，并再次清理 OpenClaw 认证档案。\n\n是否继续？`
+        `AI 提供商「${providerDisplayName}」仍会从外部 Codex 命令行工具登录自动恢复。\n\n要彻底删除，Qclaw 需要同时退出这台 Mac 上的 Codex 命令行工具登录，并再次清理 OpenClaw 认证档案。\n\n是否继续？`
       )
       if (!confirmed) {
         return {
           attempted: true,
-          message: `服务商「${providerDisplayName}」的本地配置已删除，但外部 Codex 登录仍在，OpenClaw 会继续恢复该认证。`,
+          message: `AI 提供商「${providerDisplayName}」的本地配置已删除，但外部 Codex 命令行工具登录仍在，OpenClaw 会继续恢复该认证。`,
         }
       }
 
       setCleanupNotice({
         tone: 'info',
-        message: `清理中：正在退出 Codex 登录并移除服务商「${providerDisplayName}」的外部认证来源...`,
+        message: `清理中：正在退出 Codex 命令行工具登录并移除 AI 提供商「${providerDisplayName}」的外部认证来源...`,
       })
 
       const providerIdList = getRemovalProviderIds(provider.id)
@@ -1294,7 +1294,7 @@ export default function ModelsPage() {
       if (!externalCleanupResult.ok) {
         return {
           attempted: true,
-          message: `服务商「${providerDisplayName}」的外部 Codex 登录退出失败：${externalCleanupResult.error || '请稍后重试'}`,
+          message: `AI 提供商「${providerDisplayName}」的外部 Codex 命令行工具登录退出失败：${externalCleanupResult.error || '请稍后重试'}`,
         }
       }
 
@@ -1302,7 +1302,7 @@ export default function ModelsPage() {
       if (!repairResult.ok) {
         return {
           attempted: true,
-          message: `服务商「${providerDisplayName}」的外部认证来源已退出，但认证档案补清失败：${repairResult.error || '请稍后重试'}`,
+          message: `AI 提供商「${providerDisplayName}」的外部认证来源已退出，但认证档案补清失败：${repairResult.error || '请稍后重试'}`,
         }
       }
 
@@ -1324,15 +1324,15 @@ export default function ModelsPage() {
   const handleRemoveProvider = async (provider: { id: string; name: string }) => {
     if (removingProviderId) return
 
-    const providerDisplayName = String(provider?.name || provider?.id || '').trim() || '该服务商'
-    const confirmed = window.confirm(`确定删除服务商「${providerDisplayName}」吗？`)
+    const providerDisplayName = String(provider?.name || provider?.id || '').trim() || '该 AI 提供商'
+    const confirmed = window.confirm(`确定删除 AI 提供商「${providerDisplayName}」吗？`)
     if (!confirmed) return
 
     setRemovingProviderId(provider.id)
     setError('')
     setCleanupNotice({
       tone: 'info',
-      message: `清理中：正在删除服务商「${providerDisplayName}」...`,
+      message: `清理中：正在删除 AI 提供商「${providerDisplayName}」...`,
     })
     try {
       const latestConfigRaw = await window.api.readConfig()
@@ -1348,7 +1348,7 @@ export default function ModelsPage() {
           reason: 'dashboard-remove-linked-model',
         })
         if (!writeResult.ok) {
-          throw new Error(writeResult.message || '删除服务商配置失败')
+          throw new Error(writeResult.message || '删除 AI 提供商配置失败')
         }
         configChanged = Boolean(writeResult.wrote)
       }
@@ -1405,7 +1405,7 @@ export default function ModelsPage() {
         if (envWriteResult.ok) {
           envChanged = Boolean(envWriteResult.wrote)
         } else {
-          envWarning = envWriteResult.message || '清理服务商密钥失败'
+          envWarning = envWriteResult.message || '清理 AI 提供商密钥失败'
         }
       }
 
@@ -1437,7 +1437,7 @@ export default function ModelsPage() {
         if (fallbackAuthOrderChanged) {
           setCleanupNotice({
             tone: 'info',
-            message: `清理中：服务商「${providerDisplayName}」已删除，正在完成后台清理...`,
+            message: `清理中：AI 提供商「${providerDisplayName}」已删除，正在完成后台清理...`,
           })
           void (async () => {
             const deferredIssues: string[] = []
@@ -1445,11 +1445,11 @@ export default function ModelsPage() {
               const reloadResult = await window.api.reloadGatewayAfterModelChange()
               if (!reloadResult?.ok) {
                 deferredIssues.push(
-                  `服务商已删除，但 Gateway 重载失败：${reloadResult?.stderr || reloadResult?.stdout || '请稍后手动重载'}`
+                  `AI 提供商已删除，但网关重载失败：${reloadResult?.stderr || reloadResult?.stdout || '请稍后手动重载'}`
                 )
               }
             } catch (error: any) {
-              deferredIssues.push(`服务商已删除，但 Gateway 重载失败：${error?.message || '请稍后手动重载'}`)
+              deferredIssues.push(`AI 提供商已删除，但网关重载失败：${error?.message || '请稍后手动重载'}`)
             }
 
             try {
@@ -1461,7 +1461,7 @@ export default function ModelsPage() {
                 const repairResult = await repairResidualProviderAuthStore(provider, firstResidualAuthStorePath)
                 if (!repairResult.ok) {
                   deferredIssues.push(
-                    `服务商配置已删除，但认证档案补清失败：${repairResult.error || '请稍后重试'}`
+                    `AI 提供商配置已删除，但认证档案补清失败：${repairResult.error || '请稍后重试'}`
                   )
                 } else if (authProfileCleanupChanged(repairResult)) {
                   await loadData({ background: true, forceRefresh: true, allowCliStatusFallback: false })
@@ -1490,7 +1490,7 @@ export default function ModelsPage() {
               if (verification.ok) {
                 setCleanupNotice({
                   tone: 'success',
-                  message: `清理完成：服务商「${providerDisplayName}」删除与收尾已完成。`,
+                  message: `清理完成：AI 提供商「${providerDisplayName}」删除与收尾已完成。`,
                 })
               } else {
                 setCleanupNotice(null)
@@ -1508,14 +1508,14 @@ export default function ModelsPage() {
         if (fallbackAuthOrderWarning) {
           throw new Error(fallbackAuthOrderWarning)
         }
-        throw new Error('未检测到可删除的服务商配置')
+        throw new Error('未检测到可删除的 AI 提供商配置')
       }
       const nonBlockingIssues: string[] = []
       if (authProfilesWarning) {
-        nonBlockingIssues.push(`服务商配置已删除，但认证配置清理失败：${authProfilesWarning}`)
+        nonBlockingIssues.push(`AI 提供商配置已删除，但认证配置清理失败：${authProfilesWarning}`)
       }
       if (envWarning) {
-        nonBlockingIssues.push(`服务商配置已删除，但密钥清理失败：${envWarning}`)
+        nonBlockingIssues.push(`AI 提供商配置已删除，但密钥清理失败：${envWarning}`)
       }
 
       if (configChanged) {
@@ -1543,7 +1543,7 @@ export default function ModelsPage() {
       }
       setCleanupNotice({
         tone: 'info',
-        message: `清理中：服务商「${providerDisplayName}」已删除，正在完成后台清理...`,
+        message: `清理中：AI 提供商「${providerDisplayName}」已删除，正在完成后台清理...`,
       })
 
       void (async () => {
@@ -1559,7 +1559,7 @@ export default function ModelsPage() {
               if (!clearOrderResult.ok && clearOrderResult.errorCode !== 'unsupported_capability') {
                 if (deferredIssues.length === 0) {
                   deferredIssues.push(
-                    `服务商配置已删除，但认证顺序清理失败：${
+                    `AI 提供商配置已删除，但认证顺序清理失败：${
                       clearOrderResult.message || clearOrderResult.stderr || '请稍后重试'
                     }`
                   )
@@ -1567,7 +1567,7 @@ export default function ModelsPage() {
               }
             } catch (error: any) {
               if (deferredIssues.length === 0) {
-                deferredIssues.push(`服务商配置已删除，但认证顺序清理失败：${error?.message || '请稍后重试'}`)
+                deferredIssues.push(`AI 提供商配置已删除，但认证顺序清理失败：${error?.message || '请稍后重试'}`)
               }
             }
           }
@@ -1576,11 +1576,11 @@ export default function ModelsPage() {
             const reloadResult = await window.api.reloadGatewayAfterModelChange()
             if (!reloadResult?.ok) {
               deferredIssues.push(
-                `服务商已删除，但 Gateway 重载失败：${reloadResult?.stderr || reloadResult?.stdout || '请稍后手动重载'}`
+                `AI 提供商已删除，但网关重载失败：${reloadResult?.stderr || reloadResult?.stdout || '请稍后手动重载'}`
               )
             }
           } catch (error: any) {
-            deferredIssues.push(`服务商已删除，但 Gateway 重载失败：${error?.message || '请稍后手动重载'}`)
+            deferredIssues.push(`AI 提供商已删除，但网关重载失败：${error?.message || '请稍后手动重载'}`)
           }
 
           await loadData({ background: true, forceRefresh: true, allowCliStatusFallback: false })
@@ -1589,7 +1589,7 @@ export default function ModelsPage() {
           if (!verification.ok && residualAuthStorePath) {
             const repairResult = await repairResidualProviderAuthStore(provider, residualAuthStorePath)
             if (!repairResult.ok) {
-              deferredIssues.push(`服务商配置已删除，但认证档案补清失败：${repairResult.error || '请稍后重试'}`)
+              deferredIssues.push(`AI 提供商配置已删除，但认证档案补清失败：${repairResult.error || '请稍后重试'}`)
             } else if (authProfileCleanupChanged(repairResult)) {
               await loadData({ background: true, forceRefresh: true, allowCliStatusFallback: false })
               verification = await verifyProviderRemoval(provider, repairResult.authStorePath || deletionAuthStorePath)
@@ -1618,7 +1618,7 @@ export default function ModelsPage() {
             setError((prev) => removeResolvedErrorMessages(prev, nonBlockingIssues))
             setCleanupNotice({
               tone: 'success',
-              message: `清理完成：服务商「${providerDisplayName}」删除与收尾已完成。`,
+              message: `清理完成：AI 提供商「${providerDisplayName}」删除与收尾已完成。`,
             })
           } else {
             setCleanupNotice(null)
@@ -1628,7 +1628,7 @@ export default function ModelsPage() {
         }
       })()
     } catch (e: any) {
-      setError(e?.message || '删除服务商失败')
+      setError(e?.message || '删除 AI 提供商失败')
       setCleanupNotice(null)
     } finally {
       setRemovingProviderId('')
@@ -1659,8 +1659,25 @@ export default function ModelsPage() {
     <div className="p-4 h-full overflow-y-auto space-y-2">
       {/* 页头 */}
       <div className="px-1 mb-1 space-y-2">
-        <Group justify="space-between" align="flex-start">
-          <Text size="md" fw={700} className="app-text-primary">模型与 API</Text>
+        <Group justify="space-between" align="center">
+          <Group gap="xs">
+            {!showAddForm && (
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<IconPlus size={14} />}
+                onClick={() => setShowAddForm(true)}
+                className="cursor-pointer"
+              >
+                添加
+              </Button>
+            )}
+          </Group>
+          {activeModel && (
+            <Text size="sm" c="dimmed" className="flex-1 text-center">
+              当前模型: <Text span size="sm" fw={600} className="app-text-primary">{activeModel}</Text>
+            </Text>
+          )}
           <Group gap="xs">
             <SegmentedControl
               size="xs"
@@ -1687,9 +1704,6 @@ export default function ModelsPage() {
             </Tooltip>
           </Group>
         </Group>
-        <Text size="xs" c="dimmed">
-          {catalogSummary.label} · {catalogSummary.detail}
-        </Text>
       </div>
 
       {error && (
@@ -1707,20 +1721,7 @@ export default function ModelsPage() {
         </Alert>
       )}
 
-      {/* 当前激活模型 */}
-      {activeModel && (
-        <div className="border app-border rounded-lg px-3 py-2.5 app-bg-secondary" style={{ borderLeft: '3px solid var(--mantine-color-blue-6)' }}>
-          <Group justify="space-between">
-            <Group gap="xs">
-              <Text size="xs" c="dimmed">当前模型</Text>
-              <Text size="sm" fw={600} className="app-text-primary">{activeModel}</Text>
-            </Group>
-            <Badge size="xs" color="blue" variant="dot">已激活</Badge>
-          </Group>
-        </div>
-      )}
-
-      {/* 已配置供应商 */}
+      {/* 已配置 AI 提供商 */}
       {hasConfigured && (
         <div className="space-y-2">
           {configuredProviders.map((provider) => {
@@ -1776,7 +1777,7 @@ export default function ModelsPage() {
                         {providerCountLabel}
                       </Badge>
                     )}
-                    <Tooltip label="删除服务商" withArrow>
+                    <Tooltip label="删除 AI 提供商" withArrow>
                       <ActionIcon
                         variant="subtle"
                         color="red"
@@ -1875,43 +1876,17 @@ export default function ModelsPage() {
               </div>
             )
           })}
-
-          {/* 添加供应商 */}
-          {!showAddForm && (
-            <Button
-              variant="default"
-              size="xs"
-              fullWidth
-              leftSection={<IconPlus size={14} />}
-              onClick={() => setShowAddForm(true)}
-              className="cursor-pointer"
-              styles={{ root: { borderStyle: 'dashed' } }}
-            >
-              添加供应商
-            </Button>
-          )}
         </div>
       )}
 
       {/* ModelCenter wizard — show when adding */}
       {showAddForm && (
         <div className="border app-border rounded-lg overflow-hidden p-3">
-          <Group justify="space-between" mb="sm">
-            <Text size="sm" fw={600} className="app-text-primary">添加新供应商</Text>
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="gray"
-              onClick={() => setShowAddForm(false)}
-              className="cursor-pointer"
-            >
-              取消
-            </Button>
-          </Group>
           <ModelCenter
             onConfigured={handleConfigured}
+            onCancel={() => setShowAddForm(false)}
             stayOnConfigured={true}
-            configuredMessage="供应商配置成功"
+            configuredMessage="AI 提供商配置成功"
             collapsible={false}
             submitIdleLabel="验证并保存"
           />
@@ -1922,7 +1897,7 @@ export default function ModelsPage() {
       {!hasConfigured && !showAddForm && (
         <div className="border app-border rounded-lg p-6 text-center">
           <Text size="sm" c="dimmed" mb="md">
-            暂无已配置的 AI 供应商
+            暂无已配置的 AI 提供商
           </Text>
           <Button
             variant="light"
@@ -1931,7 +1906,7 @@ export default function ModelsPage() {
             onClick={() => setShowAddForm(true)}
             className="cursor-pointer"
           >
-            添加供应商
+            添加 AI 提供商
           </Button>
         </div>
       )}

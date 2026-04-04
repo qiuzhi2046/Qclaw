@@ -16,7 +16,7 @@ function summarizeOpenClaw(check: CombinedUpdateCheckResult | null): string {
     return `${check.openclaw.currentVersion || '未知'} → ${check.openclaw.targetVersion}`
   }
   if (check.openclaw.enforcement === 'manual_block') return '当前版本需手动调整到 2026.3.24'
-  if (check.openclaw.enforcement === 'auto_correct') return '启动阶段会先自动纠偏到 2026.3.24'
+  if (check.openclaw.enforcement === 'auto_correct') return '启动阶段会先自动修复到 2026.3.24'
   return '无法确认 OpenClaw 版本状态'
 }
 

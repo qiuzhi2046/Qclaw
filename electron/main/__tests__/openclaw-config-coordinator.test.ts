@@ -336,7 +336,7 @@ describe('openclaw config coordinator', () => {
     expect(result.ok).toBe(true)
     expect(result.wrote).toBe(true)
     expect(result.message).toContain('配置写入成功，但网关生效动作失败')
-    expect(result.message).toContain('请稍后手动重载 Gateway')
+    expect(result.message).toContain('请稍后手动重载网关')
     expect(result.gatewayApply).toEqual({
       ok: false,
       requestedAction: 'hot-reload',

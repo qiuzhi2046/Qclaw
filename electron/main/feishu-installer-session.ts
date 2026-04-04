@@ -72,6 +72,39 @@ function resolveFeishuInstallerPromptHookPath(): string {
   return path.join(app.getPath('userData'), 'runtime', 'feishu-installer-prompt-hook.cjs')
 }
 
+async function resolveFeishuInstallerDiagLogPath(): Promise<string> {
+  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const homeDir = String(openClawPaths?.homeDir || '').trim()
+  if (homeDir) {
+    return path.join(homeDir, 'logs', 'qclaw-feishu-installer-diag.jsonl')
+  }
+  return path.join(app.getPath('userData'), 'logs', 'qclaw-feishu-installer-diag.jsonl')
+}
+
+function isFeishuInstallerDiagEnabled(): boolean {
+  return String(process.env.QCLAW_FEISHU_DIAG || '').trim() === '1'
+}
+
+async function appendFeishuInstallerDiag(
+  event: string,
+  fields: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    if (!isFeishuInstallerDiagEnabled()) return
+    const logPath = await resolveFeishuInstallerDiagLogPath()
+    await fs.promises.mkdir(path.dirname(logPath), { recursive: true })
+    const payload = {
+      ts: new Date().toISOString(),
+      pid: process.pid,
+      source: 'qclaw-main',
+      event: String(event || '').trim() || 'unknown',
+      ...fields,
+    }
+    await fs.promises.appendFile(logPath, `${JSON.stringify(payload)}\n`, 'utf8')
+  } catch {
+    // Best effort only; diagnostics must never break installer flow.
+  }
+}
 async function ensureFeishuInstallerPromptHookFile(): Promise<string> {
   const hookPath = resolveFeishuInstallerPromptHookPath()
   await fs.promises.mkdir(path.dirname(hookPath), { recursive: true })
@@ -153,7 +186,7 @@ async function prepareConfigForFeishuInstaller(): Promise<void> {
     const writeResult = await applyConfigPatchGuarded({
       beforeConfig: config,
       afterConfig: result.config,
-      reason: 'unknown',
+      reason: 'channel-connect-onboard-prepare',
     })
     if (!writeResult.ok) {
       throw new Error(writeResult.message || '准备飞书安装器配置失败')
@@ -442,6 +475,8 @@ export async function startFeishuInstallerSession(
     const promptBridgeServer = await createPromptBridgeServer(sessionToken)
     const promptBridgePort = resolvePromptBridgePort(promptBridgeServer)
     const sessionId = randomUUID()
+    const diagEnabled = isFeishuInstallerDiagEnabled()
+    const diagLogPath = diagEnabled ? await resolveFeishuInstallerDiagLogPath() : ''
 
     const proc = spawn(commandResolution.command[0], commandResolution.command.slice(1), {
       cwd: resolveSafeWorkingDirectory({
@@ -460,6 +495,13 @@ export async function startFeishuInstallerSession(
         NODE_OPTIONS: appendNodeRequireOption(process.env.NODE_OPTIONS, promptHookPath),
         QCLAW_FEISHU_PROMPT_PORT: String(promptBridgePort),
         QCLAW_FEISHU_PROMPT_SESSION_TOKEN: sessionToken,
+        ...(diagEnabled
+          ? {
+              QCLAW_FEISHU_DIAG: '1',
+              QCLAW_FEISHU_DIAG_LOG_PATH: diagLogPath,
+              QCLAW_FEISHU_DIAG_SESSION_ID: sessionId,
+            }
+          : {}),
         ...isolatedNpmCache.env,
       },
       shell: process.platform === 'win32',
@@ -494,6 +536,13 @@ export async function startFeishuInstallerSession(
       command: [...commandResolution.command],
       pendingPrompt: null,
     })
+    void appendFeishuInstallerDiag('session-started', {
+      sessionId,
+      command: [...commandResolution.command],
+      promptBridgePort,
+      diagLogPath,
+      npmCacheDir: isolatedNpmCache.cacheDir,
+    })
 
     proc.stdout?.on('data', (chunk) => {
       appendOutput('stdout', String(chunk), emit)
@@ -526,6 +575,12 @@ export async function startFeishuInstallerSession(
         canceled,
         pendingPrompt: null,
       })
+      void appendFeishuInstallerDiag('session-exit', {
+        sessionId,
+        code: activeSession.code,
+        ok: activeSession.ok,
+        canceled,
+      })
       void cleanupIsolatedNpmCacheEnv(npmCacheDirForCleanup)
     })
 
@@ -552,6 +607,12 @@ export async function startFeishuInstallerSession(
         ok: false,
         canceled,
         pendingPrompt: null,
+      })
+      void appendFeishuInstallerDiag('session-error', {
+        sessionId,
+        code: activeSession.code,
+        canceled,
+        message: error instanceof Error ? error.message : String(error),
       })
       void cleanupIsolatedNpmCacheEnv(npmCacheDirForCleanup)
     })
@@ -653,10 +714,13 @@ export async function stopFeishuInstallerSession(): Promise<{ ok: boolean }> {
   if (!activeSession || activeSession.phase !== 'running') {
     return { ok: true }
   }
+  const sessionId = activeSession.id
+  void appendFeishuInstallerDiag('stop-requested', { sessionId })
   clearPendingPrompt(activeSession, {
     notify: true,
     abortMessage: 'Feishu installer session was canceled by Qclaw.',
   })
   const ok = await cancelActiveProcess(FEISHU_INSTALLER_CONTROL_DOMAIN)
+  void appendFeishuInstallerDiag('stop-finished', { sessionId, ok })
   return { ok }
 }
