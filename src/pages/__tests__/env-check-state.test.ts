@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import * as EnvCheckModule from '../EnvCheck'
+import envCheckSource from '../EnvCheck.tsx?raw'
 import {
   buildOpenClawAutoCorrectionConsentMessage,
+  buildDevBypassReadyPayload,
   buildOpenClawGateState,
   canContinueWithOpenClawGate,
   canContinueHistoryOnlyRecovery,
@@ -207,6 +209,21 @@ describe('createEnvCheckRestartState', () => {
     resolveRepair()
     await repairPromise
     expect(events).toEqual(['repair-started', 'after-kickoff', 'repair-settled'])
+  })
+
+  it('builds a dev bypass payload that routes back into setup instead of pretending dashboard is ready', () => {
+    expect(buildDevBypassReadyPayload()).toEqual({
+      hadOpenClawInstalled: false,
+      installedOpenClawDuringCheck: false,
+      gatewayRunning: false,
+      sharedConfigInitialized: false,
+      discoveryResult: null,
+    })
+  })
+
+  it('renders a dev-only bypass action so vite electron sessions can skip env detection', () => {
+    expect(envCheckSource).toContain('开发调试：跳过环境检测')
+    expect(envCheckSource).toContain('import.meta.env.DEV')
   })
 
   it('treats 2026.3.22 as the minimum supported openclaw version after stripping suffixes', () => {

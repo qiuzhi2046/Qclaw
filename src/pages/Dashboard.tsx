@@ -573,7 +573,7 @@ export default function Dashboard({
 
   const getUpstreamModelState = async () => {
     const upstreamState = await readOpenClawUpstreamModelState()
-    logUpstreamModelStateFallback('Dashboard', upstreamState)
+    logUpstreamModelStateFallback('Dashboard', upstreamState, console.info, import.meta.env.DEV)
     return upstreamState
   }
 
