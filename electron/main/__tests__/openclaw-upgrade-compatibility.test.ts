@@ -29,16 +29,17 @@ describe('openclaw upgrade compatibility', () => {
     expect(detectOpenClawVersionBand('2026.3.24')).toBe('openclaw_2026_3_23_to_2026_3_24')
   })
 
-  it('marks unaudited future versions as conservative mode', () => {
+  it('treats newer versions as same-generation upgrade when ALLOW_LATEST is enabled', () => {
     const assessment = assessOpenClawUpgradeCompatibility({
       currentVersion: '2026.4.1',
       previousVersion: '2026.3.22',
       assessedAt: '2026-03-23T10:00:00.000Z',
     })
 
-    expect(assessment.status).toBe('unknown_future_version')
-    expect(assessment.conservativeMode).toBe(true)
-    expect(assessment.warningCodes).toEqual(['version_unknown_future'])
+    // ALLOW_LATEST_OPENCLAW_VERSION=true：新版本不再进入保守模式
+    expect(assessment.status).toBe('upgrade_detected')
+    expect(assessment.conservativeMode).toBe(false)
+    expect(assessment.currentBand).toBe('openclaw_2026_3_25_to_2026_3_28')
   })
 
   it('captures upgrade transitions for later reconcile flows', () => {

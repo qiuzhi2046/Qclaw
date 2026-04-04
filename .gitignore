@@ -41,6 +41,7 @@ dev-notes/
 /.npm-cache/
 /Library/
 /.tmp-qclaw-user-data/
+.qclaw-dev.pid
 /.codex-skill-build/
 /AGENTS.md
 .agents/

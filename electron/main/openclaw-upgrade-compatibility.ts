@@ -4,6 +4,8 @@ import type {
   UpgradeCompatibilityAssessment,
   UpgradeCompatibilityStatus,
 } from '../../src/shared/gateway-runtime-reconcile-state'
+import { getVersionAdapter } from '../../src/shared/openclaw-version-policy'
+import { ALLOW_LATEST_OPENCLAW_VERSION } from '../../src/shared/openclaw-version-policy'
 
 interface ParsedOpenClawVersion {
   major: number
@@ -52,12 +54,46 @@ export function detectOpenClawVersionBand(version: string | null | undefined): O
   const normalized = normalizeOpenClawVersion(version)
   if (!normalized) return 'unknown'
 
+  // 如果设置了版本适配器，使用适配器的状态判断
+  const adapter = getVersionAdapter()
+  if (adapter && adapter.getVersion() === normalized) {
+    const adapterStatus = adapter.getStatus()
+    
+    // 如果适配器标记为supported或degraded，认为是支持的版本
+    if (adapterStatus === 'supported' || adapterStatus === 'degraded') {
+      // 使用精确的版本范围检查
+      if (compareOpenClawVersions(normalized, '2026.3.25') >= 0 && compareOpenClawVersions(normalized, '2026.3.28') <= 0) {
+        return 'openclaw_2026_3_25_to_2026_3_28'
+      }
+      if (compareOpenClawVersions(normalized, '2026.3.23') >= 0 && compareOpenClawVersions(normalized, '2026.3.24') <= 0) {
+        return 'openclaw_2026_3_23_to_2026_3_24'
+      }
+      if (compareOpenClawVersions(normalized, '2026.3.22') === 0) {
+        return 'openclaw_2026_3_22'
+      }
+      // 对于未知的支持版本，返回unknown_future
+      return 'unknown_future'
+    }
+    
+    // 如果是experimental，返回unknown_future但不触发保守模式
+    if (adapterStatus === 'experimental') {
+      return 'unknown_future'
+    }
+  }
+
+  // 原有逻辑（保持向后兼容）
   if (compareOpenClawVersions(normalized, '2026.3.7') < 0) return 'pre_2026_3_7'
   if (compareOpenClawVersions(normalized, '2026.3.11') <= 0) return 'openclaw_2026_3_7_to_2026_3_11'
   if (compareOpenClawVersions(normalized, '2026.3.13') <= 0) return 'openclaw_2026_3_12_to_2026_3_13'
   if (compareOpenClawVersions(normalized, '2026.3.21') <= 0) return 'openclaw_2026_3_14_to_2026_3_21'
   if (compareOpenClawVersions(normalized, '2026.3.22') === 0) return 'openclaw_2026_3_22'
   if (compareOpenClawVersions(normalized, '2026.3.24') <= 0) return 'openclaw_2026_3_23_to_2026_3_24'
+  if (compareOpenClawVersions(normalized, '2026.3.28') <= 0) return 'openclaw_2026_3_25_to_2026_3_28'
+
+  // 新版本：当 ALLOW_LATEST 启用时，将新版本视为同代而非 unknown_future
+  if (ALLOW_LATEST_OPENCLAW_VERSION) {
+    return 'openclaw_2026_3_25_to_2026_3_28'
+  }
   return 'unknown_future'
 }
 
@@ -67,7 +103,26 @@ function resolveCompatibilityStatus(
   currentBand: OpenClawVersionBand
 ): UpgradeCompatibilityStatus {
   if (!currentVersion) return 'unknown_current_version'
-  if (currentBand === 'unknown_future') return 'unknown_future_version'
+  
+  // 如果设置了版本适配器，使用适配器的状态判断
+  const adapter = getVersionAdapter()
+  if (adapter && adapter.getVersion() === currentVersion) {
+    const adapterStatus = adapter.getStatus()
+    
+    // 如果适配器标记为supported或degraded，不触发unknown_future_version
+    if (adapterStatus === 'supported' || adapterStatus === 'degraded' || adapterStatus === 'experimental') {
+      if (!previousVersion) return 'first_observed'
+      
+      const comparison = compareOpenClawVersions(currentVersion, previousVersion)
+      if (comparison > 0) return 'upgrade_detected'
+      if (comparison < 0) return 'downgrade_detected'
+      return 'steady_state'
+    }
+  }
+  
+  // 原有逻辑（保持向后兼容）
+  // 当 ALLOW_LATEST 启用时，unknown_future 不再触发保守模式
+  if (currentBand === 'unknown_future' && !ALLOW_LATEST_OPENCLAW_VERSION) return 'unknown_future_version'
   if (!previousVersion) return 'first_observed'
 
   const comparison = compareOpenClawVersions(currentVersion, previousVersion)
@@ -191,13 +246,26 @@ export function assessOpenClawUpgradeCompatibility(params: {
   const warningCodes = buildWarningCodes(currentVersion, previousVersion, status, currentBand)
   const assessedAt = String(params.assessedAt || new Date().toISOString())
 
+  // 判断是否进入保守模式
+  // 新策略：只有在适配器明确标记为unsupported时才进入保守模式
+  let conservativeMode = status === 'unknown_current_version' || status === 'unknown_future_version'
+  
+  const adapter = getVersionAdapter()
+  if (adapter && currentVersion && adapter.getVersion() === currentVersion) {
+    const adapterStatus = adapter.getStatus()
+    // 如果适配器不是unsupported，不进入保守模式
+    if (adapterStatus !== 'unsupported') {
+      conservativeMode = false
+    }
+  }
+
   return {
     status,
     currentVersion,
     currentBand,
     previousVersion,
     previousBand,
-    conservativeMode: status === 'unknown_current_version' || status === 'unknown_future_version',
+    conservativeMode,
     warningCodes,
     summary: buildSummary(status, currentVersion, previousVersion, currentBand, warningCodes),
     assessedAt,

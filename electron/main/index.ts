@@ -15,6 +15,7 @@ import { tryNormalizeProcessCwd } from './runtime-working-directory'
 import { revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
+import { initVersionAdapter, cleanupVersionAdapter } from './openclaw-version-adapter-integration'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -264,7 +265,10 @@ function createTray() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 初始化版本适配器
+  await initVersionAdapter()
+  
   registerIpcHandlers()
   createWindow()
   createTray()
@@ -285,6 +289,9 @@ app.on('before-quit', (event) => {
       .then(() => undefined)
       .catch(() => undefined)
       .finally(() => {
+        // 清理版本适配器
+        cleanupVersionAdapter()
+        
         appExitCleanupDone = true
         appExitCleanupPromise = null
         app.quit()

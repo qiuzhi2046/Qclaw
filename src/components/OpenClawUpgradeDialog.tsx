@@ -98,15 +98,15 @@ export default function OpenClawUpgradeDialog({
             </Paper>
           </SimpleGrid>
 
-          {check.policyState === 'supported_target' && (
+          {check.upToDate && (
             <Alert color="green" variant="light" mt="md">
-              当前 OpenClaw 已是受支持上限版本，无需再升级。
+              当前 OpenClaw 已是最新版本，无需再升级。
             </Alert>
           )}
 
-          {check.policyState === 'supported_not_target' && (
+          {!check.upToDate && check.policyState === 'supported_not_target' && (
             <Alert color="blue" variant="light" mt="md">
-              当前版本受支持，可按需升级到 {check.targetVersion || '2026.3.24'}。
+              发现新版本：{check.targetVersion || '最新版本'}，当前版本 {check.currentVersion} 可升级。
             </Alert>
           )}
 
@@ -157,9 +157,9 @@ export default function OpenClawUpgradeDialog({
               color="green"
               size="sm"
               onClick={() => void handleRunUpgrade()}
-              disabled={running || !canRun}
+              disabled={running || !canRun || check?.upToDate}
             >
-              {running ? '处理中...' : '升级当前 OpenClaw'}
+              {running ? '处理中...' : check?.upToDate ? '已是最新版本' : `升级到 ${check?.targetVersion || '最新版本'}`}
             </Button>
           </Group>
         </>

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { OPENCLAW_NPM_REGISTRY_MIRRORS } from '../openclaw-download-fallbacks'
+import { setDynamicTargetVersion } from '../../../src/shared/openclaw-version-policy'
 
 const TEST_HOME = process.env.HOME || '/Users/test'
 const fs = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
@@ -212,6 +213,8 @@ describe('openclaw upgrade service', () => {
         failures: [],
       },
     })
+    // 重置动态目标版本
+    setDynamicTargetVersion(null)
   })
 
   it('marks custom out-of-range installs as manual_block against the pinned target', async () => {
@@ -241,13 +244,13 @@ describe('openclaw upgrade service', () => {
     const result = await checkOpenClawUpgrade()
 
     expect(result.currentVersion).toBe('1.0.0')
-    expect(result.targetVersion).toBe('2026.3.24')
+    expect(result.targetVersion).toBe('2026.3.28')
     expect(result.policyState).toBe('below_min')
     expect(result.enforcement).toBe('manual_block')
     expect(result.targetAction).toBe('upgrade')
     expect(result.canAutoUpgrade).toBe(false)
     expect(result.errorCode).toBe('manual_only')
-    expect(result.manualHint).toContain('2026.3.24')
+    expect(result.manualHint).toContain('最新版本')
   })
 
   it('allows supported-range installs to continue without depending on latest lookup', async () => {
@@ -280,7 +283,7 @@ describe('openclaw upgrade service', () => {
     expect(result.policyState).toBe('supported_not_target')
     expect(result.enforcement).toBe('optional_upgrade')
     expect(result.targetAction).toBe('upgrade')
-    expect(result.targetVersion).toBe('2026.3.24')
+    expect(result.targetVersion).toBe('2026.3.28')
     expect(result.errorCode).toBeUndefined()
   })
 
@@ -317,7 +320,7 @@ describe('openclaw upgrade service', () => {
     expect(result.blocksContinue).toBe(false)
     expect(result.canAutoUpgrade).toBe(false)
     expect(result.errorCode).toBeUndefined()
-    expect(result.manualHint).toContain('2026.3.24')
+    expect(result.manualHint).toContain('最新版本')
   })
 
   it('manual-blocks installs whose version string cannot be parsed safely', async () => {
@@ -795,7 +798,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.22',
+      latestVersion: '2026.3.24',
       checkedAt: '2026-03-24T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -975,6 +978,12 @@ describe('openclaw upgrade service', () => {
       )
 
       gatewayHealthMock.mockResolvedValue({ running: false, raw: '{}' })
+      checkOpenClawLatestVersionMock.mockResolvedValue({
+        ok: true,
+        latestVersion: '2026.3.24',
+        checkedAt: '2026-03-18T10:00:00.000Z',
+        source: 'npm-registry',
+      })
       discoverOpenClawInstallationsMock.mockResolvedValue({
         candidates: [
           {
@@ -1070,6 +1079,12 @@ describe('openclaw upgrade service', () => {
       await fs.writeFile(path.join(backupArchive, 'credentials', 'token.json'), '{"token":"restored"}', 'utf8')
 
       gatewayHealthMock.mockResolvedValue({ running: false, raw: '{}' })
+      checkOpenClawLatestVersionMock.mockResolvedValue({
+        ok: true,
+        latestVersion: '2026.3.24',
+        checkedAt: '2026-03-18T10:00:00.000Z',
+        source: 'npm-registry',
+      })
       discoverOpenClawInstallationsMock.mockResolvedValue({
         candidates: [
           {
@@ -1170,6 +1185,12 @@ describe('openclaw upgrade service', () => {
       )
 
       gatewayHealthMock.mockResolvedValue({ running: false, raw: '{}' })
+      checkOpenClawLatestVersionMock.mockResolvedValue({
+        ok: true,
+        latestVersion: '2026.3.24',
+        checkedAt: '2026-03-18T10:00:00.000Z',
+        source: 'npm-registry',
+      })
       discoverOpenClawInstallationsMock.mockResolvedValue({
         candidates: [
           {
