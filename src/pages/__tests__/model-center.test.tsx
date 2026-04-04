@@ -5,6 +5,7 @@ import {
   appendRetryRefreshHint,
   type OpenClawCapabilities,
   buildLocalProviderEnvUpdatesForSubmit,
+  buildNextConfigWithLocalProviderSnapshot,
   buildCapabilitiesLoadingDisplay,
   refreshModelCapabilitiesData,
   buildSkipSetupContext,
@@ -265,6 +266,35 @@ describe('ModelCenter source copy cleanup', () => {
     expect(modelCenterSource).not.toMatch(/\{selectedProvider\?\.hint && <Text/)
     expect(modelCenterSource).not.toMatch(/\{selectedMethod\?\.hint && <Text/)
     expect(modelCenterSource).not.toMatch(/\.extraOptions\.find\(\(option\) => normalizeMethodId\(option\.id\) === normalizeMethodId\(selectedExtraOption\)\)\s*\?\.hint/)
+  })
+})
+
+describe('buildNextConfigWithLocalProviderSnapshot', () => {
+  it('persists local custom-openai provider details and scanned models into models.providers', () => {
+    expect(
+      buildNextConfigWithLocalProviderSnapshot({
+        currentConfig: null,
+        providerId: 'custom-openai',
+        baseUrl: 'http://192.168.31.139:12995/v1',
+        selectedModelKey: 'custom-openai/gpt-4',
+        discoveredModels: [
+          { key: 'custom-openai/gpt-4', name: 'gpt-4' },
+          { key: 'custom-openai/gpt-4.1', name: 'gpt-4.1' },
+        ],
+      })
+    ).toEqual({
+      models: {
+        providers: {
+          'custom-openai': {
+            baseUrl: 'http://192.168.31.139:12995/v1',
+            models: [
+              { id: 'gpt-4', name: 'gpt-4' },
+              { id: 'gpt-4.1', name: 'gpt-4.1' },
+            ],
+          },
+        },
+      },
+    })
   })
 })
 
@@ -867,6 +897,28 @@ describe('findConfiguredCustomProviderId', () => {
               models: ['acme-chat'],
             },
             'acme-gateway-b': {
+              baseUrl: 'https://gateway.example.com/v1',
+              models: ['acme-chat'],
+            },
+          },
+        },
+      },
+      {
+        baseUrl: 'https://gateway.example.com/v1',
+        modelId: 'acme-chat',
+        compatibility: 'openai',
+      }
+    )
+
+    expect(configuredProviderId).toBe('')
+  })
+
+  it('ignores local custom-openai snapshots when resolving manual custom providers', () => {
+    const configuredProviderId = findConfiguredCustomProviderId(
+      {
+        models: {
+          providers: {
+            'custom-openai': {
               baseUrl: 'https://gateway.example.com/v1',
               models: ['acme-chat'],
             },

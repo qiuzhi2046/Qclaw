@@ -18,6 +18,8 @@ export type CustomProviderConfigMatchResult =
       status: 'missing'
     }
 
+const LOCAL_PROVIDER_SNAPSHOT_IDS = new Set(['ollama', 'vllm', 'custom-openai'])
+
 function isAzureCustomProviderUrl(baseUrl: string): boolean {
   try {
     const host = new URL(baseUrl).hostname.toLowerCase()
@@ -88,14 +90,16 @@ export function resolveConfiguredCustomProviderMatchFromConfig(
 
   const matchedProviderIds: string[] = []
   for (const [providerId, providerConfig] of Object.entries(providers)) {
+    const normalizedProviderId = String(providerId || '').trim()
+    if (!normalizedProviderId || LOCAL_PROVIDER_SNAPSHOT_IDS.has(normalizedProviderId)) {
+      continue
+    }
+
     const actualBaseUrl = String(providerConfig?.baseUrl || '').trim().replace(/\/+$/, '')
     const models = Array.isArray(providerConfig?.models) ? providerConfig.models : []
     const hasModel = models.some((model: unknown) => getConfiguredProviderModelCandidates(model).includes(expectedModelId))
     if (actualBaseUrl === expectedBaseUrl && hasModel) {
-      const normalizedProviderId = String(providerId || '').trim()
-      if (normalizedProviderId) {
-        matchedProviderIds.push(normalizedProviderId)
-      }
+      matchedProviderIds.push(normalizedProviderId)
     }
   }
 

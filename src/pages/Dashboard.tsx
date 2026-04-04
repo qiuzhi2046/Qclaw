@@ -10,18 +10,14 @@ import { runManagedChannelRepairFlow } from '../shared/managed-channel-repair'
 import { runDashboardInitialLoad } from './dashboard-initial-load'
 import {
   buildModelCatalogDisplaySummary,
-  filterCatalogForDisplay,
   isCatalogModelAvailable,
   type ModelCatalogDisplayMode,
 } from '../lib/model-catalog-display'
 import { listAllModelCatalogItems } from '../lib/model-catalog-pagination'
 import {
-  buildEffectiveModelCatalog,
-  buildModelsPageConfiguredProviders,
-  filterModelsPageCatalogByConfiguredProviders,
-  filterConfiguredProvidersWithVisibleModels,
   getModelsPageProviderModels,
   resolveConfiguredProviderRuntimeState,
+  resolveModelsPageCatalogState,
   resolveModelsPageActiveModel,
   resolveVisibleConfiguredActiveModel,
 } from './models-page-state'
@@ -487,28 +483,25 @@ export default function Dashboard({
   const pluginCenterProgressRef = useRef(0)
   const pluginCenterProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const activeModelHint = resolveModelsPageActiveModel(modelStatus, config)
-  const locallyConfiguredProviders = buildModelsPageConfiguredProviders({
+  const {
+    effectiveCatalog,
+    visibleCatalog,
+    scopedCatalog: configuredCatalog,
+    configuredProviders,
+  } = resolveModelsPageCatalogState({
+    catalog,
     envVars,
     config,
     statusData: modelStatus,
-  })
-  const effectiveCatalog = buildEffectiveModelCatalog(catalog, {
-    statusData: modelStatus,
-    preferredModelKey: activeModelHint,
-    configuredProviderIds: locallyConfiguredProviders.map((provider) => provider.id),
     verificationRecords,
+    preferredModelKey: activeModelHint,
+    mode: catalogMode,
   })
-  const visibleCatalog = filterCatalogForDisplay(effectiveCatalog, catalogMode)
-  const providers: ModelProvider[] = filterConfiguredProvidersWithVisibleModels(
-    locallyConfiguredProviders,
-    visibleCatalog,
-    effectiveCatalog
-  ).map((provider) => ({
+  const providers: ModelProvider[] = configuredProviders.map((provider) => ({
     id: provider.id,
     name: provider.name,
     logo: provider.logo,
   }))
-  const configuredCatalog = filterModelsPageCatalogByConfiguredProviders(effectiveCatalog, providers)
   const catalogSummary = buildModelCatalogDisplaySummary(configuredCatalog, catalogMode)
   const displayedPluginRepairResult = selectDashboardPluginRepairResult(pluginRepairResult, pluginCenterRepairResult)
   const pluginRepairErrorSummary =
