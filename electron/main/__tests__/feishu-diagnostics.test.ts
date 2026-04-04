@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   buildFeishuDiagnosticMessageText,
+  getBotLabel,
   listenForFeishuBotDiagnosticActivity,
   sendFeishuDiagnosticMessage,
 } from '../feishu-diagnostics-core'
@@ -18,11 +19,18 @@ describe('buildFeishuDiagnosticMessageText', () => {
     })
 
     expect(text).toContain('Qclaw 故障排查定位消息')
-    expect(text).toContain('Bot: 默认 Bot')
+    expect(text).toContain('机器人: 默认 Bot')
     expect(text).toContain('accountId: default')
     expect(text).toContain('agentId: feishu-default')
     expect(text).toContain('机器: macbook-pro')
     expect(text).toContain('traceId: trace-123')
+  })
+})
+
+describe('getBotLabel', () => {
+  it('normalizes legacy default bot labels from persisted data', () => {
+    expect(getBotLabel('default', '默认 Bot')).toBe('默认机器人')
+    expect(getBotLabel('sales', 'Bot sales')).toBe('机器人 sales')
   })
 })
 

@@ -86,8 +86,15 @@ export function getManagedFeishuAgentId(accountId: string): string {
 
 export function getBotLabel(accountId: string, botLabel?: string): string {
   const normalized = normalizeText(botLabel)
-  if (normalized) return normalized
-  return accountId === DEFAULT_ACCOUNT_ID ? '默认 Bot' : `Bot ${accountId}`
+  if (normalized) {
+    if (accountId === DEFAULT_ACCOUNT_ID && /^默认\s*bot$/i.test(normalized)) return '默认机器人'
+    const normalizedAccountId = normalizeText(accountId)
+    if (normalizedAccountId && normalized.toLowerCase() === `bot ${normalizedAccountId}`.toLowerCase()) {
+      return `机器人 ${normalizedAccountId}`
+    }
+    return normalized
+  }
+  return accountId === DEFAULT_ACCOUNT_ID ? '默认机器人' : `机器人 ${accountId}`
 }
 
 function safeGetManagedFeishuAgentId(accountId: string): string {
@@ -101,13 +108,13 @@ function safeGetManagedFeishuAgentId(accountId: string): string {
 export function buildFeishuDiagnosticMessageText(input: FeishuDiagnosticMessageTextInput): string {
   return [
     'Qclaw 故障排查定位消息',
-    `Bot: ${input.botLabel}`,
+    `机器人: ${input.botLabel}`,
     `accountId: ${input.accountId}`,
     `agentId: ${input.agentId}`,
     `机器: ${input.machineLabel}`,
     `时间: ${input.sentAt}`,
     `traceId: ${input.traceId}`,
-    '如果你收到这条消息，说明当前这台机器可以主动通过这个 Bot 给你发消息。',
+    '如果你收到这条消息，说明当前这台机器可以主动通过这个机器人给你发消息。',
   ].join('\n')
 }
 
@@ -128,7 +135,7 @@ function buildListenSuccessResult(params: {
     summary:
       params.activityKind === 'pairing-store'
         ? '已在当前机器检测到新的配对授权痕迹。'
-        : '已在当前机器检测到该 Bot 的本地活动。',
+        : '已在当前机器检测到该机器人的本地活动。',
     evidencePath: params.evidencePath,
     startedAt: params.startedAt,
     endedAt: params.endedAt,
@@ -150,7 +157,7 @@ function buildListenTimeoutResult(params: {
     detected: false,
     accountId: params.accountId,
     activityKind: 'none',
-    summary: '监听窗口内未检测到当前机器上的 Bot 本地活动。',
+    summary: '监听窗口内未检测到当前机器上的机器人本地活动。',
     startedAt: params.startedAt,
     endedAt: params.endedAt,
     timeoutMs: params.timeoutMs,
@@ -172,7 +179,7 @@ function buildListenCanceledResult(params: {
     canceled: true,
     accountId: params.accountId,
     activityKind: 'none',
-    summary: '已取消监听当前 Bot 活动。',
+    summary: '已取消监听当前机器人活动。',
     startedAt: params.startedAt,
     endedAt: params.endedAt,
     timeoutMs: params.timeoutMs,
@@ -212,7 +219,7 @@ async function getAppAccessToken(
     return {
       ok: false,
       code: 1,
-      message: '当前 Bot 缺少完整的飞书 App ID / App Secret。',
+      message: '当前机器人缺少完整的飞书 App ID / App Secret。',
     }
   }
 
@@ -337,7 +344,7 @@ export async function listenForFeishuBotDiagnosticActivity(
       detected: false,
       accountId,
       activityKind: 'none',
-      summary: '监听当前 Bot 活动失败，请稍后重试。',
+      summary: '监听当前机器人活动失败，请稍后重试。',
       startedAt: new Date(endedAtMs).toISOString(),
       endedAt: new Date(endedAtMs).toISOString(),
       timeoutMs,

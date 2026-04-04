@@ -2,7 +2,12 @@ const childProcess = process.getBuiltinModule('node:child_process') as typeof im
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 import { probePlatformCommandCapability } from './command-capabilities'
-import { detectNvmDir, listInstalledNvmNodeBinDirs } from './nvm-node-runtime'
+import {
+  detectNvmDir,
+  detectNvmWindowsDir,
+  listInstalledNvmNodeBinDirs,
+  listInstalledNvmWindowsNodeExePaths,
+} from './nvm-node-runtime'
 import {
   DEFAULT_BUNDLED_NODE_REQUIREMENT,
   resolveNodeInstallPlan,
@@ -82,7 +87,9 @@ interface ProbeNodeRuntimeDependencies {
   resolveRequirement?: typeof resolveOpenClawNodeRequirement
   resolveInstallPlan?: typeof resolveNodeInstallPlan
   detectNvmDir?: typeof detectNvmDir
+  detectNvmWindowsDir?: typeof detectNvmWindowsDir
   listInstalledNvmNodeBinDirs?: typeof listInstalledNvmNodeBinDirs
+  listInstalledNvmWindowsNodeExePaths?: typeof listInstalledNvmWindowsNodeExePaths
   listExecutablePathCandidates?: typeof listExecutablePathCandidates
   cwdResolver?: typeof resolveSafeWorkingDirectory
 }
@@ -205,8 +212,11 @@ export async function resolveQualifiedNodeRuntime(
     (async () => ({ minVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT, source: 'bundled-fallback' as const }))
   const resolveInstallPlan = dependencies.resolveInstallPlan || resolveNodeInstallPlan
   const detectNvmDirImpl = dependencies.detectNvmDir || detectNvmDir
+  const detectNvmWindowsDirImpl = dependencies.detectNvmWindowsDir || detectNvmWindowsDir
   const listInstalledNvmNodeBinDirsImpl =
     dependencies.listInstalledNvmNodeBinDirs || listInstalledNvmNodeBinDirs
+  const listInstalledNvmWindowsNodeExePathsImpl =
+    dependencies.listInstalledNvmWindowsNodeExePaths || listInstalledNvmWindowsNodeExePaths
   const listExecutablePathCandidatesImpl =
     dependencies.listExecutablePathCandidates || listExecutablePathCandidates
 
@@ -233,20 +243,53 @@ export async function resolveQualifiedNodeRuntime(
       : null
   if (shellCandidate?.version) detectedVersions.add(shellCandidate.version)
 
-  const nvmDir = platform === 'win32' ? null : await detectNvmDirImpl({ env: lookupEnv }).catch(() => null)
+  const nvmDir =
+    platform !== 'win32'
+      ? await detectNvmDirImpl({ env: lookupEnv }).catch(() => null)
+      : null
+  const nvmWindowsDir =
+    platform === 'win32'
+      ? await detectNvmWindowsDirImpl({ env: lookupEnv }).catch(() => null)
+      : null
   let nvmCandidate: RuntimeCandidateWithPath | null = null
+
   if (nvmDir) {
     const candidateBins = Array.from(
       new Set(
         [
-          targetVersion ? path.join(nvmDir, 'versions', 'node', `v${targetVersion.replace(/^v/, '')}`, 'bin') : '',
+          targetVersion
+            ? path.join(nvmDir, 'versions', 'node', `v${targetVersion.replace(/^v/, '')}`, 'bin')
+            : '',
           ...(await listInstalledNvmNodeBinDirsImpl(nvmDir).catch(() => [])),
         ].filter(Boolean)
       )
     )
 
     for (const candidateBin of candidateBins) {
-      const executablePath = path.join(candidateBin, platform === 'win32' ? 'node.exe' : 'node')
+      const executablePath = path.join(candidateBin, 'node')
+      nvmCandidate = await probeRuntimeCandidate(
+        executablePath,
+        { timeoutMs, env: lookupEnv, cwd },
+        probeVersion
+      )
+      if (nvmCandidate) {
+        detectedVersions.add(nvmCandidate.version)
+        break
+      }
+    }
+  } else if (nvmWindowsDir) {
+    const candidateExePaths = Array.from(
+      new Set(
+        [
+          targetVersion
+            ? path.join(nvmWindowsDir, `v${targetVersion.replace(/^v/, '')}`, 'node.exe')
+            : '',
+          ...(await listInstalledNvmWindowsNodeExePathsImpl(nvmWindowsDir).catch(() => [])),
+        ].filter(Boolean)
+      )
+    )
+
+    for (const executablePath of candidateExePaths) {
       nvmCandidate = await probeRuntimeCandidate(
         executablePath,
         { timeoutMs, env: lookupEnv, cwd },
@@ -259,6 +302,7 @@ export async function resolveQualifiedNodeRuntime(
     }
   }
 
+  const effectiveNvmDir = nvmWindowsDir ?? nvmDir
   const preferred = selectPreferredNodeRuntime({
     shellNode: shellCandidate
       ? {
@@ -273,7 +317,7 @@ export async function resolveQualifiedNodeRuntime(
         }
       : null,
     requiredVersion,
-    nvmDir,
+    nvmDir: effectiveNvmDir,
   })
 
   if (preferred) {
@@ -325,7 +369,7 @@ export async function resolveQualifiedNodeRuntime(
       runtime: {
         executablePath: probedCandidate.executablePath,
         version: probedCandidate.version,
-        installStrategy: resolveNodeInstallStrategy(probedCandidate.binDir, nvmDir),
+        installStrategy: resolveNodeInstallStrategy(probedCandidate.binDir, effectiveNvmDir),
         source: 'candidate',
         requiredVersion,
         targetVersion,

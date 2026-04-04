@@ -62,8 +62,9 @@ describe('resolveQualifiedNodeRuntime', () => {
       {
         probeCapability: vi.fn(async () => makeNodeCapability()),
         probeVersion: vi.fn(async (executablePath: string) => {
-          if (executablePath === '/usr/local/bin/node') return 'v20.11.1'
-          if (executablePath === '/Users/alice/.nvm/versions/node/v24.14.0/bin/node') return 'v24.14.0'
+          const p = executablePath.replace(/\\/g, '/')
+          if (p === '/usr/local/bin/node') return 'v20.11.1'
+          if (p === '/Users/alice/.nvm/versions/node/v24.14.0/bin/node') return 'v24.14.0'
           return null
         }),
         resolveRequirement: vi.fn(async () => ({
@@ -80,7 +81,7 @@ describe('resolveQualifiedNodeRuntime', () => {
     expect(result).toEqual({
       ok: true,
       runtime: expect.objectContaining({
-        executablePath: '/Users/alice/.nvm/versions/node/v24.14.0/bin/node',
+        executablePath: expect.stringMatching(/nvm[/\\]versions[/\\]node[/\\]v24\.14\.0[/\\]bin[/\\]node$/),
         version: 'v24.14.0',
         installStrategy: 'nvm',
         source: 'nvm',
@@ -119,6 +120,57 @@ describe('resolveQualifiedNodeRuntime', () => {
         executablePath: '/opt/homebrew/bin/node',
         version: 'v24.14.0',
         source: 'candidate',
+      }),
+    })
+  })
+
+  it('detects nvm-windows Node on Windows when NVM_HOME is set', async () => {
+    const result = await resolveQualifiedNodeRuntime(
+      {
+        env: {
+          ...TEST_ENV,
+          NVM_HOME: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm',
+        },
+        platform: 'win32',
+      },
+      {
+        probeCapability: vi.fn(async () =>
+          makeNodeCapability({
+            platform: 'win32',
+            available: false,
+            resolvedPath: undefined,
+          })
+        ),
+        probeVersion: vi.fn(async (executablePath: string) => {
+          if (
+            executablePath ===
+            'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v24.14.0\\node.exe'
+          )
+            return 'v24.14.0'
+          return null
+        }),
+        resolveRequirement: vi.fn(async () => ({
+          minVersion: '22.16.0',
+          source: 'bundled-fallback' as const,
+        })),
+        resolveInstallPlan: vi.fn(async () =>
+          makeInstallPlan({ platform: 'win32', url: 'https://nodejs.org/dist/v24.14.0/node-v24.14.0-x64.msi', filename: 'node-v24.14.0-x64.msi' })
+        ),
+        detectNvmWindowsDir: vi.fn(async () => 'C:\\Users\\Jason\\AppData\\Roaming\\nvm'),
+        listInstalledNvmWindowsNodeExePaths: vi.fn(async () => [
+          'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v24.14.0\\node.exe',
+        ]),
+        listExecutablePathCandidates: vi.fn(() => []),
+      }
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      runtime: expect.objectContaining({
+        executablePath: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v24.14.0\\node.exe',
+        version: 'v24.14.0',
+        installStrategy: 'nvm',
+        source: 'nvm',
       }),
     })
   })

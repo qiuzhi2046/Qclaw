@@ -129,7 +129,7 @@ describe('resolveGatewayBootstrapFailureView', () => {
     })
 
     expect(view.title).toContain('更具体的连接原因')
-    expect(view.detail).toContain('连接 Gateway 超时')
+    expect(view.detail).toContain('连接网关超时')
   })
 
   it('shows a soft warning style explanation for plugin allowlist warnings', () => {

@@ -133,6 +133,7 @@ import {
   reloadGatewayForConfigChange,
 } from './gateway-lifecycle-controller'
 import {
+  answerFeishuInstallerSessionPrompt,
   getFeishuInstallerSessionSnapshot,
   isFeishuOfficialPluginInstalledOnDisk,
   startFeishuInstallerSession,
@@ -714,6 +715,9 @@ export function registerIpcHandlers() {
   ipcMain.handle('feishu:installer:input', (_e, sessionId: string, input: string) =>
     writeFeishuInstallerSessionInput(sessionId, input)
   )
+  ipcMain.handle('feishu:installer:prompt:answer', (_e, sessionId: string, promptId: string, resolution: 'confirm' | 'cancel') =>
+    answerFeishuInstallerSessionPrompt(sessionId, promptId, resolution)
+  )
   ipcMain.handle('feishu:installer:stop', () => stopFeishuInstallerSession())
   ipcMain.handle('feishu:diagnostics:listen', (_e, accountId?: string, timeoutMs?: number, requestId?: string) =>
     listenForFeishuBotDiagnosticActivity({ accountId, timeoutMs, requestId })
@@ -995,7 +999,7 @@ export function registerIpcHandlers() {
     const locations = await getOpenClawSkillLocations()
     const result = await runShell(
       'npx',
-      ['-y', 'clawhub', 'search', query, '--limit', String(limit)],
+      ['-y', 'clawhub', 'search', query, '--limit', String(limit), '--registry', 'https://mirror-cn.clawhub.com'],
       undefined,
       { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' }
     )

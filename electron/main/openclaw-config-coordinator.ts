@@ -225,7 +225,7 @@ export async function applyConfigPatchGuarded(
           gatewayApply,
           message: appendMessage(
             writeResult.message,
-            `配置写入成功，但网关生效动作失败（action=${decision.action}）。请稍后手动重载 Gateway。`
+            `配置写入成功，但网关生效动作失败（action=${decision.action}）。请稍后手动重载网关。`
           ),
         }
       }

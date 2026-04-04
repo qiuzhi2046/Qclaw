@@ -65,8 +65,8 @@ const COMMAND_CAPABILITY_SPECS: Record<PlatformCommandId, CommandCapabilitySpec>
     command: 'openclaw',
     supportedPlatforms: ['darwin', 'linux', 'win32'],
     source: 'named-command',
-    missingMessage: 'OpenClaw CLI command is unavailable. Complete CLI installation in Env Check and try again.',
-    unsupportedMessage: 'OpenClaw CLI command probing is unavailable on this platform.',
+    missingMessage: 'OpenClaw 命令行工具命令不可用。请先在环境检查中完成安装后再试。',
+    unsupportedMessage: '当前平台暂不支持检测 OpenClaw 命令行工具命令。',
   },
   node: {
     command: 'node',
@@ -109,7 +109,7 @@ const COMMAND_CAPABILITY_SPECS: Record<PlatformCommandId, CommandCapabilitySpec>
     supportedPlatforms: ['darwin', 'linux'],
     source: 'named-command',
     missingMessage:
-      'Gemini CLI OAuth prompt automation requires the `expect` command. Qclaw will fall back to raw OpenClaw execution and may stop at the Gemini risk confirmation prompt.',
+      'Gemini 浏览器授权登录的提示自动化依赖 `expect` 命令。Qclaw 将回退为直接执行 OpenClaw，流程可能停在 Gemini 风险确认提示。',
     unsupportedMessage: 'The `expect` command is only supported on macOS and Linux.',
   },
   script: {
@@ -117,7 +117,7 @@ const COMMAND_CAPABILITY_SPECS: Record<PlatformCommandId, CommandCapabilitySpec>
     supportedPlatforms: ['darwin', 'linux'],
     source: 'named-command',
     missingMessage:
-      'Interactive OAuth on this platform requires the `script` command. Qclaw will fall back to direct OpenClaw execution without PTY/browser auto-open.',
+      '当前平台的交互式浏览器授权登录依赖 `script` 命令。Qclaw 将回退为直接执行 OpenClaw，不再自动创建 PTY 或拉起浏览器。',
     unsupportedMessage: 'The `script` PTY wrapper is only supported on macOS and Linux.',
   },
   powershell: {

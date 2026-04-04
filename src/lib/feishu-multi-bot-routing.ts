@@ -45,10 +45,22 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function normalizeLegacyBotDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
+  const normalized = normalizeText(rawName)
+  if (!normalized) return ''
+  if (isDefault && /^默认\s*bot$/i.test(normalized)) return '机器人'
+  const normalizedAccountId = normalizeText(accountId)
+  if (normalizedAccountId && normalized.toLowerCase() === `bot ${normalizedAccountId}`.toLowerCase()) {
+    return `机器人 ${normalizedAccountId}`
+  }
+  return normalized
+}
+
 function createDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
-  if (rawName) return rawName
-  if (isDefault) return '默认 Bot'
-  return `Bot ${accountId}`
+  const normalizedLegacyName = normalizeLegacyBotDisplayName(rawName, accountId, isDefault)
+  if (normalizedLegacyName) return normalizedLegacyName
+  if (isDefault) return '机器人'
+  return `机器人 ${accountId}`
 }
 
 export function getFeishuManagedAgentId(accountId: string): string {

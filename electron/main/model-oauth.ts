@@ -172,18 +172,18 @@ async function defaultProbeOpenAICallbackPort(): Promise<{ staleListenerDetected
           return {
             staleListenerDetected: true,
             message:
-              `检测到本地 OAuth 回调地址 ${displayTarget} 已被旧会话占用（State mismatch）。请关闭旧的 openclaw 登录会话后重试。`,
+              `检测到本地浏览器授权登录回调地址 ${displayTarget} 已被旧会话占用（State mismatch）。请关闭旧的 openclaw 登录会话后重试。`,
           }
         }
         return {
           staleListenerDetected: true,
-          message: `检测到本地 OAuth 回调地址 ${displayTarget} 已被占用（HTTP ${response.status}）。请关闭旧的 openclaw 登录会话后重试。`,
+          message: `检测到本地浏览器授权登录回调地址 ${displayTarget} 已被占用（HTTP ${response.status}）。请关闭旧的 openclaw 登录会话后重试。`,
         }
       }
 
       return {
         staleListenerDetected: true,
-        message: `检测到本地 OAuth 回调地址 ${displayTarget} 正在被使用。请先结束旧的 openclaw 登录会话后重试。`,
+        message: `检测到本地浏览器授权登录回调地址 ${displayTarget} 正在被使用。请先结束旧的 openclaw 登录会话后重试。`,
       }
     } catch {
       // ECONNREFUSED / timeout / DNS failures here mean no active local callback listener.
@@ -243,7 +243,7 @@ export async function startModelOAuthFlow(
   const method = resolvedMethod.value.method
   const loginProviderId = String(method.route.providerId || '').trim()
   if (!method.route.requiresBrowser) {
-    const message = `Selected auth method "${method.authChoice}" does not require an OAuth browser flow.`
+    const message = `Selected auth method "${method.authChoice}" does not require a browser login flow.`
     const payload = {
       providerId,
       methodId,
@@ -290,7 +290,7 @@ export async function startModelOAuthFlow(
     if (probeResult.staleListenerDetected) {
       const message =
         probeResult.message ||
-        '检测到本地 OAuth 回调端口已被旧会话占用，请关闭旧会话后重试。'
+        '检测到本地浏览器授权登录回调端口已被旧会话占用，请关闭旧会话后重试。'
       const payload = {
         providerId,
         methodId,
@@ -380,7 +380,7 @@ export async function startModelOAuthFlow(
     ? ''
     : maybeEnhanceGeminiOAuthFailureMessage(
         method.authChoice,
-        result.message || getCliFailureMessage(result, 'OAuth 认证失败'),
+        result.message || getCliFailureMessage(result, '浏览器授权登录失败'),
         dependencyInspection.warnings
       )
 

@@ -232,7 +232,7 @@ async function applyNormalizedConfigIfNeeded(state: FeishuOfficialPluginState): 
 async function reloadGatewayAfterFeishuRepair(reason: string): Promise<void> {
   const reloadResult = await reloadGatewayForConfigChange(reason)
   if (!reloadResult.ok) {
-    throw new Error(reloadResult.summary || reloadResult.stderr || reloadResult.stdout || 'Gateway 重载失败')
+    throw new Error(reloadResult.summary || reloadResult.stderr || reloadResult.stdout || '网关重载失败')
   }
 }
 
@@ -332,7 +332,7 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
           stdout: '',
           stderr: error instanceof Error ? error.message : String(error),
           code: 1,
-          message: '飞书官方插件配置已同步，但 Gateway 重载失败',
+          message: '飞书官方插件配置已同步，但网关重载失败',
         }
       }
     }
@@ -407,8 +407,8 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
       stderr: error instanceof Error ? error.message : String(error),
       code: 1,
       message: installResult.ok
-        ? '飞书官方插件安装成功，但 Gateway 重载失败'
-        : '飞书官方插件已就绪，但 Gateway 重载失败',
+        ? '飞书官方插件安装成功，但网关重载失败'
+        : '飞书官方插件已就绪，但网关重载失败',
     }
   }
 

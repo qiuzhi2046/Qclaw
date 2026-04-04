@@ -121,7 +121,7 @@ async function detectRegisteredPlugin(params: {
         channelId: params.channelId,
         pluginId: params.pluginId,
         command: 'openclaw plugins list --json',
-        message: '当前 CLI 未提供可解析的 plugins list，registered 暂记为 unknown / 未证实',
+        message: '当前命令行工具未提供可解析的 plugins list，registered 暂记为 unknown / 未证实',
         detail: normalizeText(listResult?.stderr) || normalizeText(listResult?.stdout),
       },
     }

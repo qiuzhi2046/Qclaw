@@ -166,7 +166,7 @@ export default function RestoreDialog({
                 )}
                 {result.gatewayApply?.note && (
                   <Text size="xs" mt="xs" className="leading-5">
-                    运行时处理：{result.gatewayApply.note}
+                    当前状态处理：{result.gatewayApply.note}
                   </Text>
                 )}
                 {result.restoredItems.map((item) => (

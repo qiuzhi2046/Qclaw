@@ -37,7 +37,7 @@ export function buildBackupDeleteConfirmMessage(
 ): string {
   const baseMessage = `将删除备份「${backupTypeLabel(backup.type)} · ${formatTime(backup.createdAt)}」。删除后不可恢复。`
   if (backup.type !== 'baseline-backup') return baseMessage
-  return `${baseMessage} 删除后系统会转为手动备份责任，后续共享配置仍可修改，但基线恢复需由您自行负责。`
+  return `${baseMessage} 删除后系统会转为手动备份责任，后续配置文件仍可修改，但基线恢复需由您自行负责。`
 }
 
 export function buildDeleteAllBackupsConfirmMessage(
@@ -45,7 +45,7 @@ export function buildDeleteAllBackupsConfirmMessage(
 ): string {
   const baseMessage = '将删除全部 OpenClaw 备份。此操作不可恢复。'
   if (!hasBaselineBackup(backups)) return baseMessage
-  return `${baseMessage} 其中包含基线备份；删除后系统会转为手动备份责任，后续共享配置仍可修改，但基线恢复需由您自行负责。`
+  return `${baseMessage} 其中包含基线备份；删除后系统会转为手动备份责任，后续配置文件仍可修改，但基线恢复需由您自行负责。`
 }
 
 function notifyDeleteWarnings(warnings: string[]) {

@@ -5899,7 +5899,7 @@ Sender (untrusted metadata):
 
     expect(result.ok).toBe(false)
     expect(result.messageText).not.toContain('当前 OpenClaw 版本还不支持')
-    expect(result.messageText).toContain('Gateway 尚未就绪')
+    expect(result.messageText).toContain('网关尚未就绪')
   })
 
   it('rejects model switches early when the target model is not allowed by the current OpenClaw config', async () => {

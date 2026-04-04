@@ -100,6 +100,82 @@ describe('managed channel lifecycle specs', () => {
       installStrategy: 'interactive-installer',
     })
   })
+
+  it('treats file-backed Feishu SecretRef credentials as configured', () => {
+    const spec = getManagedChannelLifecycleSpec('feishu')
+    expect(spec).not.toBeNull()
+    if (!spec) throw new Error('expected feishu lifecycle spec')
+
+    expect(
+      spec.detectConfigured({
+        referenceConfig: null,
+        currentConfig: {
+          channels: {
+            feishu: {
+              appId: 'cli_test',
+              appSecret: {
+                source: 'file',
+                provider: 'lark-secrets',
+                id: '/lark/appSecret',
+              },
+            },
+          },
+        },
+        runtime: {
+          installedOnDisk: false,
+          registeredState: 'unknown',
+          loadedState: 'unknown',
+          readyState: 'unknown',
+          evidence: [],
+        },
+        capabilities: {
+          supportsStatusProbe: true,
+          supportsGatewayReload: true,
+          supportsBackgroundRestore: true,
+          supportsInteractiveRepair: true,
+          blockedReasons: [],
+        },
+      })
+    ).toBe(true)
+  })
+
+  it('does not treat unsupported exec-backed Feishu SecretRef credentials as configured', () => {
+    const spec = getManagedChannelLifecycleSpec('feishu')
+    expect(spec).not.toBeNull()
+    if (!spec) throw new Error('expected feishu lifecycle spec')
+
+    expect(
+      spec.detectConfigured({
+        referenceConfig: null,
+        currentConfig: {
+          channels: {
+            feishu: {
+              appId: 'cli_test',
+              appSecret: {
+                source: 'exec',
+                provider: 'openclaw',
+                id: '/lark/appSecret',
+              },
+            },
+          },
+        },
+        runtime: {
+          installedOnDisk: false,
+          registeredState: 'unknown',
+          loadedState: 'unknown',
+          readyState: 'unknown',
+          evidence: [],
+        },
+        capabilities: {
+          supportsStatusProbe: true,
+          supportsGatewayReload: true,
+          supportsBackgroundRestore: true,
+          supportsInteractiveRepair: true,
+          blockedReasons: [],
+        },
+      })
+    ).toBe(false)
+  })
 })
 
 describe('createManagedChannelPluginLifecycleService', () => {

@@ -491,7 +491,7 @@ export async function applyDefaultModelWithGatewayReload(params: {
       ok: false,
       modelApplied: true,
       gatewayReloaded: false,
-      message: `默认模型已保存，但运行时尚未确认生效：${describeCliFailure(reloadResult, 'Gateway 重载未完成')}`,
+      message: `默认模型已保存，但运行状态尚未确认生效：${describeCliFailure(reloadResult, '网关重载未完成')}`,
       ...localWriteMeta,
     }
   }
@@ -508,7 +508,7 @@ export async function applyDefaultModelWithGatewayReload(params: {
       ok: false,
       modelApplied: true,
       gatewayReloaded: true,
-      message: '默认模型已保存，Gateway 已重载，但当前仍未确认模型状态刷新完成',
+      message: '默认模型已保存，网关已重载，但当前仍未确认模型状态刷新完成',
       ...localWriteMeta,
     }
   }
@@ -555,7 +555,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
       ok: false,
       modelApplied: false,
       gatewayReloaded: false,
-      message: 'Bot 模型不能为空',
+      message: '机器人模型不能为空',
     }
   }
 
@@ -604,7 +604,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
       modelApplied: true,
       gatewayReloaded: upstreamWriteResult.gatewayReloaded === true,
       writeSource: upstreamWriteResult.source,
-      message: 'Bot 模型已通过 OpenClaw 上游配置写入，但当前仍未确认模型状态刷新完成',
+      message: '机器人模型已通过 OpenClaw 上游配置写入，但当前仍未确认模型状态刷新完成',
     }
   }
 
@@ -617,7 +617,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
       ok: false,
       modelApplied: false,
       gatewayReloaded: false,
-      message: (error as Error).message || '准备 Bot 模型配置失败',
+      message: (error as Error).message || '准备机器人模型配置失败',
       ...localWriteMeta,
     }
   }
@@ -631,7 +631,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
       ok: false,
       modelApplied: false,
       gatewayReloaded: false,
-      message: describeCliFailure(writeResult, '设置 Bot 模型失败'),
+      message: describeCliFailure(writeResult, '设置机器人模型失败'),
       ...localWriteMeta,
     }
   }
@@ -658,7 +658,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
       ok: false,
       modelApplied: true,
       gatewayReloaded: false,
-      message: `Bot 模型已保存，但运行时尚未确认生效：${describeCliFailure(reloadResult, 'Gateway 重载未完成')}`,
+      message: `机器人模型已保存，但运行状态尚未确认生效：${describeCliFailure(reloadResult, '网关重载未完成')}`,
       ...localWriteMeta,
     }
   }
@@ -675,7 +675,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
       ok: false,
       modelApplied: true,
       gatewayReloaded: true,
-      message: 'Bot 模型已保存，Gateway 已重载，但当前仍未确认模型状态刷新完成',
+      message: '机器人模型已保存，网关已重载，但当前仍未确认模型状态刷新完成',
       ...localWriteMeta,
     }
   }

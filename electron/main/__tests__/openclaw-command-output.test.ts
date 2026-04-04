@@ -66,7 +66,7 @@ describe('getCliFailureMessage', () => {
         },
         'fallback'
       )
-    ).toContain('未检测到 Gemini CLI')
+    ).toContain('未检测到 Gemini 命令行工具')
   })
 
   it('prefers stdout when stderr only contains config warnings', () => {
@@ -90,7 +90,7 @@ describe('getCliFailureMessage', () => {
         },
         'fallback'
       )
-    ).toBe('Gateway 尚未就绪，请稍后重试。若持续失败，请重启 Gateway 后再试。')
+    ).toBe('网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。')
   })
 
   it('hides internal multi-model fallback chains behind a user-facing recovery message', () => {

@@ -1,0 +1,33 @@
+---
+description: Electron IPC 跨層開發順序與注意事項
+globs: electron/**/*.ts
+alwaysApply: false
+---
+
+# Electron IPC 開發規範
+
+## 跨層改動順序
+
+新增或修改 IPC 功能時，**必須依照以下順序**：
+
+1. **型別定義** — `src/types/electron.d.ts`
+2. **Preload 橋接** — `electron/preload/`
+3. **IPC Handler** — `electron/main/ipc-handlers.ts`
+4. **主程式邏輯** — `electron/main/`（新增服務檔案）
+5. **UI 元件** — `src/pages/` 或 `src/components/`
+
+## 架構分層說明
+
+| 層 | 路徑 | 說明 |
+|----|------|------|
+| UI | `src/pages/` | React 頁面、按鈕、互動 |
+| 型別定義 | `src/types/electron.d.ts` | IPC API 型別 |
+| Preload | `electron/preload/` | 安全橋接層（Context Bridge） |
+| IPC | `electron/main/ipc-handlers.ts` | IPC 事件處理 |
+| 業務邏輯 | `electron/main/` | 主程式服務 |
+
+## 注意事項
+
+- Preload 只能使用 `contextBridge.exposeInMainWorld` 暴露 API
+- 主程序使用 `process.getBuiltinModule('node:...')` 取得 Node 內建模組
+- 跨平台路徑比較前須正規化分隔符：`.replace(/\\/g, '/')`

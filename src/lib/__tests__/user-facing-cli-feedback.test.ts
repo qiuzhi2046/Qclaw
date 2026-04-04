@@ -61,6 +61,15 @@ describe('user-facing-cli-feedback', () => {
     expect(message).toBe('ClawHub 当前请求过于频繁，已被限流，请稍后再试。')
   })
 
+  it('maps gateway-not-ready logs into the unified gateway wording', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: 'Gateway did not become reachable at ws://127.0.0.1:18789.',
+      fallback: 'fallback',
+    })
+
+    expect(message).toBe('网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。')
+  })
+
   it('surfaces the busy skill mutation hint emitted by the main process marker', () => {
     const message = toUserFacingCliFailureMessage({
       stderr: [

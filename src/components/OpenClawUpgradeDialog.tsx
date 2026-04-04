@@ -92,7 +92,7 @@ export default function OpenClawUpgradeDialog({
                 <Text size="sm">不迁移数据目录和配置路径</Text>
                 <Text size="sm">升级前自动创建配置快照</Text>
                 <Text size="sm">
-                  {check.gatewayRunning ? '升级后会尝试恢复 Gateway 运行态' : '当前 Gateway 未运行，不需要恢复'}
+                  {check.gatewayRunning ? '升级后会尝试恢复网关运行状态' : '当前网关未运行，不需要恢复'}
                 </Text>
               </Stack>
             </Paper>
@@ -112,7 +112,7 @@ export default function OpenClawUpgradeDialog({
 
           {check.enforcement === 'auto_correct' && (
             <Alert color="yellow" variant="light" mt="md">
-              当前版本超出受支持策略，请先回到环境检查页，由启动阶段完成备份后再自动纠偏到 {check.targetVersion || '2026.3.24'}。
+              当前版本超出受支持策略，请先回到环境检查页，由启动阶段完成备份后再自动修复到 {check.targetVersion || '2026.3.24'}。
             </Alert>
           )}
 

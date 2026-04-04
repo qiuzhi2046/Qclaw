@@ -128,7 +128,7 @@ export default function OpenClawClassify({
           <Text size="sm" lh="1.625" mt="xs" style={{ color: 'rgba(167, 243, 208, 0.85)' }}>
             {freshManagedInstall
               ? '当前环境是本次启动中新安装的 OpenClaw，下一步将进入首次配置流程。'
-              : '当前机器已有 OpenClaw CLI，但还没有生成可直接启动 Gateway 的共享配置。下一步必须先进入配置向导执行初始化。'}
+              : '这台电脑上已经安装了 OpenClaw，下一步将进入配置向导。'}
           </Text>
           <Button
             onClick={() => onProceed('setup')}
@@ -159,7 +159,7 @@ export default function OpenClawClassify({
           <div className="rounded-xl border app-border app-bg-tertiary p-4">
             <Title order={3} size="sm" fw={500} c="var(--app-text-primary)">选项 1：仅接管，不升级</Title>
             <Text size="sm" lh="1.625" mt="xs" c="var(--app-text-tertiary)">
-              保留当前已安装的低版本 OpenClaw，不执行程序升级，先进入面板观察和接管。
+              保留当前版本，可以先进入控制面板查看和使用，稍后再决定是否升级。
             </Text>
             <Button
               onClick={() => onProceed('dashboard')}
@@ -190,7 +190,7 @@ export default function OpenClawClassify({
         <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
           <Title order={3} size="sm" fw={500} c="warning.3">已检测到 OpenClaw，但最新版本暂时未知</Title>
           <Text size="sm" lh="1.625" mt="xs" style={{ color: 'rgba(254, 243, 199, 0.85)' }}>
-            因网络或远端解析失败，当前无法确认最新版本。你仍可以先进入控制面板，不会触发自动升级。
+            目前暂时无法确认最新版本，可能是网络连接异常。可以先进入控制面板，后续再检查更新。
           </Text>
           <div className="mt-4 flex flex-wrap gap-3">
             <Button
@@ -215,9 +215,9 @@ export default function OpenClawClassify({
         </div>
       ) : (
         <div className="mt-5 rounded-xl border app-border app-bg-tertiary p-4">
-          <Title order={3} size="sm" fw={500} c="var(--app-text-primary)">继续流程</Title>
+          <Title order={3} size="sm" fw={500} c="var(--app-text-primary)">下一步</Title>
           <Text size="sm" lh="1.625" mt="xs" c="var(--app-text-tertiary)">
-            当前分类结果不会阻断接管。您可以继续进入控制面板，后续阶段再补齐升级与治理能力。
+            当前状态不影响继续使用，可以先进入控制面板，后续再处理升级或修复。
           </Text>
           <Button
             onClick={() => onProceed(activeCandidate ? 'dashboard' : 'setup')}
@@ -225,7 +225,7 @@ export default function OpenClawClassify({
             mt="md"
             size="sm"
           >
-            继续
+            下一步
           </Button>
         </div>
       )}

@@ -95,7 +95,7 @@ export function toUserFacingCliFailureMessage(params: {
     return '配置写入失败，请检查本机权限后重试。'
   }
   if (GATEWAY_UNREADY_REGEX.test(corpus)) {
-    return 'Gateway 尚未就绪，请稍后重试。若持续失败，请重启 Gateway 后再试。'
+    return '网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。'
   }
   if (CLAWHUB_RATE_LIMIT_REGEX.test(corpus)) {
     return 'ClawHub 当前请求过于频繁，已被限流，请稍后再试。'

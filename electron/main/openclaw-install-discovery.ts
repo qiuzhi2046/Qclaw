@@ -426,7 +426,7 @@ export async function discoverOpenClawInstallations(): Promise<OpenClawDiscovery
 
   const status = candidates.length > 0 ? 'installed' : historyDataCandidates.length > 0 ? 'history-only' : 'absent'
   if (status === 'history-only') {
-    warnings.push('检测到历史 OpenClaw 数据，但当前机器缺少可执行 OpenClaw 运行环境。')
+    warnings.push('检测到历史 OpenClaw 数据，但当前机器缺少可执行的 OpenClaw 环境。')
   }
   const activeCandidateId =
     candidates.find((candidate) => candidate.isPathActive)?.candidateId || candidates[0]?.candidateId || null

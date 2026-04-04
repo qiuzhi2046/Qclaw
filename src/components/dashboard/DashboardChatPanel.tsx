@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, ActionIcon, Badge, Button, Card, Group, Paper, ScrollArea, Select, Stack, Text, Textarea, Tooltip, Transition, useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
-import { IconChevronDown, IconChevronUp, IconPlayerStop, IconRefresh, IconSend, IconTrash } from '@tabler/icons-react'
+import { IconChevronDown, IconChevronUp, IconClock, IconMoon, IconPlayerStop, IconPlus, IconRefresh, IconSend, IconSun, IconTrash } from '@tabler/icons-react'
 import type {
   ChatCapabilitySnapshot,
   ChatMessage,
@@ -48,8 +48,8 @@ const QUICK_PROMPTS = [
   '给我一个测试对话示例',
 ]
 
-const COMPOSER_DEFAULT_HEIGHT = 160
-const COMPOSER_MIN_HEIGHT = 120
+const COMPOSER_DEFAULT_HEIGHT = 48
+const COMPOSER_MIN_HEIGHT = 40
 const COMPOSER_MAX_HEIGHT_FALLBACK = 520
 
 const TOKEN_FORMATTER = new Intl.NumberFormat('zh-CN')
@@ -86,35 +86,6 @@ function formatMessageTime(createdAt: number, fallback = ''): string {
   })
 }
 
-function buildComposerHint(params: {
-  hasSession: boolean
-  canPatchModel: boolean
-  enterSendMode: ChatComposerEnterSendMode
-}): string {
-  const enterHint: string = (() => {
-    switch (params.enterSendMode) {
-      case 'enter':
-        return 'Enter 发送 · Shift+Enter 换行'
-      case 'shiftEnter':
-        return 'Shift+Enter 发送 · Enter 换行'
-      case 'altEnter':
-        return 'Alt+Enter 发送 · Enter 换行'
-      default:
-        return 'Enter 发送 · Shift+Enter 换行'
-    }
-  })()
-
-  if (!params.hasSession) {
-    return `发送首条消息后可切换会话模型 · ${enterHint}`
-  }
-
-  if (!params.canPatchModel) {
-    return `当前会话暂不支持切换模型 · ${enterHint}`
-  }
-
-  return `模型切换仅影响当前会话 · ${enterHint}`
-}
-
 function buildEmptyTranscript(sessionId: string): ChatTranscript {
   return {
     sessionId,
@@ -147,20 +118,6 @@ function formatUsageLabel(usage: ChatUsage | null | undefined): string {
   return parts.join(' · ')
 }
 
-function formatSessionUsage(session: ChatSessionSummary | null | undefined): string {
-  if (!session) return ''
-  if (Number.isFinite(session.totalTokens) && Number.isFinite(session.contextTokens)) {
-    return `${TOKEN_FORMATTER.format(Number(session.totalTokens))}/${TOKEN_FORMATTER.format(Number(session.contextTokens))} tokens`
-  }
-  if (Number.isFinite(session.totalTokens)) {
-    return `${TOKEN_FORMATTER.format(Number(session.totalTokens))} tokens`
-  }
-  if (Number.isFinite(session.contextTokens)) {
-    return `上下文 ${TOKEN_FORMATTER.format(Number(session.contextTokens))}`
-  }
-  return ''
-}
-
 function findLastAssistantModel(messages: ChatMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -186,7 +143,7 @@ function resolveExternalTranscriptMessage(transcript: ChatTranscript | null): st
   return ''
 }
 
-/** 横向滑块主题切换，左月亮右太阳 */
+/** 主题切换按钮 */
 function LightSwitch() {
   const { setColorScheme } = useMantineColorScheme()
   const computed = useComputedColorScheme('dark')
@@ -196,37 +153,11 @@ function LightSwitch() {
     <Tooltip label={isDark ? '切换亮色' : '切换暗色'} withArrow>
       <ActionIcon
         variant="subtle"
-        color="surface"
-        size="lg"
+        color="gray"
+        size="md"
         onClick={() => setColorScheme(isDark ? 'light' : 'dark')}
-        style={{ width: 52, overflow: 'hidden', position: 'relative' }}
       >
-        {/* 月亮 */}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#fbbf24' : 'var(--app-text-faint)'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 6, transition: 'stroke .2s' }}>
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-        {/* 太阳 */}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isDark ? 'var(--app-text-faint)' : '#f59e0b'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: 6, transition: 'stroke .2s' }}>
-          <circle cx="12" cy="12" r="5" />
-          <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-          <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-        </svg>
-        {/* 滑块指示器 */}
-        <span
-          style={{
-            position: 'absolute',
-            top: 4,
-            left: isDark ? 3 : 29,
-            width: 18,
-            height: 18,
-            borderRadius: '50%',
-            background: isDark ? 'rgba(59,130,246,.2)' : 'rgba(245,158,11,.2)',
-            transition: 'left .25s cubic-bezier(.4,0,.2,1), background .2s',
-            pointerEvents: 'none',
-          }}
-        />
+        {isDark ? <IconSun size={16} /> : <IconMoon size={16} />}
       </ActionIcon>
     </Tooltip>
   )
@@ -421,11 +352,6 @@ export default function DashboardChatPanel({
     loadingSessions,
     loadingTranscript,
     renderedMessageCount: renderedMessages.length,
-  })
-  const composerHint = buildComposerHint({
-    hasSession: Boolean(activeSession),
-    canPatchModel: sessionModelSelectionEnabled,
-    enterSendMode,
   })
   const externalTranscriptMessage = resolveExternalTranscriptMessage(activeTranscript)
   const capabilityIndicators = buildChatCapabilityIndicators(capabilitySnapshot)
@@ -1000,28 +926,22 @@ export default function DashboardChatPanel({
   })
 
   return (
-    <Card h="100%" p="sm" withBorder shadow="xl" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
-        <div>
-          <Group gap="xs">
-            <Text size="sm" fw={600}>直接对话</Text>
-            <Badge
-              variant="light"
-              color={headerBadgeColor}
-              size="sm"
-            >
-              {headerBadgeLabel}
-            </Badge>
-          </Group>
-        </div>
-
-        <ActionIcon.Group>
+    <Card h="100%" p="sm" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <Group justify="flex-end" align="center" wrap="wrap" gap="sm">
+        <Group gap={4} align="center">
+          <Badge
+            variant="light"
+            color={headerBadgeColor}
+            size="sm"
+          >
+            {headerBadgeLabel}
+          </Badge>
           <LightSwitch />
           <Tooltip label="刷新会话" withArrow>
             <ActionIcon
               variant="subtle"
-              color="surface"
-              size="lg"
+              color="gray"
+              size="md"
               onClick={() => void handleRefreshChatData()}
               loading={loadingSessions || loadingTranscript}
               disabled={!canBrowseHistory}
@@ -1032,34 +952,26 @@ export default function DashboardChatPanel({
           <Tooltip label={showHistory ? '收起历史' : `历史${sessions.length > 0 ? ` (${sessions.length})` : ''}`} withArrow>
             <ActionIcon
               variant="subtle"
-              color="surface"
-              size="lg"
+              color="gray"
+              size="md"
               onClick={() => setShowHistory((current) => !current)}
               disabled={!canBrowseHistory}
             >
-              {/* 历史图标 */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
+              <IconClock size={16} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="新对话" withArrow>
             <ActionIcon
               variant="subtle"
-              color="surface"
-              size="lg"
+              color="gray"
+              size="md"
               onClick={() => void handleCreateSession()}
               disabled={!canSend || sending}
             >
-              {/* 加号图标 */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+              <IconPlus size={16} />
             </ActionIcon>
           </Tooltip>
-        </ActionIcon.Group>
+        </Group>
       </Group>
 
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -1252,9 +1164,6 @@ export default function DashboardChatPanel({
               <Group justify="space-between" gap="sm">
                 <div>
                   <Text size="xs" fw={500}>最近会话</Text>
-                  <Text size="xs" c="dimmed" mt={4}>
-                    展示最近 OpenClaw / Qclaw 会话，并明确区分本地会话与历史来源会话。
-                  </Text>
                 </div>
                 <Button
                   variant="light" color="brand"
@@ -1297,12 +1206,8 @@ export default function DashboardChatPanel({
                                 {session.model || '默认模型'}
                               </Text>
                               <Text size="xs" c="dimmed" mt={2}>
-                                {formatSessionTime(session.updatedAt)} · {session.sessionId.slice(0, 8)}
-                                {formatSessionUsage(session) ? ` · ${formatSessionUsage(session)}` : ''}
+                                {formatSessionTime(session.updatedAt)}
                               </Text>
-                              {historySummary.modelDetail && (
-                                <Text size="xs" c="dimmed" mt={2}>{historySummary.modelDetail}</Text>
-                              )}
                               {(() => {
                                 const rowIntentState = resolveSessionModelIntentState({
                                   hasSession: true,
@@ -1346,9 +1251,6 @@ export default function DashboardChatPanel({
 
                                 return null
                               })()}
-                              {!session.canPatchModel && session.modelSwitchBlockedReason && (
-                                <Text size="xs" c="dimmed" mt={2}>{session.modelSwitchBlockedReason}</Text>
-                              )}
                             </div>
                             <Group gap={4} wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }}>
                               <Badge
@@ -1406,9 +1308,10 @@ export default function DashboardChatPanel({
 
           <div
             ref={scrollRef as React.RefObject<HTMLDivElement>}
-            style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 'var(--mantine-spacing-sm)' }}
+            className="hide-scrollbar"
+            style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 'var(--mantine-spacing-xs)' }}
           >
-            <Paper withBorder p="sm" radius="lg" style={{ minHeight: '100%' }}>
+            <Paper p="sm" radius="lg" style={{ minHeight: '100%' }}>
             {showAvailabilityEmptyState ? (
               <div style={{ display: 'flex', height: '100%', minHeight: 150, flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
                 <Text size="sm">{resolvedAvailabilityMessage}</Text>
@@ -1470,7 +1373,7 @@ export default function DashboardChatPanel({
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
-                          gap: 6,
+                          gap: 4,
                           maxWidth: '82%',
                         }}
                       >
@@ -1511,7 +1414,7 @@ export default function DashboardChatPanel({
 
                         {(metaItems.length > 0 || canCopyMessage) && (
                           <Group
-                            gap={8}
+                            gap={6}
                             wrap="wrap"
                             justify={message.role === 'user' ? 'flex-end' : 'flex-start'}
                           >
@@ -1554,8 +1457,8 @@ export default function DashboardChatPanel({
                 </Text>
                 <Text size="xs" c="dimmed" mt={4}>
                   {activeSession
-                    ? '您可以继续发送消息，确认 provider、模型和网关都已经打通。'
-                    : '您可以先发一句简单问题，确认 provider、模型和网关都已经打通。'}
+                    ? '您可以继续发送消息，确认 AI 提供商、模型和网关都已经打通。'
+                    : '您可以先发一句简单问题，确认 AI 提供商、模型和网关都已经打通。'}
                 </Text>
                 {!activeSession && (
                   <Group mt="sm" gap="xs">
@@ -1582,7 +1485,7 @@ export default function DashboardChatPanel({
 
           <div
             style={{
-              marginTop: 'var(--mantine-spacing-sm)',
+              marginTop: 'var(--mantine-spacing-xs)',
               border: '1px solid var(--app-border)',
               borderRadius: 'var(--mantine-radius-lg)',
               backgroundColor: 'var(--app-bg-input)',
@@ -1611,18 +1514,15 @@ export default function DashboardChatPanel({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '6px 0',
+                padding: '3px 0',
                 cursor: 'ns-resize',
                 touchAction: 'none',
-                borderBottom: '1px solid var(--app-border)',
-                background:
-                  'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%)',
               }}
             >
               <div
                 style={{
-                  width: 40,
-                  height: 4,
+                  width: 28,
+                  height: 3,
                   borderRadius: '999px',
                   backgroundColor: 'var(--app-border-light)',
                 }}
@@ -1644,11 +1544,12 @@ export default function DashboardChatPanel({
               }}
               placeholder="输入消息"
               disabled={sending || !canSend}
-              rows={4}
+              rows={1}
               variant="unstyled"
+              classNames={{ input: 'hide-scrollbar' }}
               styles={{
                 input: {
-                  padding: '14px 16px 12px',
+                  padding: '10px 16px 8px',
                   fontSize: 'var(--mantine-font-size-sm)',
                   lineHeight: 1.6,
                   height: composerHeight,
@@ -1659,46 +1560,44 @@ export default function DashboardChatPanel({
                 },
               }}
             />
-            <div style={{ borderTop: '1px solid var(--app-border)', padding: '10px 12px' }}>
-              <Stack gap={8}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 {modelOptions.length > 0 && showComposerModelPicker && (
-                  <Group gap="xs" wrap="nowrap" align="center">
-                    <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>会话模型</Text>
-                    <Select
-                      size="xs"
-                      variant="unstyled"
-                      style={{ flex: 1, minWidth: 0 }}
-                      data={modelOptions}
-                      value={sessionModelSelectValue || null}
-                      placeholder={
-                        activeSession
-                          ? sessionModelPresentation.modeLabel
-                          : '发送首条消息后可切换'
-                      }
-                      onChange={(value) => void handleSessionModelChange(value)}
-                      disabled={!canSend || sending || chatModelSwitching || !sessionModelSelectionEnabled}
-                      aria-label="切换此会话模型"
-                      comboboxProps={{ withinPortal: false }}
-                      styles={{
-                        input: {
-                          minHeight: 32,
-                          padding: '0 12px',
-                          borderRadius: '999px',
-                          border: '1px solid var(--app-border)',
-                          backgroundColor: 'var(--app-bg-bubble-assistant)',
-                          fontSize: 'var(--mantine-font-size-xs)',
-                        },
-                      }}
-                    />
-                  </Group>
+                  <div style={{ borderTop: '1px solid var(--app-border)', padding: '6px 12px' }}>
+                    <Group gap="xs" wrap="nowrap" align="center">
+                      <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>会话模型</Text>
+                      <Select
+                        size="xs"
+                        variant="unstyled"
+                        style={{ flex: 1, minWidth: 0 }}
+                        data={modelOptions}
+                        value={sessionModelSelectValue || null}
+                        placeholder={
+                          activeSession
+                            ? sessionModelPresentation.modeLabel
+                            : '发送首条消息后可切换'
+                        }
+                        onChange={(value) => void handleSessionModelChange(value)}
+                        disabled={!canSend || sending || chatModelSwitching || !sessionModelSelectionEnabled}
+                        aria-label="切换此会话模型"
+                        comboboxProps={{ withinPortal: false }}
+                        styles={{
+                          input: {
+                            minHeight: 32,
+                            padding: '0 12px',
+                            borderRadius: '999px',
+                            border: '1px solid var(--app-border)',
+                            backgroundColor: 'var(--app-bg-bubble-assistant)',
+                            fontSize: 'var(--mantine-font-size-xs)',
+                          },
+                        }}
+                      />
+                    </Group>
+                  </div>
                 )}
-
-                <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
-                  <Text size="xs" c="dimmed" style={{ flex: 1, minWidth: 0 }} lineClamp={2}>
-                    {composerHint}
-                  </Text>
-
-                  <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+              </div>
+              <div style={{ flexShrink: 0, padding: '6px 12px' }}>
+                <Group gap={6} wrap="nowrap" align="center">
                     {modelOptions.length > 0 && (
                       <Tooltip label={showComposerModelPicker ? '收起会话模型' : '展开会话模型'} withArrow>
                         <ActionIcon
@@ -1757,8 +1656,7 @@ export default function DashboardChatPanel({
                       </ActionIcon>
                     )}
                   </Group>
-                </Group>
-              </Stack>
+              </div>
             </div>
           </div>
       </div>

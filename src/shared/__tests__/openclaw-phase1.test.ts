@@ -101,7 +101,8 @@ describe('classifyOpenClawPhase1', () => {
     })
 
     expect(result.versionStatus).toBe('latest-unknown')
-    expect(result.warnings.join(' ')).toContain('timeout')
+    expect(result.warnings).toContain('最新版本检查失败，可以先继续使用，稍后再重试。')
+    expect(result.warnings.join(' ')).not.toContain('timeout')
   })
 })
 

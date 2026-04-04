@@ -313,7 +313,7 @@ export function classifyOpenClawPhase1(
       canUpgradeInPlace: false,
       warnings: [
         ...discovery.warnings,
-        latestCheck?.error ? `最新版本检查失败：${latestCheck.error}` : '最新版本暂时不可判断。',
+        latestCheck?.error ? '最新版本检查失败，可以先继续使用，稍后再重试。' : '最新版本暂时不可判断。',
       ],
     }
   }

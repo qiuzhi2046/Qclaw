@@ -1109,7 +1109,7 @@ describe('openclaw restore service', () => {
     expect(result.errorCode).toBe('runtime_apply_failed')
     expect(result.restoredItems).toContain('已恢复 openclaw.json')
     expect(result.restoredItems).toContain('已恢复 credentials 目录')
-    expect(result.message).toContain('运行时生效失败')
+    expect(result.message).toContain('当前状态生效失败')
     expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('restore-config', {
       preferEnsureWhenNotRunning: true,
     })

@@ -451,6 +451,34 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     })
   })
 
+  it('does not quarantine diagnostic-only official managed plugins during global repair sweeps', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'openclaw-weixin',
+      '@tencent-weixin/openclaw-weixin',
+      'index.ts',
+      'import { buildChannelConfigSchema } from "openclaw/plugin-sdk"\nexport default {}'
+    )
+
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      quarantineOfficialManagedPlugins: true,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['openclaw-weixin'],
+        },
+      }),
+      writeConfig: async () => {},
+    })
+
+    expect(result).toEqual({
+      incompatiblePlugins: [],
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+    })
+  })
+
   it('quarantines official managed plugins during explicit targeted repair', async () => {
     const homeDir = await createTempHome()
     await writePluginPackage(
@@ -498,6 +526,46 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
       'utf8'
     )
     expect(quarantinedEntry).toContain('@larksuite/openclaw-lark')
+  })
+
+  it('does not quarantine the interactive-installer weixin plugin on Node smoke-test false positives', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'openclaw-weixin',
+      '@tencent-weixin/openclaw-weixin',
+      'index.ts',
+      'import { buildChannelConfigSchema } from "openclaw/plugin-sdk"\nexport default {}'
+    )
+
+    const writeConfig = vi.fn(async () => {})
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      now: () => 0,
+      scopePluginIds: ['openclaw-weixin'],
+      quarantineOfficialManagedPlugins: true,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['openclaw-weixin'],
+          entries: {
+            'openclaw-weixin': { enabled: true },
+          },
+          installs: {
+            'openclaw-weixin': {
+              installPath: path.join(homeDir, 'extensions', 'openclaw-weixin'),
+            },
+          },
+        },
+      }),
+      writeConfig,
+    })
+
+    expect(result.quarantinedPluginIds).toEqual([])
+    expect(result.prunedPluginIds).toEqual([])
+    expect(writeConfig).not.toHaveBeenCalled()
+    await expect(
+      readFile(path.join(homeDir, 'extensions', 'openclaw-weixin', 'package.json'), 'utf8')
+    ).resolves.toContain('@tencent-weixin/openclaw-weixin')
   })
 
   it('returns a repair summary when incompatible plugins are fixed', async () => {
@@ -685,7 +753,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     })
 
     expect(result.ok).toBe(false)
-    expect(result.summary).toBe('修复坏插件环境失败，请重试。')
+    expect(result.summary).toBe('修复损坏插件环境失败，请重试。')
     expect(result.stderr).toContain('write config failed')
   })
 

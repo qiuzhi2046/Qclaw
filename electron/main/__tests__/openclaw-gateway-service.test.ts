@@ -428,7 +428,7 @@ describe('openclaw gateway service', () => {
         revision: undefined,
         blockingReason: 'none',
         safeToRetry: true,
-        summary: 'Gateway 已确认可用，运行时状态已通过健康探针确认。',
+        summary: '网关已确认可用，运行状态已通过健康探针确认。',
       })
     )
   })

@@ -29,6 +29,33 @@ describe('resolveNodeInstallStrategy', () => {
       )
     ).toBe('installer')
   })
+
+  it('recognizes nvm-windows version directories on Windows', () => {
+    expect(
+      resolveNodeInstallStrategy(
+        'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v22.17.1',
+        'C:\\Users\\Jason\\AppData\\Roaming\\nvm'
+      )
+    ).toBe('nvm')
+  })
+
+  it('treats non-nvm Windows paths as installer-managed', () => {
+    expect(
+      resolveNodeInstallStrategy(
+        'C:\\Program Files\\nodejs',
+        'C:\\Users\\Jason\\AppData\\Roaming\\nvm'
+      )
+    ).toBe('installer')
+  })
+
+  it('recognizes nvm even when Windows path casing differs', () => {
+    expect(
+      resolveNodeInstallStrategy(
+        'C:\\Users\\Jason\\AppData\\Roaming\\NVM\\v22.17.1',
+        'c:\\users\\jason\\appdata\\roaming\\nvm'
+      )
+    ).toBe('nvm')
+  })
 })
 
 describe('selectPreferredNodeRuntime', () => {
@@ -50,6 +77,29 @@ describe('selectPreferredNodeRuntime', () => {
       candidate: {
         version: 'v24.14.0',
         binDir: '/Users/alice/.nvm/versions/node/v24.14.0/bin',
+      },
+      installStrategy: 'nvm',
+    })
+  })
+
+  it('prefers nvm-windows node over an older shell node on Windows', () => {
+    const selected = selectPreferredNodeRuntime({
+      shellNode: {
+        version: 'v20.11.1',
+        binDir: 'C:\\Program Files\\nodejs',
+      },
+      nvmNode: {
+        version: 'v24.0.0',
+        binDir: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v24.0.0',
+      },
+      requiredVersion: '22.16.0',
+      nvmDir: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm',
+    })
+
+    expect(selected).toEqual({
+      candidate: {
+        version: 'v24.0.0',
+        binDir: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm\\v24.0.0',
       },
       installStrategy: 'nvm',
     })

@@ -422,7 +422,7 @@ describe('createOpenClawAuthRegistry', () => {
             authChoice: 'google-gemini-cli',
             label: 'Google Gemini CLI OAuth',
             hint:
-              'Unofficial flow; review account-risk warning before use; Requires local Gemini CLI or GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET.',
+              'Unofficial flow; review account-risk warning before use; 需要先在本机安装 Gemini 命令行工具，或显式设置 GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET。',
             kind: 'oauth',
             route: {
               kind: 'models-auth-login',
@@ -515,7 +515,8 @@ describe('createOpenClawAuthRegistry', () => {
         {
           authChoice: 'google-gemini-cli',
           label: 'Gemini CLI OAuth',
-          hint: 'Google OAuth with project-aware token payload; Requires local Gemini CLI or GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET.',
+          hint:
+            'Google OAuth with project-aware token payload; 需要先在本机安装 Gemini 命令行工具，或显式设置 GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET。',
           kind: 'oauth',
           route: {
             kind: 'models-auth-login',

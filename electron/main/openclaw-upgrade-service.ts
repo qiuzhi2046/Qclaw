@@ -572,7 +572,7 @@ async function runUserManagedOwnershipRepairUpgrade(
     operation: 'upgrade',
     lifecycleCommand: command,
     prompt:
-      'Qclaw 检测到当前 OpenClaw 安装目录存在权限/所有权问题，无法直接升级。\n\nQclaw 将先修正该目录 ownership，再继续升级到目标版本。\n\n请输入你的 Mac 登录密码以继续。',
+      'Qclaw 检测到当前 OpenClaw 安装目录存在权限/所有权问题，无法直接升级。\n\nQclaw 将先修复该目录的权限/所有权设置，再继续升级到目标版本。\n\n请输入你的 Mac 登录密码以继续。',
     timeoutMs: buildMirrorAwareTimeoutMs(MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs),
     controlDomain: 'upgrade',
     binaryPath: candidate.resolvedBinaryPath || candidate.binaryPath,
@@ -610,7 +610,7 @@ async function runSourceAwareUpgrade(
       return {
         ok: false,
         stdout: '',
-        stderr: buildManualUpgradeHint(candidate) || '当前 Homebrew 安装暂不支持程序内自动纠偏。',
+        stderr: buildManualUpgradeHint(candidate) || '当前 Homebrew 安装暂不支持程序内自动修复。',
         code: 1,
       }
     }

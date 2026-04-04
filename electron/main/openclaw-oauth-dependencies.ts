@@ -118,8 +118,8 @@ function firstPresentEnvValue(env: NodeJS.ProcessEnv, keys: string[]): string | 
 
 function buildGeminiCliMissingMessage(): string {
   return [
-    '未检测到 Gemini CLI。',
-    'Google Gemini CLI OAuth 依赖本机安装 gemini CLI，或显式设置 GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET。',
+    '未检测到 Gemini 命令行工具。',
+    'Google Gemini 浏览器授权登录依赖本机安装 gemini 命令行工具，或显式设置 GEMINI_CLI_OAUTH_CLIENT_ID / GEMINI_CLI_OAUTH_CLIENT_SECRET。',
     'Qclaw 会先静默探测 npm / Homebrew 是否可用，只展示当前机器可执行的一键安装入口。',
   ].join(' ')
 }
@@ -127,13 +127,13 @@ function buildGeminiCliMissingMessage(): string {
 function buildGeminiProjectEnvWarningMessage(): string {
   return [
     '部分 Google 账号在网页授权成功后，仍需要设置 GOOGLE_CLOUD_PROJECT 或 GOOGLE_CLOUD_PROJECT_ID。',
-    '如果缺少项目 ID，Gemini OAuth 可能会在 Google Cloud project 发现阶段失败，导致凭证无法落盘。',
+    '如果缺少项目 ID，Gemini 浏览器授权登录可能会在 Google Cloud project 发现阶段失败，导致凭证无法落盘。',
   ].join(' ')
 }
 
 function buildGeminiProjectEnvFailureMessage(): string {
   return [
-    'Gemini OAuth 浏览器回调已完成，但当前环境未设置 GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_PROJECT_ID。',
+    'Gemini 浏览器授权登录回调已完成，但当前环境未设置 GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_PROJECT_ID。',
     '部分 Google 账号会在 Google Cloud project 发现阶段失败，因此凭证不会落盘。',
     '请先在 OpenClaw 的 .env 或系统环境中设置项目 ID 后重试。',
   ].join(' ')
@@ -252,7 +252,7 @@ export async function inspectOAuthDependencyForAuthChoice(
     warnings,
     action: {
       dependencyId: 'gemini-cli',
-      title: '安装 Gemini CLI',
+      title: '安装 Gemini 命令行工具',
       message: buildGeminiCliMissingMessage(),
       commandName: 'gemini',
       ...(recommendedMethod ? { recommendedMethod } : {}),
@@ -305,7 +305,7 @@ export async function installOAuthExternalDependency(
 
   const inspection = await inspectOAuthDependencyForAuthChoice('google-gemini-cli', options)
   if (inspection.ready) {
-    return successInstallResult('gemini-cli', request.method, '', 'Gemini CLI 已可用，无需重复安装。')
+    return successInstallResult('gemini-cli', request.method, '', 'Gemini 命令行工具已可用，无需重复安装。')
   }
 
   const installOptions = inspection.action?.installOptions || []
@@ -356,7 +356,7 @@ export async function installOAuthExternalDependency(
           '-e',
           buildAppleScriptDoShellScript(cmd, {
             prompt:
-              'Qclaw 需要安装 Gemini CLI。\n\n这是 Google Gemini CLI OAuth 的前置依赖。\n\n请输入您的 Mac 登录密码以继续。',
+              'Qclaw 需要安装 Gemini 命令行工具。\n\n这是 Google Gemini 浏览器授权登录的前置依赖。\n\n请输入您的 Mac 登录密码以继续。',
           })
         ],
         MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs
@@ -374,7 +374,7 @@ export async function installOAuthExternalDependency(
     return failureInstallResult(
       'gemini-cli',
       method,
-      String(installResult.stderr || installResult.stdout || 'Gemini CLI install failed').trim(),
+      String(installResult.stderr || installResult.stdout || 'Gemini command-line tool install failed').trim(),
       installResult.code
     )
   }
@@ -385,7 +385,7 @@ export async function installOAuthExternalDependency(
     return failureInstallResult(
       'gemini-cli',
       method,
-      availabilityResult.stderr || 'Gemini CLI 安装完成，但当前环境暂未检测到 gemini 命令。'
+      availabilityResult.stderr || 'Gemini 命令行工具安装完成，但当前环境暂未检测到 gemini 命令。'
     )
   }
 
@@ -393,6 +393,6 @@ export async function installOAuthExternalDependency(
     'gemini-cli',
     method,
     String(installResult.stdout || availabilityResult.stdout || '').trim(),
-    `Gemini CLI 已安装完成（${method}）。请重新发起 Google Gemini CLI OAuth。`
+    `Gemini 命令行工具已安装完成（${method}）。请重新发起 Google Gemini 浏览器授权登录。`
   )
 }

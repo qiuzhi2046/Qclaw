@@ -505,8 +505,8 @@ function buildOAuthConfigRecoveryFailureMessage(params: {
   recoverySummary: string
 }): string {
   return [
-    `OpenClaw 在执行 auth flow "${params.authChoice}" 时检测到当前本地配置与新版本契约不兼容。`,
-    `Qclaw 已尝试自动修复配置并恢复 Gateway，但仍未成功：${params.recoverySummary}`,
+    `OpenClaw 在执行认证流程 "${params.authChoice}" 时检测到当前本地配置与新版本契约不兼容。`,
+    `Qclaw 已尝试自动修复配置并恢复网关，但仍未成功：${params.recoverySummary}`,
     `原始认证错误：${params.authError}`,
   ].join('\n')
 }
@@ -519,12 +519,12 @@ function buildGatewayRestartFailureMessage(params: {
   gatewayReloadSuggested: boolean
 }): string {
   const intro = params.gatewayReloadSuggested
-    ? `OpenClaw 已启用插件 "${params.pluginId}"，但 provider "${params.providerId}" 需要刷新 gateway 后才会生效。`
-    : `OpenClaw 已启用插件 "${params.pluginId}"，但当前运行中的 gateway 仍未识别 provider "${params.providerId}"。`
+    ? `OpenClaw 已启用插件 "${params.pluginId}"，但提供商 "${params.providerId}" 需要刷新网关后才会生效。`
+    : `OpenClaw 已启用插件 "${params.pluginId}"，但当前运行中的网关仍未识别提供商 "${params.providerId}"。`
 
   return [
     intro,
-    `Qclaw 已尝试自动重启 gateway，但失败了：${params.restartError}`,
+    `Qclaw 已尝试自动重启网关，但失败了：${params.restartError}`,
     `原始登录错误：${params.loginError}`,
   ].join('\n')
 }
@@ -541,8 +541,8 @@ function buildGatewayTokenReloadFailureMessage(params: {
   applyError: string
 }): string {
   return [
-    `OpenClaw 已完成认证写入，但 auth flow "${params.authChoice}" 同时更新了 gateway.auth.token。`,
-    `Qclaw 已先尝试热重载 secrets，并在失败后回退重启 gateway，但仍未成功：${params.applyError}`,
+    `OpenClaw 已完成认证写入，但认证流程 "${params.authChoice}" 同时更新了 gateway.auth.token。`,
+    `Qclaw 已先尝试热重载 secrets，并在失败后回退重启网关，但仍未成功：${params.applyError}`,
   ].join('\n')
 }
 
@@ -551,8 +551,8 @@ function buildGatewayTokenConfirmFailureMessage(params: {
   gatewaySummary: string
 }): string {
   return [
-    `OpenClaw 已完成 auth flow "${params.authChoice}" 的写入，并已触发 gateway token apply。`,
-    `但 Qclaw 仍未确认 Gateway 已消费最新 token：${params.gatewaySummary}`,
+    `OpenClaw 已完成认证流程 "${params.authChoice}" 的写入，并已触发 gateway token apply。`,
+    `但 Qclaw 仍未确认网关已消费最新 token：${params.gatewaySummary}`,
   ].join('\n')
 }
 
@@ -563,7 +563,7 @@ function buildProviderConfigRepairFailureMessage(params: {
   const repairedPaths =
     params.repairedJsonPaths.length > 0 ? params.repairedJsonPaths.join(', ') : '$.models.providers.minimax-portal.api'
   return [
-    'OpenClaw 已完成认证写入，但 Qclaw 在修复 MiniMax provider 运行时配置时失败了。',
+    'OpenClaw 已完成认证写入，但 Qclaw 在修复 MiniMax 提供商运行状态配置时失败了。',
     `需要补齐的字段：${repairedPaths}`,
     `修复失败原因：${params.error}`,
   ].join('\n')
@@ -574,7 +574,7 @@ function buildMainAuthProfileSyncFailureMessage(params: {
   error: string
 }): string {
   return [
-    `OpenClaw 已完成 provider "${params.providerId}" 的认证写入，但 Qclaw 在同步 main agent 的 auth profile 时失败了。`,
+    `OpenClaw 已完成提供商 "${params.providerId}" 的认证写入，但 Qclaw 在同步 main agent 的 auth profile 时失败了。`,
     `失败原因：${params.error}`,
   ].join('\n')
 }
@@ -584,9 +584,9 @@ function buildAmbiguousCustomProviderMatchMessage(params: {
 }): string {
   const candidates = params.providerIds.map((providerId) => `"${providerId}"`).join(', ')
   return [
-    'OpenClaw 已完成认证写入，但检测到多个同 endpoint/model 的自定义 Provider 配置。',
-    candidates ? `候选 Provider ID：${candidates}` : '候选 Provider ID 未知。',
-    '请填写 Provider ID 后重试，避免将 API Key 同步到错误的 provider。',
+    'OpenClaw 已完成认证写入，但检测到多个同 endpoint/model 的自定义提供商配置。',
+    candidates ? `候选提供商 ID：${candidates}` : '候选提供商 ID 未知。',
+    '请填写提供商 ID 后重试，避免将 API Key 同步到错误的提供商。',
   ].join('\n')
 }
 
@@ -595,9 +595,9 @@ function buildMissingCustomProviderMatchMessage(params: {
 }): string {
   const providerId = String(params.providerId || '').trim()
   return [
-    'OpenClaw 已完成认证写入，但 Qclaw 尚未在配置中确认自定义 Provider ID。',
-    providerId ? `当前填写的 Provider ID："${providerId}"。` : '当前未填写 Provider ID。',
-    '请等待配置落盘后重试，避免将 API Key 同步到错误的 provider。',
+    'OpenClaw 已完成认证写入，但 Qclaw 尚未在配置中确认自定义提供商 ID。',
+    providerId ? `当前填写的提供商 ID："${providerId}"。` : '当前未填写提供商 ID。',
+    '请等待配置落盘后重试，避免将 API Key 同步到错误的提供商。',
   ].join('\n')
 }
 
@@ -819,7 +819,7 @@ async function applyGatewayTokenRefresh(params: {
     ok: false,
     message: buildGatewayTokenReloadFailureMessage({
       authChoice: params.authChoice,
-      applyError: applyResult.note || 'Gateway apply failed',
+      applyError: applyResult.note || '网关生效失败',
     }),
   }
 }
@@ -857,8 +857,8 @@ function buildOnboardGatewayRecoveryFailureMessage(params: {
   recoverySummary?: string
 }): string {
   return [
-    `OpenClaw 在执行 auth flow "${params.authChoice}" 时检测到 Gateway 运行时未就绪。`,
-    `Qclaw 已尝试自动恢复 Gateway 并等待其重新就绪，但恢复失败了：${params.recoverySummary || params.recoveryError}`,
+    `OpenClaw 在执行认证流程 "${params.authChoice}" 时检测到网关运行状态未就绪。`,
+    `Qclaw 已尝试自动恢复网关并等待其重新就绪，但恢复失败了：${params.recoverySummary || params.recoveryError}`,
     `原始认证错误：${params.onboardError}`,
   ].join('\n')
 }
@@ -891,8 +891,8 @@ async function executeOnboardCommandWithGatewayRecovery(params: {
         params.attemptedCommands,
         buildOnboardGatewayRecoveryFailureMessage({
           authChoice: params.authChoice,
-          onboardError: getCliFailureMessage(result, 'Auth command failed'),
-          recoveryError: getCliFailureMessage(recoveryResult, 'Gateway recovery failed'),
+          onboardError: getCliFailureMessage(result, '认证命令执行失败'),
+          recoveryError: getCliFailureMessage(recoveryResult, '网关恢复失败'),
           recoverySummary: recoveryResult.summary,
         }),
         'command_failed',
@@ -1132,19 +1132,19 @@ export async function executeAuthRoute(
               kind: 'repair',
               action: 'plugin-enable',
               outcome: 'succeeded',
-              detail: `插件 ${activePluginId} 已启用，正在确认 provider ${loginProviderId} 是否已被 Gateway 识别。`,
+              detail: `插件 ${activePluginId} 已启用，正在确认提供商 ${loginProviderId} 是否已被网关识别。`,
             },
             {
               kind: 'repair',
               action: 'gateway-restart',
               outcome: 'scheduled',
-              detail: `首次登录发现 provider ${loginProviderId} 尚未被运行时加载。`,
+              detail: `首次登录发现提供商 ${loginProviderId} 尚未被运行状态加载。`,
             },
           ],
         })
         const runtimeRevision = pendingStore.runtime.desiredRevision
         await markRuntimeRevisionInProgress(runtimeRevision, {
-          summary: `插件 ${activePluginId} 已启用，正在重载 Gateway 以确认 provider ${loginProviderId} 生效。`,
+          summary: `插件 ${activePluginId} 已启用，正在重载网关以确认提供商 ${loginProviderId} 生效。`,
           actions: pendingStore.runtime.lastActions,
         })
         const gatewayRestartCommand = ['gateway', 'restart']
@@ -1159,8 +1159,8 @@ export async function executeAuthRoute(
             summary: buildGatewayRestartFailureMessage({
               pluginId: activePluginId,
               providerId: loginProviderId,
-              loginError: getCliFailureMessage(failedLoginResult, 'Auth command failed'),
-              restartError: getCliFailureMessage(restartResult, 'Gateway restart failed'),
+              loginError: getCliFailureMessage(failedLoginResult, '认证命令执行失败'),
+              restartError: getCliFailureMessage(restartResult, '网关重启失败'),
               gatewayReloadSuggested: pluginGatewayReloadSuggested,
             }),
             actions: [
@@ -1168,7 +1168,7 @@ export async function executeAuthRoute(
                 kind: 'repair',
                 action: 'gateway-restart',
                 outcome: 'failed',
-                detail: getCliFailureMessage(restartResult, 'Gateway restart failed'),
+                detail: getCliFailureMessage(restartResult, '网关重启失败'),
               },
             ],
           })
@@ -1180,8 +1180,8 @@ export async function executeAuthRoute(
                 buildGatewayRestartFailureMessage({
                   pluginId: activePluginId,
                   providerId: loginProviderId,
-                  loginError: getCliFailureMessage(failedLoginResult, 'Auth command failed'),
-                  restartError: getCliFailureMessage(restartResult, 'Gateway restart failed'),
+                  loginError: getCliFailureMessage(failedLoginResult, '认证命令执行失败'),
+                  restartError: getCliFailureMessage(restartResult, '网关重启失败'),
                 gatewayReloadSuggested: pluginGatewayReloadSuggested,
               }),
               'command_failed',
@@ -1204,8 +1204,8 @@ export async function executeAuthRoute(
           blockingReason: nextResult.ok ? 'none' : 'provider_plugin_not_ready',
           safeToRetry: nextResult.ok ? true : false,
           summary: nextResult.ok
-            ? `Gateway 已重载并确认 provider ${loginProviderId} 可用于 auth login。`
-            : `Gateway 已重载，但 provider ${loginProviderId} 仍未准备完成：${getCliFailureMessage(nextResult, 'Auth command failed')}`,
+            ? `网关已重载并确认提供商 ${loginProviderId} 可用于 auth login。`
+            : `网关已重载，但提供商 ${loginProviderId} 仍未准备完成：${getCliFailureMessage(nextResult, 'Auth command failed')}`,
           actions: [
             {
               kind: 'repair',
@@ -1243,8 +1243,8 @@ export async function executeAuthRoute(
             attemptedCommands,
             buildOAuthConfigRecoveryFailureMessage({
               authChoice: method.authChoice,
-              authError: getCliFailureMessage(result, 'Auth command failed'),
-              recoverySummary: recoveryResult.summary || getCliFailureMessage(recoveryResult, 'Gateway recovery failed'),
+              authError: getCliFailureMessage(result, '认证命令执行失败'),
+              recoverySummary: recoveryResult.summary || getCliFailureMessage(recoveryResult, '网关恢复失败'),
             }),
             'command_failed',
             {
@@ -1391,8 +1391,8 @@ export async function executeAuthRoute(
             attemptedCommands,
             buildOAuthConfigRecoveryFailureMessage({
               authChoice: method.authChoice,
-              authError: getCliFailureMessage(result, 'Auth command failed'),
-              recoverySummary: recoveryResult.summary || getCliFailureMessage(recoveryResult, 'Gateway recovery failed'),
+              authError: getCliFailureMessage(result, '认证命令执行失败'),
+              recoverySummary: recoveryResult.summary || getCliFailureMessage(recoveryResult, '网关恢复失败'),
             }),
             'command_failed',
             {
@@ -1538,7 +1538,7 @@ export async function executeAuthRoute(
               kind: 'repair',
               action: 'auth-onboard',
               outcome: 'succeeded',
-              detail: `Auth flow "${method.authChoice}" 更新了 gateway.auth.token。`,
+              detail: `认证流程 "${method.authChoice}" 更新了 gateway.auth.token。`,
               changedPaths: ['gateway.auth.token'],
             },
             {
@@ -1550,7 +1550,7 @@ export async function executeAuthRoute(
         })
         const runtimeRevision = pendingStore.runtime.desiredRevision
         await markRuntimeRevisionInProgress(runtimeRevision, {
-          summary: `Auth flow "${method.authChoice}" 已更新 gateway.auth.token，正在确认 Gateway 是否已消费最新 token。`,
+          summary: `认证流程 "${method.authChoice}" 已更新 gateway.auth.token，正在确认网关是否已消费最新 token。`,
           actions: pendingStore.runtime.lastActions,
         })
         const gatewayApply = await applyGatewayTokenRefresh({
@@ -1601,10 +1601,10 @@ export async function executeAuthRoute(
           blockingDetail: gatewayRuntime.reasonDetail,
           safeToRetry: gatewayConfirmed ? true : gatewayRuntime.safeToRetry,
           summary: gatewayConfirmed
-            ? `Gateway 已确认消费 auth flow "${method.authChoice}" 更新后的 token。`
+            ? `网关已确认消费认证流程 "${method.authChoice}" 更新后的 token。`
             : buildGatewayTokenConfirmFailureMessage({
                 authChoice: method.authChoice,
-                gatewaySummary: gatewayRuntime.summary || 'Gateway 未返回可用确认',
+                gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
               }),
           actions: [
             {
@@ -1627,7 +1627,7 @@ export async function executeAuthRoute(
             attemptedCommands,
             buildGatewayTokenConfirmFailureMessage({
               authChoice: method.authChoice,
-              gatewaySummary: gatewayRuntime.summary || 'Gateway 未返回可用确认',
+              gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
             }),
             'command_failed',
             {
@@ -1780,7 +1780,7 @@ export async function executeAuthRoute(
               kind: 'repair',
               action: 'auth-onboard-custom',
               outcome: 'succeeded',
-              detail: `Auth flow "${method.authChoice}" 更新了 gateway.auth.token。`,
+              detail: `认证流程 "${method.authChoice}" 更新了 gateway.auth.token。`,
               changedPaths: ['gateway.auth.token'],
             },
             {
@@ -1792,7 +1792,7 @@ export async function executeAuthRoute(
         })
         const runtimeRevision = pendingStore.runtime.desiredRevision
         await markRuntimeRevisionInProgress(runtimeRevision, {
-          summary: `Auth flow "${method.authChoice}" 已更新 gateway.auth.token，正在确认 Gateway 是否已消费最新 token。`,
+          summary: `认证流程 "${method.authChoice}" 已更新 gateway.auth.token，正在确认网关是否已消费最新 token。`,
           actions: pendingStore.runtime.lastActions,
         })
         const gatewayApply = await applyGatewayTokenRefresh({
@@ -1843,10 +1843,10 @@ export async function executeAuthRoute(
           blockingDetail: gatewayRuntime.reasonDetail,
           safeToRetry: gatewayConfirmed ? true : gatewayRuntime.safeToRetry,
           summary: gatewayConfirmed
-            ? `Gateway 已确认消费 auth flow "${method.authChoice}" 更新后的 token。`
+            ? `网关已确认消费认证流程 "${method.authChoice}" 更新后的 token。`
             : buildGatewayTokenConfirmFailureMessage({
                 authChoice: method.authChoice,
-                gatewaySummary: gatewayRuntime.summary || 'Gateway 未返回可用确认',
+                gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
               }),
           actions: [
             {
@@ -1869,7 +1869,7 @@ export async function executeAuthRoute(
             attemptedCommands,
             buildGatewayTokenConfirmFailureMessage({
               authChoice: method.authChoice,
-              gatewaySummary: gatewayRuntime.summary || 'Gateway 未返回可用确认',
+              gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
             }),
             'command_failed',
             {

@@ -28,6 +28,16 @@
   </p>
 </div>
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=qiuzhi2046%2FQclaw&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=qiuzhi2046/Qclaw&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=qiuzhi2046/Qclaw&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=qiuzhi2046/Qclaw&type=date&legend=top-left" />
+ </picture>
+</a>
+
 <details>
   <summary>目录</summary>
   <ol>
@@ -218,24 +228,26 @@ build/              应用图标与打包资源
 - Linux（计划中）
 
 ## 贡献指南
-欢迎每一个有想法、愿意动手的朋友参与到Qclaw的贡献中来！正是因为有你们，这个项目才能不断进步。
+我们欢迎每一个致力于让前沿 AI Agent 变得更好用、更易用的朋友加入贡献者行列！
+无论你是否贡献过代码，只要有想法、有热情，都欢迎加入我们一起交流！🤗
 
-本指南将帮助你了解如何参与项目开发，无论是报告 Bug、提出新功能建议，还是提交代码，我们都非常欢迎。
+[贡献指南](CONTRIBUTING.md)
 
-另外我们也非常鼓励和欢迎使用各类AI编程工具编写、提交代码（这也是我们的日常），哪怕你不是专业开发者。
-
-如果Qclaw能成为你的第一个开源贡献项目，我们荣幸之至。
-
-贡献指南：
-
-小白贡献指南：
+- **Qclaw贡献者交流群**
+<p>
+  <img src="docs/images/feishu_contributor.png" alt="Qclaw贡献者交流群" height="160">
+  <br />
+  <mark>如果你希望给 Qclaw 做贡献，欢迎加入贡献者交流群！</mark>
+</p>
 
 ## 加入社区
 
-- **Qclaw开源交流群**
+- **Qclaw用户交流群**
 
 <p>
-  <img src="docs/images/feishu_qrcode.png" alt="Qclaw开源交流群二维码" height="180">
+  <img src="docs/images/feishu_qrcode.png" alt="Qclaw用户交流群二维码" height="180">
+  <br />
+  <mark>如果你对Qclaw有疑问、希望与其他朋友交流等，欢迎加入用户交流群！</mark>
 </p>
 
 

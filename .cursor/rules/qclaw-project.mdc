@@ -1,0 +1,48 @@
+---
+description: Qclaw 專案概述：技術棧、目錄結構與開發指令
+alwaysApply: true
+---
+
+# Qclaw 專案規範
+
+## 技術棧
+
+- 桌面框架：Electron
+- 前端：React + TypeScript + Vite
+- UI：Mantine 8 + Tailwind CSS 3
+- 打包：electron-builder
+- 測試：Vitest
+- 授權：Apache-2.0
+
+## 目錄結構
+
+```
+electron/
+  main/         主程序（窗口管理、CLI 調用、IPC 處理）
+  preload/      預加載腳本（安全橋接）
+src/
+  pages/        頁面元件（嚮導步驟、Dashboard、聊天等）
+  components/   UI 元件
+  lib/          業務邏輯
+  shared/       共享模組
+  types/        TypeScript 型別定義（含 IPC API 介面）
+```
+
+## 開發指令
+
+| 指令 | 用途 |
+|------|------|
+| `npm run dev` | 啟動開發伺服器 |
+| `npm run typecheck` | TypeScript 型別檢查 |
+| `npm test` | 執行測試套件（Vitest） |
+| `npm run build:app` | 前端 + 主程式編譯 |
+
+> `npm run build` 因 `forceCodeSigning: true` 在無憑證環境會失敗，屬預期行為。
+
+## 提交前必跑
+
+```powershell
+npm run typecheck
+npm test
+npm run build:app
+```

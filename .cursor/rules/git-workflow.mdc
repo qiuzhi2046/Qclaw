@@ -1,0 +1,50 @@
+---
+description: Qclaw 開源貢獻的 Git 工作流程、Commit 格式與分支命名
+alwaysApply: true
+---
+
+# Git 工作流程
+
+## Remote 設定
+
+| Remote | 指向 | 用途 |
+|--------|------|------|
+| `origin` | `JasonYang318/Qclaw`（fork） | 推送改動 |
+| `upstream` | `qiuzhi2046/Qclaw`（原始） | 同步最新版 |
+
+## 同步上游
+
+```powershell
+git fetch upstream
+git checkout main
+git merge upstream/main
+git push origin main
+```
+
+## 分支命名
+
+- 新功能：`feat/<功能名>`
+- 修 bug：`fix/<問題描述>`
+- 文件：`docs/<主題>`
+
+## Commit 訊息格式
+
+```
+<type>: <簡述>
+```
+
+| 前綴 | 用途 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | 修 bug |
+| `docs` | 文件變更 |
+| `refactor` | 重構 |
+| `test` | 測試 |
+| `chore` | 工具 / 設定 |
+
+## PR 流程
+
+1. 先開 GitHub Issue，等維護者確認方向
+2. 在自己的 fork 分支開發
+3. 跑完三個驗證指令後再 commit
+4. 推送到 `origin`，開 PR 指向 `qiuzhi2046/Qclaw`

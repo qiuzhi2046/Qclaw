@@ -2,6 +2,7 @@ import { pruneStalePluginConfigEntries } from './openclaw-config-warnings'
 import { runNodeEvalWithQualifiedRuntime } from './node-subprocess-runtime'
 import { formatDisplayPath } from './openclaw-paths'
 import {
+  getManagedChannelPluginByPluginId,
   isOfficialManagedPluginId,
   listManagedChannelPluginRecords,
 } from '../../src/shared/managed-channel-plugin-registry'
@@ -60,6 +61,28 @@ function normalizePluginIds(values: string[] | undefined): string[] {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))]
 }
 
+function getManagedPluginRecord(pluginId: string) {
+  const normalizedPluginId = String(pluginId || '').trim().toLowerCase()
+  return MANAGED_CHANNEL_PLUGIN_RECORDS.find((record) => record.pluginId.toLowerCase() === normalizedPluginId)
+}
+
+function shouldQuarantineOfficialManagedPlugin(
+  pluginId: string,
+  options: Pick<PluginInstallSafetyOptions, 'scopePluginIds' | 'quarantineOfficialManagedPlugins'>
+): boolean {
+  if (!isOfficialManagedPluginId(pluginId)) return true
+  if (options.quarantineOfficialManagedPlugins !== true) return false
+
+  const record = getManagedPluginRecord(pluginId)
+  if (!record) return true
+
+  const scopedPluginIds = normalizePluginIds(options.scopePluginIds)
+  const isScopedRepair = scopedPluginIds.length > 0
+  if (isScopedRepair) return true
+
+  return record.smokeTestPolicy === 'strict'
+}
+
 function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -84,6 +107,17 @@ function looksLikePluginSdkCompatibilityFailure(detail: string): boolean {
     || /named export .* not found/.test(text)
     || /cannot read (?:properties|property) of undefined/.test(text)
   )
+}
+
+function shouldSkipManagedPluginQuarantine(pluginId: string): boolean {
+  const managedPlugin = getManagedChannelPluginByPluginId(pluginId)
+  if (!managedPlugin) return false
+
+  // Personal Weixin is shipped as an interactive-installer plugin whose entry imports
+  // host-only OpenClaw runtime helpers. The generic Node smoke test in this file is not
+  // a reliable compatibility signal for that package, so quarantining it causes false
+  // positives and breaks unrelated features such as skills listing/install.
+  return managedPlugin.channelId === 'openclaw-weixin'
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -233,7 +267,10 @@ async function findIncompatibleExtensionPlugins(
       if (!pluginSdkResolutionFailure && !pluginSdkCompatibilityFailure) {
         continue
       }
-      if (isOfficialManagedPluginId(entry.name) && options.quarantineOfficialManagedPlugins !== true) {
+      if (!shouldQuarantineOfficialManagedPlugin(entry.name, options)) {
+        break
+      }
+      if (shouldSkipManagedPluginQuarantine(entry.name)) {
         break
       }
       incompatible.push({
@@ -446,15 +483,15 @@ export function buildIncompatiblePluginRepairSummary(
   reconcileResult: ReconcileIncompatibleExtensionsResult
 ): string {
   if (reconcileResult.quarantinedPluginIds.length > 0) {
-    return `已自动隔离 ${reconcileResult.quarantinedPluginIds.length} 个坏插件并清理相关配置。`
+    return `已自动隔离 ${reconcileResult.quarantinedPluginIds.length} 个损坏插件并清理相关配置。`
   }
   if (reconcileResult.prunedPluginIds.length > 0) {
-    return `已自动清理 ${reconcileResult.prunedPluginIds.length} 个坏插件残留配置。`
+    return `已自动清理 ${reconcileResult.prunedPluginIds.length} 个损坏插件残留配置。`
   }
   if (reconcileResult.quarantinedPluginIds.length === 0) {
-    return '未发现坏插件。'
+    return '未发现损坏插件。'
   }
-  return '未发现坏插件。'
+  return '未发现损坏插件。'
 }
 
 export async function repairIncompatibleExtensionPlugins(
@@ -467,10 +504,10 @@ export async function repairIncompatibleExtensionPlugins(
         ok: false,
         repaired: reconcileResult.quarantinedPluginIds.length > 0 || reconcileResult.prunedPluginIds.length > 0,
         summary: reconcileResult.failureKind === 'permission-denied'
-          ? '坏插件隔离失败，请检查本机权限后重试。'
+          ? '损坏插件隔离失败，请检查本机权限后重试。'
           : reconcileResult.failureKind === 'partial-quarantine'
-            ? '坏插件隔离未完成，请重试。'
-            : '坏插件隔离失败，请重试。',
+            ? '损坏插件隔离未完成，请重试。'
+            : '损坏插件隔离失败，请重试。',
         stderr: '',
         ...reconcileResult,
       }
@@ -490,7 +527,7 @@ export async function repairIncompatibleExtensionPlugins(
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
       prunedPluginIds: [],
-      summary: '修复坏插件环境失败，请重试。',
+      summary: '修复损坏插件环境失败，请重试。',
       stderr: error instanceof Error ? error.message : String(error),
     }
   }

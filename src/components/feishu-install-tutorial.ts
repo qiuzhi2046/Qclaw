@@ -25,11 +25,11 @@ export interface FeishuInstallTutorialStep {
 export const FEISHU_INSTALL_TUTORIAL_STEPS: FeishuInstallTutorialStep[] = [
   {
     title: '第 1 步：进入渠道配置',
-    description: '在 Qclaw Lite 向导中进入「连接 IM 渠道」步骤，点击顶部「飞书」标签页。',
+    description: '在 Qclaw Lite 向导中进入「连接消息渠道」步骤，点击顶部「飞书」标签页。',
     images: [
       {
-        alt: '飞书步骤 1 图 1：进入 IM 渠道页并点击添加渠道',
-        caption: '先进入左侧「IM 渠道」，然后点击右上角「添加渠道」。',
+        alt: '飞书步骤 1 图 1：进入消息渠道页并点击添加渠道',
+        caption: '先进入左侧「消息渠道」，然后点击右上角「添加渠道」。',
         src: feishuStep1Overview,
         switchLabel: '入口页',
       },

@@ -14,11 +14,15 @@ import {
 import { applyFeishuMultiBotIsolation } from '../lib/feishu-multi-bot-routing'
 import {
   extractFeishuAsciiQr,
-  extractFeishuExistingBotPromptKey,
   extractFirstHttpUrl,
   FEISHU_OFFICIAL_GUIDE_URL,
   FEISHU_OFFICIAL_INSTALL_COMMAND,
 } from '../lib/feishu-installer'
+import {
+  buildFeishuCreateBotConfirmationMessage,
+  isFeishuCreateBotConfirmationPrompt,
+  shouldDisableFeishuInstallerManualInput,
+} from '../shared/feishu-installer-session'
 
 interface FeishuBotManagerModalProps {
   opened: boolean
@@ -74,6 +78,8 @@ export default function FeishuBotManagerModal({
   const [feishuInstallerBusy, setFeishuInstallerBusy] = useState(false)
   const [feishuInstallerInput, setFeishuInstallerInput] = useState('')
   const [feishuInstallerNotice, setFeishuInstallerNotice] = useState('')
+  const [feishuInstallerPendingPrompt, setFeishuInstallerPendingPrompt] =
+    useState<Awaited<ReturnType<typeof window.api.getFeishuInstallerState>>['pendingPrompt']>(null)
   const [showFeishuInstallTutorial, setShowFeishuInstallTutorial] = useState(false)
   const [botError, setBotError] = useState('')
   const [botListRefreshing, setBotListRefreshing] = useState(false)
@@ -81,7 +87,8 @@ export default function FeishuBotManagerModal({
   const [repairingIsolation, setRepairingIsolation] = useState(false)
   const [isolationDrift, setIsolationDrift] = useState(() => detectFeishuIsolationDrift(null))
 
-  const feishuInstallerPromptAutoReplyKeyRef = useRef('')
+  const feishuInstallerHandledPromptIdRef = useRef('')
+  const previousOpenedRef = useRef(opened)
 
   const feishuBotsOrdered = useMemo(
     () =>
@@ -107,6 +114,7 @@ export default function FeishuBotManagerModal({
   )
   const feishuInstallerHasLiveQr =
     feishuInstallerAsciiQr.length > 0 || feishuInstallerQrUrl !== FEISHU_OFFICIAL_GUIDE_URL
+  const feishuInstallerManualInputBlocked = shouldDisableFeishuInstallerManualInput(feishuInstallerPendingPrompt)
 
   const applyFeishuInstallerSnapshot = useCallback(
     (snapshot: Awaited<ReturnType<typeof window.api.getFeishuInstallerState>>) => {
@@ -115,6 +123,7 @@ export default function FeishuBotManagerModal({
       setFeishuInstallerOutput(snapshot.output || '')
       setFeishuInstallerExitCode(snapshot.code ?? null)
       setFeishuInstallerCanceled(Boolean(snapshot.canceled))
+      setFeishuInstallerPendingPrompt(snapshot.pendingPrompt || null)
     },
     []
   )
@@ -171,7 +180,7 @@ export default function FeishuBotManagerModal({
       applyFeishuInstallerSnapshot(snapshot)
       await refreshFeishuBotsFromConfig()
     } catch (e: any) {
-      setBotError(e?.message || '刷新飞书 Bot 列表失败')
+      setBotError(e?.message || '刷新飞书机器人列表失败')
     } finally {
       setBotListRefreshing(false)
     }
@@ -180,11 +189,11 @@ export default function FeishuBotManagerModal({
   useEffect(() => {
     const unsubscribe = window.api.onFeishuInstallerEvent((payload) => {
       if (payload.type === 'started') {
-        feishuInstallerPromptAutoReplyKeyRef.current = ''
         setFeishuInstallerSessionId(payload.sessionId || '')
         setFeishuInstallerRunning(true)
         setFeishuInstallerExitCode(null)
         setFeishuInstallerCanceled(false)
+        setFeishuInstallerPendingPrompt(payload.pendingPrompt || null)
         return
       }
 
@@ -193,11 +202,16 @@ export default function FeishuBotManagerModal({
         return
       }
 
+      if (payload.type === 'prompt') {
+        setFeishuInstallerPendingPrompt(payload.pendingPrompt || null)
+        return
+      }
+
       if (payload.type === 'exit') {
         setFeishuInstallerRunning(false)
         setFeishuInstallerExitCode(payload.code ?? null)
         setFeishuInstallerCanceled(Boolean(payload.canceled))
-        feishuInstallerPromptAutoReplyKeyRef.current = ''
+        setFeishuInstallerPendingPrompt(null)
         void refreshFeishuBotsFromConfig().catch(() => {
           // Ignore refresh failure after installer exit.
         })
@@ -213,33 +227,59 @@ export default function FeishuBotManagerModal({
   }, [opened, refreshBotModalState])
 
   useEffect(() => {
+    const wasOpened = previousOpenedRef.current
+    previousOpenedRef.current = opened
+
     if (!opened) {
+      if (wasOpened && isFeishuCreateBotConfirmationPrompt(feishuInstallerPendingPrompt)) {
+        void window.api.stopFeishuInstaller().catch(() => {
+          // Best effort only; modal reopen will re-sync installer state.
+        })
+      }
       setShowFeishuInstallTutorial(false)
+      feishuInstallerHandledPromptIdRef.current = ''
     }
-  }, [opened])
+  }, [opened, feishuInstallerPendingPrompt])
 
   useEffect(() => {
-    if (!opened || !feishuInstallerRunning) return
-    const promptKeyBase = extractFeishuExistingBotPromptKey(feishuInstallerOutput)
-    if (!promptKeyBase) return
+    if (!opened) return
+    if (!isFeishuCreateBotConfirmationPrompt(feishuInstallerPendingPrompt)) {
+      feishuInstallerHandledPromptIdRef.current = ''
+      return
+    }
 
-    const autoReply = feishuBotSetupMode === 'link' ? 'y' : 'n'
-    const promptKey = `${feishuBotSetupMode}:${promptKeyBase}:${autoReply}`
-    if (feishuInstallerPromptAutoReplyKeyRef.current === promptKey) return
+    const promptId = feishuInstallerPendingPrompt.promptId
+    if (!promptId || feishuInstallerHandledPromptIdRef.current === promptId) return
 
-    feishuInstallerPromptAutoReplyKeyRef.current = promptKey
-    setFeishuInstallerNotice(
-      feishuBotSetupMode === 'link'
-        ? '检测到官方安装器询问是否复用已存在的飞书机器人，Qclaw 已自动回复 "Y"。'
-        : '检测到官方安装器询问是否复用已存在的飞书机器人，Qclaw 已自动回复 "n"，继续走新建机器人流程。'
-    )
+    const sessionId = String(feishuInstallerSessionId || '').trim()
+    if (!sessionId) return
 
-    void sendFeishuInstallerInput(`${autoReply}\n`).then((ok) => {
-      if (!ok) {
-        feishuInstallerPromptAutoReplyKeyRef.current = ''
+    feishuInstallerHandledPromptIdRef.current = promptId
+    const confirmed = window.confirm(buildFeishuCreateBotConfirmationMessage(feishuInstallerPendingPrompt))
+
+    void window.api.answerFeishuInstallerPrompt(
+      sessionId,
+      promptId,
+      confirmed ? 'confirm' : 'cancel'
+    ).then((result) => {
+      if (!result.ok) {
+        feishuInstallerHandledPromptIdRef.current = ''
+        setBotError(result.message || (confirmed ? '继续新建机器人失败' : '取消新建机器人失败'))
+        return
       }
+
+      setFeishuInstallerPendingPrompt(null)
+      setFeishuInstallerNotice(
+        confirmed
+          ? '已确认新建机器人，Qclaw 正在继续官方安装器流程。'
+          : '已取消新建机器人；当前安装流程已停止，你可以稍后重新发起。'
+      )
+      setBotError('')
+    }).catch((e: any) => {
+      feishuInstallerHandledPromptIdRef.current = ''
+      setBotError(e?.message || (confirmed ? '继续新建机器人失败' : '取消新建机器人失败'))
     })
-  }, [opened, feishuBotSetupMode, feishuInstallerOutput, feishuInstallerRunning])
+  }, [opened, feishuInstallerPendingPrompt, feishuInstallerSessionId])
 
   const sendFeishuInstallerInput = async (input: string) => {
     const sessionId = String(feishuInstallerSessionId || '').trim()
@@ -308,11 +348,11 @@ export default function FeishuBotManagerModal({
         reason: 'dashboard-delete-feishu-bot',
       })
       if (!writeResult.ok) {
-        throw new Error(writeResult.message || '删除飞书 Bot 配置失败')
+        throw new Error(writeResult.message || '删除飞书机器人配置失败')
       }
       await refreshFeishuBotsFromConfig()
     } catch (e: any) {
-      setBotError(e?.message || '删除飞书 Bot 失败')
+      setBotError(e?.message || '删除飞书机器人失败')
     } finally {
       setDeletingBotId('')
     }
@@ -335,11 +375,11 @@ export default function FeishuBotManagerModal({
         reason: 'unknown',
       })
       if (!writeResult.ok) {
-        throw new Error(writeResult.message || '修复飞书多 Bot 隔离写入失败')
+        throw new Error(writeResult.message || '修复飞书多机器人隔离写入失败')
       }
       await refreshFeishuBotsFromConfig()
     } catch (e: any) {
-      setBotError(e?.message || '修复飞书多 Bot 隔离失败')
+      setBotError(e?.message || '修复飞书多机器人隔离失败')
     } finally {
       setRepairingIsolation(false)
     }
@@ -359,7 +399,7 @@ export default function FeishuBotManagerModal({
       size="xl"
       title={
         <Group gap="xs">
-          <Text size="sm" fw={600}>飞书 Bot 管理</Text>
+          <Text size="sm" fw={600}>飞书机器人管理</Text>
           <Tooltip label="刷新列表" withArrow>
             <ActionIcon
               variant="subtle"
@@ -375,11 +415,11 @@ export default function FeishuBotManagerModal({
       }
     >
       <div className="space-y-3">
-        {/* Bot 列表 */}
+        {/* 机器人列表 */}
         <ScrollArea.Autosize mah={200}>
           <div className="space-y-1.5">
             {feishuBotsOrdered.length === 0 && (
-              <Text size="xs" c="dimmed" ta="center" py="md">还没有已配置的飞书 Bot</Text>
+              <Text size="xs" c="dimmed" ta="center" py="md">还没有已配置的飞书机器人</Text>
             )}
 
             {feishuBotsOrdered.map((bot) => {
@@ -433,10 +473,10 @@ export default function FeishuBotManagerModal({
           </div>
         </ScrollArea.Autosize>
 
-        {/* 多 Bot 隔离 */}
+        {/* 多机器人隔离 */}
         <Group justify="space-between" wrap="nowrap" className="border app-border rounded-lg px-3 py-2.5">
           <div style={{ minWidth: 0, flex: 1 }}>
-            <Text size="xs" fw={500} className="app-text-primary">多 Bot 隔离状态</Text>
+            <Text size="xs" fw={500} className="app-text-primary">多机器人隔离状态</Text>
             <Text size="xs" c="dimmed">
               {isolationDrift.needsRepair
                 ? '检测到隔离配置不完整'
@@ -618,10 +658,10 @@ export default function FeishuBotManagerModal({
           </Group>
 
           <Group gap={4}>
-            <Button variant="light" size="compact-xs" onClick={() => void sendFeishuInstallerInput('\u001b[A')} disabled={!feishuInstallerRunning}>上移</Button>
-            <Button variant="light" size="compact-xs" onClick={() => void sendFeishuInstallerInput('\u001b[B')} disabled={!feishuInstallerRunning}>下移</Button>
-            <Button variant="light" size="compact-xs" onClick={() => void sendFeishuInstallerInput('\r')} disabled={!feishuInstallerRunning}>确认</Button>
-            <Button variant="subtle" size="compact-xs" color="red" onClick={() => void sendFeishuInstallerInput('\u0003')} disabled={!feishuInstallerRunning}>Ctrl+C</Button>
+            <Button variant="light" size="compact-xs" onClick={() => void sendFeishuInstallerInput('\u001b[A')} disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}>上移</Button>
+            <Button variant="light" size="compact-xs" onClick={() => void sendFeishuInstallerInput('\u001b[B')} disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}>下移</Button>
+            <Button variant="light" size="compact-xs" onClick={() => void sendFeishuInstallerInput('\r')} disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}>确认</Button>
+            <Button variant="subtle" size="compact-xs" color="red" onClick={() => void sendFeishuInstallerInput('\u0003')} disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}>Ctrl+C</Button>
           </Group>
 
           <ScrollArea.Autosize mah={180} className="rounded-md" style={{ backgroundColor: 'var(--app-bg-inset)' }}>
@@ -637,7 +677,7 @@ export default function FeishuBotManagerModal({
               value={feishuInstallerInput}
               onChange={(e) => setFeishuInstallerInput(e.currentTarget.value)}
               placeholder="向安装器发送自定义输入"
-              disabled={!feishuInstallerRunning}
+              disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked}
             />
             <Button
               variant="light"
@@ -649,7 +689,7 @@ export default function FeishuBotManagerModal({
                   if (ok) setFeishuInstallerInput('')
                 })
               }}
-              disabled={!feishuInstallerRunning || !feishuInstallerInput.trim()}
+              disabled={!feishuInstallerRunning || feishuInstallerManualInputBlocked || !feishuInstallerInput.trim()}
             >
               发送
             </Button>
@@ -657,7 +697,7 @@ export default function FeishuBotManagerModal({
         </div>
 
         {feishuInstallerNotice && (
-          <Alert color="blue" variant="light" styles={{ title: { fontSize: 'var(--mantine-font-size-xs)' } }} title="自动回复">
+          <Alert color="blue" variant="light" styles={{ title: { fontSize: 'var(--mantine-font-size-xs)' } }} title="安装器提示">
             <Text size="xs">{feishuInstallerNotice}</Text>
           </Alert>
         )}

@@ -277,6 +277,17 @@ describe('dashboard plugin center helpers', () => {
     expect(dashboardSource).toContain('window.api.repairManagedChannelPlugin')
   })
 
+  it('does not keep the redundant plugin center helper copy', () => {
+    const dashboardSource = fs.readFileSync(
+      path.join(process.cwd(), 'src', 'pages', 'Dashboard.tsx'),
+      'utf8'
+    )
+
+    expect(dashboardSource).not.toContain(
+      '选择一个渠道后，Qclaw 会先检查并修复损坏插件环境，再安装对应插件。整个过程中都会显示进度条。'
+    )
+  })
+
   it('re-checks Gateway with strict ensure after a repairable weixin reload failure before closing the plugin center as success', () => {
     const dashboardSource = fs.readFileSync(
       path.join(process.cwd(), 'src', 'pages', 'Dashboard.tsx'),
