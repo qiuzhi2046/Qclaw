@@ -73,7 +73,7 @@ const defaultWindowPolicy = desktopPolicy?.window || {
   defaultHeight: 600,
   minimumWidth: 640,
   minimumHeight: 480,
-  backgroundColor: '#09090b',
+  backgroundColor: '#ffffff',
   safeMargin: 32,
 }
 
@@ -86,7 +86,7 @@ export const DESKTOP_WINDOW_POLICY = Object.freeze({
   defaultHeight: toPositiveInteger(defaultWindowPolicy.defaultHeight, 600),
   minimumWidth: toPositiveInteger(defaultWindowPolicy.minimumWidth, 640),
   minimumHeight: toPositiveInteger(defaultWindowPolicy.minimumHeight, 480),
-  backgroundColor: String(defaultWindowPolicy.backgroundColor || '#09090b').trim() || '#09090b',
+  backgroundColor: String(defaultWindowPolicy.backgroundColor || '#ffffff').trim() || '#ffffff',
   safeMargin: toNonNegativeInteger(defaultWindowPolicy.safeMargin, 32),
   disableHardwareAccelerationWindowsReleasePrefixes: (
     defaultCompatibilityPolicy.disableHardwareAccelerationWindowsReleasePrefixes || ['6.1']

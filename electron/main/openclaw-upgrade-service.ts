@@ -7,6 +7,8 @@ import {
   isStrictOpenClawPolicyVersion,
   resolveOpenClawVersionEnforcement,
   supportsPinnedOpenClawCorrection,
+  setDynamicTargetVersion,
+  getEffectiveTargetVersion,
 } from '../../src/shared/openclaw-version-policy'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { checkOpenClaw, gatewayHealth, gatewayStart, readConfig, runCli, runDirect, runDoctor, runShell, writeConfig } from './cli'
@@ -67,17 +69,18 @@ function resolveActiveCandidate(candidates: OpenClawInstallCandidate[]): OpenCla
 
 function buildManualUpgradeHint(candidate: OpenClawInstallCandidate | null): string | undefined {
   if (!candidate) return undefined
+  const targetDesc = '最新版本'
   if (!isStrictOpenClawPolicyVersion(candidate.version)) {
-    return '当前 OpenClaw 版本号无法可靠解析。为避免误改现有安装，请先确认 `openclaw --version` 输出正常，并手动切换到 2026.3.24 后再回到 Qclaw。'
+    return `当前 OpenClaw 版本号无法可靠解析。为避免误改现有安装，请先确认 \`openclaw --version\` 输出正常，并手动切换到${targetDesc}后再回到 Qclaw。`
   }
   if (candidate.installSource === 'homebrew' && !supportsPinnedOpenClawCorrection(candidate.installSource, candidate)) {
-    return '当前 OpenClaw 由 Homebrew 管理，程序内无法安全回退到 2026.3.24。请先在 Homebrew 环境中手动切换到 2026.3.24；若当前 Homebrew 源无法提供该版本，请先移除 brew 安装后，再让 Qclaw 重新安装 2026.3.24。'
+    return `当前 OpenClaw 由 Homebrew 管理，程序内无法安全升级。请先在 Homebrew 环境中手动升级到${targetDesc}；若当前 Homebrew 源无法提供该版本，请先移除 brew 安装后，再让 Qclaw 重新安装${targetDesc}。`
   }
   if (candidate.installSource === 'custom') {
-    return '当前 OpenClaw 来自自定义路径，程序内无法安全改写。请在原安装位置或原包管理器中手动安装 2026.3.24，并确认 PATH 指向该版本后再回到 Qclaw。'
+    return `当前 OpenClaw 来自自定义路径，程序内无法安全改写。请在原安装位置或原包管理器中手动安装${targetDesc}，并确认 PATH 指向该版本后再回到 Qclaw。`
   }
   if (candidate.installSource === 'unknown') {
-    return '当前 OpenClaw 安装来源无法识别。为避免误改系统环境，请先确认 which openclaw 对应的实际路径，并将 PATH 切换到 2026.3.24，或移除该版本后让 Qclaw 重新安装。'
+    return `当前 OpenClaw 安装来源无法识别。为避免误改系统环境，请先确认 which openclaw 对应的实际路径，并将 PATH 切换到${targetDesc}，或移除该版本后让 Qclaw 重新安装。`
   }
   return undefined
 }
@@ -687,6 +690,18 @@ async function runSourceAwareUpgrade(
 }
 
 export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult> {
+  // 先查询 npm latest 版本，更新动态目标
+  try {
+    const { checkOpenClawLatestVersion } = await import('./openclaw-latest-version-service')
+    const latestResult = await checkOpenClawLatestVersion()
+    if (latestResult.ok && latestResult.latestVersion) {
+      setDynamicTargetVersion(latestResult.latestVersion)
+    }
+  } catch {
+    // 查询失败不阻断，回退到 PINNED_OPENCLAW_VERSION
+  }
+
+  const effectiveTarget = getEffectiveTargetVersion()
   const discovery = await discoverOpenClawInstallations()
   const activeCandidate = resolveActiveCandidate(discovery.candidates)
   const health = activeCandidate ? await gatewayHealth().catch(() => ({ running: false, raw: '' })) : { running: false, raw: '' }
@@ -697,7 +712,7 @@ export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult
       ok: false,
       activeCandidate: null,
       currentVersion: null,
-      targetVersion: PINNED_OPENCLAW_VERSION,
+      targetVersion: effectiveTarget,
       latestCheck: null,
       policyState: null,
       enforcement: null,
@@ -725,11 +740,15 @@ export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult
     warnings.push(manualHint)
   }
 
+  // 判断是否已是最新：当前版本 >= 有效目标版本
+  const isUpToDate = policy.policyState === 'supported_target' ||
+    (activeCandidate.version && compareLooseVersions(activeCandidate.version, effectiveTarget) >= 0)
+
   return {
     ok: !policy.blocksContinue,
     activeCandidate,
     currentVersion: activeCandidate.version || null,
-    targetVersion: policy.targetVersion,
+    targetVersion: policy.targetVersion || effectiveTarget,
     latestCheck: null,
     policyState: policy.policyState,
     enforcement: policy.enforcement,
@@ -737,7 +756,7 @@ export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult
     blocksContinue: policy.blocksContinue,
     canSelfHeal: policy.canSelfHeal,
     canAutoUpgrade,
-    upToDate: policy.policyState === 'supported_target',
+    upToDate: Boolean(isUpToDate),
     gatewayRunning: Boolean(health.running),
     warnings,
     manualHint,
