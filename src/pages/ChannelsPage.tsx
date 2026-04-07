@@ -158,6 +158,7 @@ export default function ChannelsPage() {
   const [togglingChannelId, setTogglingChannelId] = useState<string | null>(null)
   const [repairingPluginChannelId, setRepairingPluginChannelId] = useState<string | null>(null)
   const [legacyFeishuAgentIds, setLegacyFeishuAgentIds] = useState<string[]>([])
+  const [configNeedsSyncChannels, setConfigNeedsSyncChannels] = useState<string[]>([])
   const [showModelModal, setShowModelModal] = useState(false)
   const [selectedModelChannel, setSelectedModelChannel] = useState<ChannelInfo | null>(null)
   const [modelOptions, setModelOptions] = useState<ModelSelectOption[]>([])
@@ -231,10 +232,17 @@ export default function ChannelsPage() {
 
       const normalizedConfig = feishuPluginState?.normalizedConfig || sanitizeFeishuPluginConfig(config)
       if (feishuPluginState?.configChanged) {
+        setConfigNeedsSyncChannels((prev) =>
+          prev.includes('feishu') ? prev : [...prev, 'feishu']
+        )
         void window.api.applyConfigPatchGuarded({
           beforeConfig: config,
           afterConfig: normalizedConfig,
           reason: 'unknown',
+        }).then((writeResult) => {
+          if (writeResult?.ok) {
+            setConfigNeedsSyncChannels((prev) => prev.filter((ch) => ch !== 'feishu'))
+          }
         }).catch(() => {
           // Keep listing channels even if the background healing write fails.
         })

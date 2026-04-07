@@ -15,8 +15,11 @@ import {
 import type { OfficialChannelActionResult, OfficialChannelAdapterId } from '../../src/shared/official-channel-integration'
 import { isPluginAlreadyInstalledError } from '../../src/shared/openclaw-cli-errors'
 import type { CliResult, RepairIncompatibleExtensionPluginsOptions } from './cli'
-import { withManagedOperationLock } from './managed-operation-lock'
+import { withManagedOperationLock, ManagedOperationLockTimeoutError } from './managed-operation-lock'
 import type { RepairIncompatibleExtensionsResult } from './plugin-install-safety'
+import { reconcileManagedPluginConfig } from './managed-plugin-config-reconciler'
+import { dingtalkPreflightHook } from './dingtalk-official-channel'
+import { sendRepairProgress, type RepairProgressEvent } from './renderer-notification-bridge'
 
 interface GatewayReloadLikeResult {
   ok: boolean
@@ -351,6 +354,23 @@ export function createManagedChannelPluginLifecycleService(
   }
   const repairCooldowns = new Map<string, ManagedChannelRepairCooldownState>()
 
+  async function resolveHomeDir(): Promise<string | null> {
+    try {
+      const { getOpenClawPaths } = await import('./cli')
+      const paths = await getOpenClawPaths()
+      return paths.homeDir || null
+    } catch {
+      return null
+    }
+  }
+
+  function resolvePreflightHook(
+    channelId: ManagedChannelLifecycleId
+  ): ((context: { homeDir: string; config: Record<string, any> }) => Promise<{ ok: boolean; evidence?: string[]; error?: string }>) | null {
+    if (channelId === 'dingtalk') return dingtalkPreflightHook
+    return null
+  }
+
   function createCapabilities(spec: ManagedChannelPluginLifecycleSpec) {
     return createManagedChannelCapabilitySnapshot({
       supportsBackgroundRestore: spec.supportsBackgroundRestore,
@@ -489,15 +509,45 @@ export function createManagedChannelPluginLifecycleService(
       }
     }
 
+    // Phase 2: unified config reconciliation via reconciler
+    const homeDir = await resolveHomeDir()
+    if (homeDir) {
+      await reconcileManagedPluginConfig(
+        spec.channelId,
+        homeDir,
+        { scope: 'plugins-only', checkDisk: true, detectOrphans: true, apply: true, caller: 'preflight' }
+      ).catch(() => null)
+    }
+
+    // Phase 2: channel-specific preflight hook (e.g. dingtalk doctor --fix)
+    const preflightHook = resolvePreflightHook(spec.channelId)
+    if (preflightHook && homeDir) {
+      const currentConfig = await resolvedDependencies.readConfig().catch(() => null)
+      const hookResult = await preflightHook({ homeDir, config: currentConfig || {} }).catch(() => ({
+        ok: false as const,
+        error: 'preflight hook threw an exception',
+      }))
+      if (!hookResult.ok) {
+        return {
+          kind: 'prepare-failed',
+          channelId: spec.channelId,
+          pluginScope: 'channel',
+          entityScope: spec.entityScope,
+          error: hookResult.error || 'channel-specific preflight check failed',
+        }
+      }
+    }
+
     if (spec.installStrategy === 'interactive-installer') {
-      return withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, async () => {
+      try {
+      return await withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, async () => {
         const preflightRepair = await repairManagedPluginScope(spec)
         if (!preflightRepair.ok) {
           recordFailure(spec.channelId, preflightRepair.failureKind || 'prepare-repair-failed')
           return {
-            kind: 'prepare-failed',
+            kind: 'prepare-failed' as const,
             channelId: spec.channelId,
-            pluginScope: 'channel',
+            pluginScope: 'channel' as const,
             entityScope: spec.entityScope,
             error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
           }
@@ -508,15 +558,27 @@ export function createManagedChannelPluginLifecycleService(
           .then((result) => result.status)
           .catch(() => createEmptyStatus(spec, '该渠道需要交互式安装器。'))
         return {
-          kind: 'manual-action-required',
+          kind: 'manual-action-required' as const,
           channelId: spec.channelId,
-          pluginScope: 'channel',
+          pluginScope: 'channel' as const,
           entityScope: spec.entityScope,
-          action: 'launch-interactive-installer',
+          action: 'launch-interactive-installer' as const,
           reason: '该渠道需要交互式安装器，不能在后台自动安装。',
           status,
         }
       })
+      } catch (error) {
+        if (error instanceof ManagedOperationLockTimeoutError) {
+          return {
+            kind: 'prepare-failed' as const,
+            channelId: spec.channelId,
+            pluginScope: 'channel' as const,
+            entityScope: spec.entityScope,
+            error: `预检操作等待超时（${Math.round(error.timeoutMs / 1000)}秒），请稍后重试。`,
+          }
+        }
+        throw error
+      }
     }
 
     const inspection = await inspectManagedChannelPlugin(spec.channelId)
@@ -564,6 +626,205 @@ export function createManagedChannelPluginLifecycleService(
     }
   }
 
+  function emitRepairProgress(channelId: string, phase: string, status: RepairProgressEvent['status'], message: string): void {
+    sendRepairProgress({ channelId, phase, status, message, timestamp: Date.now() })
+  }
+
+  async function repairViaInteractiveInstaller(
+    spec: ManagedChannelPluginLifecycleSpec
+  ): Promise<ManagedChannelPluginRepairResult> {
+    const preflightRepair = await repairManagedPluginScope(spec)
+    if (!preflightRepair.ok) {
+      if (preflightRepair.failureKind && preflightRepair.failedPluginIds && preflightRepair.failedPaths) {
+        recordFailure(spec.channelId, preflightRepair.failureKind)
+        return {
+          kind: 'quarantine-failed',
+          channelId: spec.channelId,
+          pluginScope: 'channel',
+          entityScope: spec.entityScope,
+          failureKind: preflightRepair.failureKind,
+          failedPluginIds: preflightRepair.failedPluginIds,
+          failedPaths: preflightRepair.failedPaths,
+          status: createEmptyStatus(spec, preflightRepair.summary || '插件隔离失败'),
+        }
+      }
+      recordFailure(spec.channelId, 'repair-failed')
+      return {
+        kind: 'repair-failed',
+        channelId: spec.channelId,
+        pluginScope: 'channel',
+        entityScope: spec.entityScope,
+        status: createEmptyStatus(spec, preflightRepair.summary || '损坏插件环境修复失败'),
+        error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
+      }
+    }
+    resetFailure(spec.channelId)
+    return {
+      kind: 'manual-action-required',
+      channelId: spec.channelId,
+      pluginScope: 'channel',
+      entityScope: spec.entityScope,
+      action: 'launch-interactive-installer',
+      reason: '该渠道需要交互式安装器，不能通过后台修复自动完成。',
+      status: createEmptyStatus(spec, '该渠道需要交互式安装器。'),
+    }
+  }
+
+  async function repairViaOfficialAdapter(
+    spec: ManagedChannelPluginLifecycleSpec,
+    officialAdapterId: OfficialChannelAdapterId
+  ): Promise<ManagedChannelPluginRepairResult> {
+    const result = await resolvedDependencies.repairOfficialChannel(officialAdapterId)
+    if (!result.ok) {
+      recordFailure(spec.channelId, 'official-repair-failed')
+      return {
+        kind: 'repair-failed',
+        channelId: spec.channelId,
+        pluginScope: 'channel',
+        entityScope: spec.entityScope,
+        status: createEmptyStatus(spec, result.summary),
+        error: result.message || result.summary,
+      }
+    }
+    resetFailure(spec.channelId)
+    const status = await resolvedDependencies.getOfficialChannelStatus(officialAdapterId)
+    return {
+      kind: 'ok',
+      channelId: spec.channelId,
+      pluginScope: 'channel',
+      entityScope: spec.entityScope,
+      action: result.installedThisRun ? 'installed' : 'reused-existing',
+      status,
+    }
+  }
+
+  async function repairAndInstallGenericPlugin(
+    spec: ManagedChannelPluginLifecycleSpec
+  ): Promise<
+    | { ok: false; result: ManagedChannelPluginRepairResult }
+    | { ok: true; action: 'reused-existing' | 'installed' | 'restored' }
+  > {
+    const repairResult = await repairManagedPluginScope(spec)
+    if (!repairResult.ok) {
+      if (repairResult.failureKind && repairResult.failedPluginIds && repairResult.failedPaths) {
+        recordFailure(spec.channelId, repairResult.failureKind)
+        return { ok: false, result: {
+          kind: 'quarantine-failed',
+          channelId: spec.channelId,
+          pluginScope: 'channel',
+          entityScope: spec.entityScope,
+          failureKind: repairResult.failureKind,
+          failedPluginIds: repairResult.failedPluginIds,
+          failedPaths: repairResult.failedPaths,
+          status: createEmptyStatus(spec, repairResult.summary || '插件隔离失败'),
+        } }
+      }
+      recordFailure(spec.channelId, 'repair-failed')
+      return { ok: false, result: {
+        kind: 'repair-failed',
+        channelId: spec.channelId,
+        pluginScope: 'channel',
+        entityScope: spec.entityScope,
+        status: createEmptyStatus(spec, repairResult.summary || '损坏插件环境修复失败'),
+        error: repairResult.summary || repairResult.stderr || '损坏插件环境修复失败',
+      } }
+    }
+
+    const installedBefore = await resolvedDependencies.isPluginInstalledOnDisk(spec.canonicalPluginId)
+    let action: 'reused-existing' | 'installed' | 'restored' = repairResult.repaired ? 'restored' : 'reused-existing'
+    if (!installedBefore) {
+      const installResult = spec.installStrategy === 'npx'
+        ? await resolvedDependencies.installPluginNpx(spec.npxSpecifier || '', [spec.canonicalPluginId])
+        : await resolvedDependencies.installPlugin(spec.packageName || '', [spec.canonicalPluginId])
+      if (!installResult.ok) {
+        const installedAfterAlreadyExists = isSafeAlreadyInstalledManagedPluginInstallFailure(installResult)
+          ? await resolvedDependencies.isPluginInstalledOnDisk(spec.canonicalPluginId)
+          : false
+        if (!installedAfterAlreadyExists) {
+          recordFailure(spec.channelId, 'install-failed')
+          return { ok: false, result: {
+            kind: 'install-failed',
+            channelId: spec.channelId,
+            pluginScope: 'channel',
+            entityScope: spec.entityScope,
+            attemptedInstaller: spec.installStrategy,
+            status: createEmptyStatus(spec, installResult.stderr || `${spec.channelId} 插件安装失败`),
+            error: installResult.stderr || `${spec.channelId} 插件安装失败`,
+          } }
+        }
+        action = repairResult.repaired ? 'restored' : 'reused-existing'
+      } else {
+        action = 'installed'
+      }
+    }
+    return { ok: true, action }
+  }
+
+  async function reconcileAndWriteConfig(
+    spec: ManagedChannelPluginLifecycleSpec
+  ): Promise<
+    | { ok: false; result: ManagedChannelPluginRepairResult }
+    | { ok: true; status: ManagedChannelPluginStatusView }
+  > {
+    const statusBeforeNormalize = await buildGenericStatus(spec, resolvedDependencies)
+    if (statusBeforeNormalize.normalizedConfig.changed && !statusBeforeNormalize.configAvailable) {
+      recordFailure(spec.channelId, 'repair-failed')
+      return { ok: false, result: {
+        kind: 'repair-failed',
+        channelId: spec.channelId,
+        pluginScope: 'channel',
+        entityScope: spec.entityScope,
+        status: statusBeforeNormalize.status,
+        error: '当前 OpenClaw 配置读取失败或格式异常，已停止自动修复以避免覆盖现有配置。',
+      } }
+    }
+    if (statusBeforeNormalize.normalizedConfig.changed) {
+      emitRepairProgress(spec.channelId, 'config-write', 'in-progress', '正在同步配置...')
+      const { applyConfigPatchGuarded } = await import('./openclaw-config-coordinator')
+      await applyConfigPatchGuarded({
+        beforeConfig: statusBeforeNormalize.currentConfig,
+        afterConfig: statusBeforeNormalize.normalizedConfig.config,
+        reason: 'managed-channel-plugin-repair',
+      })
+    }
+    return { ok: true, status: statusBeforeNormalize.status }
+  }
+
+  async function reloadGatewayAfterRepair(
+    spec: ManagedChannelPluginLifecycleSpec,
+    action: 'reused-existing' | 'installed' | 'restored',
+    fallbackStatus: ManagedChannelPluginStatusView
+  ): Promise<ManagedChannelPluginRepairResult> {
+    emitRepairProgress(spec.channelId, 'gateway-reload', 'in-progress', '正在重载网关...')
+    const reloadResult = await resolvedDependencies.reloadGatewayForConfigChange(
+      'managed-channel-plugin-repair',
+      { preferEnsureWhenNotRunning: true }
+    )
+    if (!reloadResult.ok || reloadResult.running !== true) {
+      recordFailure(spec.channelId, 'gateway-reload-failed')
+      return {
+        kind: 'gateway-reload-failed',
+        channelId: spec.channelId,
+        pluginScope: 'channel',
+        entityScope: spec.entityScope,
+        reloadReason: reloadResult.summary || reloadResult.stderr || '网关重载失败',
+        retryable: true,
+        status: fallbackStatus,
+        failedPhase: 'gateway-reload',
+      }
+    }
+    resetFailure(spec.channelId)
+    const finalStatus = await buildGenericStatus(spec, resolvedDependencies)
+    return {
+      kind: 'ok',
+      channelId: spec.channelId,
+      pluginScope: 'channel',
+      entityScope: spec.entityScope,
+      action,
+      status: finalStatus.status,
+    }
+  }
+
   async function repairManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginRepairResult> {
     const spec = getManagedChannelLifecycleSpec(channelId)
     if (!spec) {
@@ -584,173 +845,57 @@ export function createManagedChannelPluginLifecycleService(
           supportsInteractiveRepairUi: true,
           detectConfigured: () => false,
           normalizeConfig: (config) => ({ config: hasOwnRecord(config) ? config : {}, changed: false }),
+          reconcileConfig: (config) => ({ config: hasOwnRecord(config) ? config : {}, changed: false }),
         }, '不支持的 managed channel'),
         error: `Unsupported managed channel: ${channelId}`,
       }
     }
 
-    return withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, async () => {
-      if (spec.installStrategy === 'interactive-installer') {
-        const preflightRepair = await repairManagedPluginScope(spec)
-        if (!preflightRepair.ok) {
-          if (preflightRepair.failureKind && preflightRepair.failedPluginIds && preflightRepair.failedPaths) {
-            recordFailure(spec.channelId, preflightRepair.failureKind)
-            return {
-              kind: 'quarantine-failed',
-              channelId: spec.channelId,
-              pluginScope: 'channel',
-              entityScope: spec.entityScope,
-              failureKind: preflightRepair.failureKind,
-              failedPluginIds: preflightRepair.failedPluginIds,
-              failedPaths: preflightRepair.failedPaths,
-              status: createEmptyStatus(spec, preflightRepair.summary || '插件隔离失败'),
-            }
-          }
-          recordFailure(spec.channelId, 'repair-failed')
-          return {
-            kind: 'repair-failed',
-            channelId: spec.channelId,
-            pluginScope: 'channel',
-            entityScope: spec.entityScope,
-            status: createEmptyStatus(spec, preflightRepair.summary || '损坏插件环境修复失败'),
-            error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
-          }
+    try {
+      return await withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, async () => {
+        if (spec.installStrategy === 'interactive-installer') {
+          return repairViaInteractiveInstaller(spec)
         }
-        resetFailure(spec.channelId)
-        return {
-          kind: 'manual-action-required',
-          channelId: spec.channelId,
-          pluginScope: 'channel',
-          entityScope: spec.entityScope,
-          action: 'launch-interactive-installer',
-          reason: '该渠道需要交互式安装器，不能通过后台修复自动完成。',
-          status: createEmptyStatus(spec, '该渠道需要交互式安装器。'),
+        const officialAdapterId = toOfficialAdapterId(spec.channelId)
+        if (officialAdapterId) {
+          return repairViaOfficialAdapter(spec, officialAdapterId)
         }
-      }
-
-      const officialAdapterId = toOfficialAdapterId(spec.channelId)
-      if (officialAdapterId) {
-        const result = await resolvedDependencies.repairOfficialChannel(officialAdapterId)
-        if (!result.ok) {
-          recordFailure(spec.channelId, 'official-repair-failed')
-          return {
-            kind: 'repair-failed',
-            channelId: spec.channelId,
-            pluginScope: 'channel',
-            entityScope: spec.entityScope,
-            status: createEmptyStatus(spec, result.summary),
-            error: result.message || result.summary,
-          }
-        }
-        resetFailure(spec.channelId)
-        const status = await resolvedDependencies.getOfficialChannelStatus(officialAdapterId)
-        return {
-          kind: 'ok',
-          channelId: spec.channelId,
-          pluginScope: 'channel',
-          entityScope: spec.entityScope,
-          action: result.installedThisRun ? 'installed' : 'reused-existing',
-          status,
-        }
-      }
-
-      const repairResult = await repairManagedPluginScope(spec)
-      if (!repairResult.ok) {
-        if (repairResult.failureKind && repairResult.failedPluginIds && repairResult.failedPaths) {
-          recordFailure(spec.channelId, repairResult.failureKind)
-          return {
-            kind: 'quarantine-failed',
-            channelId: spec.channelId,
-            pluginScope: 'channel',
-            entityScope: spec.entityScope,
-            failureKind: repairResult.failureKind,
-            failedPluginIds: repairResult.failedPluginIds,
-            failedPaths: repairResult.failedPaths,
-            status: createEmptyStatus(spec, repairResult.summary || '插件隔离失败'),
-          }
-        }
-        recordFailure(spec.channelId, 'repair-failed')
+        const installOutcome = await repairAndInstallGenericPlugin(spec)
+        if (!installOutcome.ok) return installOutcome.result
+        const configOutcome = await reconcileAndWriteConfig(spec)
+        if (!configOutcome.ok) return configOutcome.result
+        return reloadGatewayAfterRepair(spec, installOutcome.action, configOutcome.status)
+      })
+    } catch (error) {
+      if (error instanceof ManagedOperationLockTimeoutError) {
+        recordFailure(spec.channelId, 'lock-timeout')
         return {
           kind: 'repair-failed',
           channelId: spec.channelId,
-          pluginScope: 'channel',
+          pluginScope: 'channel' as const,
           entityScope: spec.entityScope,
-          status: createEmptyStatus(spec, repairResult.summary || '损坏插件环境修复失败'),
-          error: repairResult.summary || repairResult.stderr || '损坏插件环境修复失败',
+          status: createEmptyStatus(spec, '修复操作等待超时'),
+          error: `修复操作等待超时（${Math.round(error.timeoutMs / 1000)}秒），可能有其他修复正在进行，请稍后重试。`,
         }
       }
+      throw error
+    }
+  }
 
-      const installedBefore = await resolvedDependencies.isPluginInstalledOnDisk(spec.canonicalPluginId)
-      let action: 'reused-existing' | 'installed' | 'restored' = repairResult.repaired ? 'restored' : 'reused-existing'
-      if (!installedBefore) {
-        const installResult = spec.installStrategy === 'npx'
-          ? await resolvedDependencies.installPluginNpx(spec.npxSpecifier || '', [spec.canonicalPluginId])
-          : await resolvedDependencies.installPlugin(spec.packageName || '', [spec.canonicalPluginId])
-        if (!installResult.ok) {
-          const installedAfterAlreadyExists = isSafeAlreadyInstalledManagedPluginInstallFailure(installResult)
-            ? await resolvedDependencies.isPluginInstalledOnDisk(spec.canonicalPluginId)
-            : false
-          if (!installedAfterAlreadyExists) {
-            recordFailure(spec.channelId, 'install-failed')
-            return {
-              kind: 'install-failed',
-              channelId: spec.channelId,
-              pluginScope: 'channel',
-              entityScope: spec.entityScope,
-              attemptedInstaller: spec.installStrategy,
-              status: createEmptyStatus(spec, installResult.stderr || `${spec.channelId} 插件安装失败`),
-              error: installResult.stderr || `${spec.channelId} 插件安装失败`,
-            }
-          }
-          action = repairResult.repaired ? 'restored' : 'reused-existing'
-        } else {
-          action = 'installed'
-        }
-      }
-
-      const statusBeforeNormalize = await buildGenericStatus(spec, resolvedDependencies)
-      if (statusBeforeNormalize.normalizedConfig.changed && !statusBeforeNormalize.configAvailable) {
-        recordFailure(spec.channelId, 'repair-failed')
-        return {
-          kind: 'repair-failed',
-          channelId: spec.channelId,
-          pluginScope: 'channel',
-          entityScope: spec.entityScope,
-          status: statusBeforeNormalize.status,
-          error: '当前 OpenClaw 配置读取失败或格式异常，已停止自动修复以避免覆盖现有配置。',
-        }
-      }
-      if (statusBeforeNormalize.normalizedConfig.changed) {
-        await resolvedDependencies.writeConfig(statusBeforeNormalize.normalizedConfig.config)
-      }
-
-      const reloadResult = await resolvedDependencies.reloadGatewayForConfigChange(
-        'managed-channel-plugin-repair',
+  async function retryGatewayReload(channelId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const result = await resolvedDependencies.reloadGatewayForConfigChange(
+        'managed-channel-plugin-repair-retry',
         { preferEnsureWhenNotRunning: true }
       )
-      if (!reloadResult.ok || reloadResult.running !== true) {
-        recordFailure(spec.channelId, 'gateway-reload-failed')
-        return {
-          kind: 'gateway-reload-failed',
-          channelId: spec.channelId,
-          pluginScope: 'channel',
-          entityScope: spec.entityScope,
-          reloadReason: reloadResult.summary || reloadResult.stderr || '网关重载失败',
-          status: statusBeforeNormalize.status,
-        }
+      if (result.ok && result.running === true) {
+        resetFailure(channelId)
+        return { ok: true }
       }
-
-      resetFailure(spec.channelId)
-      const finalStatus = await buildGenericStatus(spec, resolvedDependencies)
-      return {
-        kind: 'ok',
-        channelId: spec.channelId,
-        pluginScope: 'channel',
-        entityScope: spec.entityScope,
-        action,
-        status: finalStatus.status,
-      }
-    })
+      return { ok: false, error: result.summary || result.stderr || '网关重载重试失败' }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   return {
@@ -758,6 +903,7 @@ export function createManagedChannelPluginLifecycleService(
     inspectManagedChannelPlugin,
     prepareManagedChannelPluginForSetup,
     repairManagedChannelPlugin,
+    retryGatewayReload,
     getRepairCooldown(channelId: string) {
       return repairCooldowns.get(channelId) || null
     },

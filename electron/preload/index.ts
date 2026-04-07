@@ -188,6 +188,13 @@ export const api = {
   listWeixinAccounts: () => ipcRenderer.invoke('weixin:accounts:list'),
   removeWeixinAccount: (accountId: string) => ipcRenderer.invoke('weixin:accounts:remove', accountId),
 
+  // Repair progress (Phase 4 unified notifications)
+  onRepairProgress: (listener: (payload: Record<string, any>) => void) =>
+    subscribeToChannel('managed-plugin:repair:progress', listener),
+  onRepairResult: (listener: (payload: Record<string, any>) => void) =>
+    subscribeToChannel('managed-plugin:repair:result', listener),
+  getActiveRepairs: () => ipcRenderer.invoke('managed-plugin:repair:active'),
+
   // Channels
   channelsAdd: (channel: string, token: string) => ipcRenderer.invoke('channels:add', channel, token),
   setupDingtalkOfficialChannel: (formData: Record<string, string>) =>

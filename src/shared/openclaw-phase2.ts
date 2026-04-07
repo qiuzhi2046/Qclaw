@@ -112,6 +112,7 @@ export type OpenClawGuardedWriteReason =
   | 'dashboard-add-feishu-bot'
   | 'dashboard-delete-feishu-bot'
   | 'managed-channel-plugin-repair'
+  | 'managed-plugin-config-reconcile'
   | 'pairing-allowfrom-sync'
   | 'gateway-port-recovery'
   | 'unknown'

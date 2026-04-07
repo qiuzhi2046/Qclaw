@@ -36,6 +36,7 @@ import {
   type CliResult,
   type GatewayHealthCheckResult,
 } from './cli'
+import { notifyRepairResult } from './managed-channel-repair-notifications'
 import { guardedWriteConfig } from './openclaw-config-guard'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { findAvailableLoopbackPort, probeGatewayPortOwner } from './openclaw-gateway-probes'
@@ -516,6 +517,7 @@ async function tryRepairUnknownManagedChannels(
       ['managed-channel-plugin', 'repair', record.channelId]
     )
     const repairResult = await repairManagedChannelPlugin(record.channelId)
+    notifyRepairResult(repairResult, 'gateway-self-heal')
     if (repairResult.kind === 'ok') {
       continue
     }

@@ -738,6 +738,9 @@ export function registerIpcHandlers() {
   ipcMain.handle('weixin:accounts:list', () => listWeixinAccountState())
   ipcMain.handle('weixin:accounts:remove', (_e, accountId: string) => removeWeixinAccountState(accountId))
 
+  // Repair progress (stub — real data wired in a later stage)
+  ipcMain.handle('managed-plugin:repair:active', () => [])
+
   // Channels
   ipcMain.handle('channels:add', (_e, channel: string, token: string) => channelsAdd(channel, token))
   ipcMain.handle('channels:dingtalk:setup-official', (_e, formData: Record<string, string>) =>

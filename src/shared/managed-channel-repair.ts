@@ -27,7 +27,10 @@ function joinText(parts: Array<string | null | undefined>): string {
 }
 
 function getFailureSummary(result: ManagedChannelPluginRepairResult): string {
-  if (result.kind === 'gateway-reload-failed') return result.reloadReason
+  if (result.kind === 'gateway-reload-failed') {
+    const base = result.reloadReason
+    return result.retryable ? `${base}（可重试）` : base
+  }
   if (result.kind === 'install-failed' || result.kind === 'repair-failed') return result.error
   if (result.kind === 'config-sync-required') return result.reason
   if (result.kind === 'plugin-ready-channel-not-ready') return result.blockingReason
@@ -39,6 +42,20 @@ function getFailureSummary(result: ManagedChannelPluginRepairResult): string {
   }
   if (result.kind === 'manual-action-required') return result.reason
   return result.status.summary
+}
+
+function getRepairLogSuffix(result: ManagedChannelPluginRepairResult): string {
+  const parts: string[] = []
+  if ('failedPhase' in result && result.failedPhase) {
+    parts.push(`失败阶段：${result.failedPhase}`)
+  }
+  if ('rolledBack' in result && result.rolledBack) {
+    parts.push('配置已回滚')
+  }
+  if ('rollbackError' in result && result.rollbackError) {
+    parts.push(`回滚失败：${result.rollbackError}`)
+  }
+  return parts.length > 0 ? `\n  （${parts.join('；')}）` : ''
 }
 
 export function buildManagedChannelRepairOutcome(
@@ -66,7 +83,7 @@ export function buildManagedChannelRepairOutcome(
   return {
     ok: false,
     summary,
-    log: `❌ ${summary}`,
+    log: `❌ ${summary}${getRepairLogSuffix(result)}`,
     nextAction: null,
   }
 }

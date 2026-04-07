@@ -231,6 +231,7 @@ interface WeixinInstallerSessionSnapshot {
   ok: boolean
   canceled: boolean
   command: string[]
+  forceMode: boolean
   beforeAccountIds: string[]
   afterAccountIds: string[]
   newAccountIds: string[]
@@ -238,7 +239,7 @@ interface WeixinInstallerSessionSnapshot {
 
 interface WeixinInstallerSessionEvent {
   sessionId: string
-  type: 'started' | 'output' | 'exit'
+  type: 'started' | 'output' | 'exit' | 'force-retry-started'
   stream?: 'stdout' | 'stderr'
   chunk?: string
   phase?: WeixinInstallerSessionSnapshot['phase']
@@ -246,6 +247,7 @@ interface WeixinInstallerSessionEvent {
   ok?: boolean
   canceled?: boolean
   command?: string[]
+  forceMode?: boolean
   beforeAccountIds?: string[]
   afterAccountIds?: string[]
   newAccountIds?: string[]
@@ -1027,6 +1029,7 @@ type OpenClawGuardedWriteReason =
   | 'dashboard-add-feishu-bot'
   | 'dashboard-delete-feishu-bot'
   | 'managed-channel-plugin-repair'
+  | 'managed-plugin-config-reconcile'
   | 'pairing-allowfrom-sync'
   | 'gateway-port-recovery'
   | 'unknown'
@@ -1745,6 +1748,11 @@ interface ElectronApi {
   onWeixinInstallerEvent: (listener: (payload: WeixinInstallerSessionEvent) => void) => () => void
   listWeixinAccounts: () => Promise<WeixinAccountState[]>
   removeWeixinAccount: (accountId: string) => Promise<{ ok: boolean }>
+
+  // Repair progress (Phase 4 unified notifications)
+  onRepairProgress: (listener: (payload: Record<string, any>) => void) => () => void
+  onRepairResult: (listener: (payload: Record<string, any>) => void) => () => void
+  getActiveRepairs: () => Promise<Record<string, any>[]>
 
   // Channels
   channelsAdd: (channel: string, token: string) => Promise<CliResult>

@@ -176,6 +176,24 @@ function isStateReady(state: FeishuOfficialPluginState): boolean {
   return state.installedOnDisk && state.officialPluginConfigured
 }
 
+/**
+ * Feishu-specific config reconciliation for the unified reconciler.
+ * Wraps buildNormalizedConfig to match the reconcileConfig hook signature.
+ */
+export function reconcileFeishuPluginConfig(
+  config: Record<string, any> | null | undefined,
+  runtime: { installedOnDisk: boolean; installPath: string }
+): { config: Record<string, any>; changed: boolean } {
+  const safeConfig = cloneConfig(config)
+  const normalized = buildNormalizedConfig({
+    config: safeConfig,
+    installedOnDisk: runtime.installedOnDisk,
+    installPath: runtime.installPath,
+  })
+  const changed = JSON.stringify(safeConfig) !== JSON.stringify(normalized)
+  return { config: normalized, changed }
+}
+
 function resolveFeishuOfficialPluginManifestPath(homeDir: string): string {
   return path.join(homeDir, 'extensions', FEISHU_OFFICIAL_PLUGIN_ID, FEISHU_OFFICIAL_PLUGIN_MANIFEST)
 }

@@ -7,6 +7,7 @@ import { getManagedChannelPluginByChannelId } from '../shared/managed-channel-pl
 import { pollWithBackoff } from '../shared/polling'
 import { UI_RUNTIME_DEFAULTS, type BackoffPollingPolicy } from '../shared/runtime-policies'
 import { runManagedChannelRepairFlow } from '../shared/managed-channel-repair'
+import { useRepairProgress } from '../hooks/useRepairProgress'
 import { runDashboardInitialLoad } from './dashboard-initial-load'
 import {
   buildModelCatalogDisplaySummary,
@@ -92,9 +93,10 @@ type PluginRepairOptions = Parameters<typeof window.api.repairIncompatiblePlugin
 type WeixinInstallerSnapshot = Awaited<ReturnType<typeof window.api.getWeixinInstallerState>>
 type DashboardWeixinInstallerEvent = {
   sessionId: string
-  type: 'started' | 'output' | 'exit'
+  type: 'started' | 'output' | 'exit' | 'force-retry-started'
   ok?: boolean
   canceled?: boolean
+  forceMode?: boolean
   newAccountIds?: string[]
 }
 
@@ -480,6 +482,8 @@ export default function Dashboard({
   const [pluginCenterError, setPluginCenterError] = useState('')
   const [pluginCenterSummary, setPluginCenterSummary] = useState('')
   const [pluginCenterRepairResult, setPluginCenterRepairResult] = useState<PluginRepairResult | null>(null)
+
+  const { activeRepairs, lastResult: repairLastResult } = useRepairProgress()
 
   // 用于数据变化检测
   const prevChannelsRef = useRef<string>('')
@@ -1229,6 +1233,22 @@ export default function Dashboard({
                 </Button>
               </Tooltip>
             </Group>
+            {activeRepairs.size > 0 && (
+              <Group gap="xs" mt={4}>
+                {Array.from(activeRepairs.values()).map((r) => (
+                  <Badge key={r.channelId} variant="light" color="blue" size="sm">
+                    正在修复 {r.channelId}...
+                  </Badge>
+                ))}
+              </Group>
+            )}
+            {repairLastResult && (repairLastResult.trigger === 'startup' || repairLastResult.trigger === 'gateway-self-heal') && (
+              <Text size="xs" c={repairLastResult.ok ? 'teal' : 'red'} mt={4}>
+                {repairLastResult.ok
+                  ? `自动修复完成: ${repairLastResult.summary}`
+                  : `自动修复失败: ${repairLastResult.summary}`}
+              </Text>
+            )}
           </div>
         </Collapse>
       </div>

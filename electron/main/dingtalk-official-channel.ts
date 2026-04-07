@@ -177,6 +177,31 @@ async function sanitizeLegacyConfig(context: DingtalkOperationContext): Promise<
   return { ok: true }
 }
 
+/**
+ * Dingtalk-specific preflight hook for the unified preflight flow.
+ * Runs `openclaw doctor --fix --non-interactive` to clean up stale config.
+ */
+export async function dingtalkPreflightHook(context: {
+  homeDir: string
+  config: Record<string, any>
+}): Promise<{ ok: boolean; evidence?: string[]; error?: string }> {
+  const doctorResult = await runDoctor({ fix: true, nonInteractive: true })
+  if (!doctorResult.ok) {
+    return {
+      ok: false,
+      evidence: [
+        `openclaw doctor --fix --non-interactive exited with code ${doctorResult.code ?? 'null'}`,
+        ...(doctorResult.stderr ? [doctorResult.stderr] : []),
+      ],
+      error: '钉钉预检修复失败，请先处理历史污染配置后重试。',
+    }
+  }
+  return {
+    ok: true,
+    evidence: [`openclaw doctor --fix completed successfully`],
+  }
+}
+
 async function runDingtalkDoctorAndRepair(
   context: DingtalkOperationContext
 ): Promise<{ ok: true } | { ok: false; message: string; code: number }> {

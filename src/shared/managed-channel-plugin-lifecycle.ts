@@ -92,10 +92,48 @@ export interface ManagedChannelPluginLifecycleSpec {
   supportsBackgroundRestore: boolean
   supportsInteractiveRepairUi: boolean
   detectConfigured(context: ManagedChannelLifecycleContext): boolean
+  /**
+   * @deprecated Use reconcileConfig instead. Will be removed after Phase 1 migration.
+   */
   normalizeConfig(
     config: Record<string, any> | null | undefined,
     runtime: ManagedChannelRuntimeSnapshot
   ): { config: Record<string, any>; changed: boolean }
+  /**
+   * Reconcile channel-specific plugin configuration.
+   * Replaces normalizeConfig with richer runtime context.
+   *
+   * - feishu: legacy cleanup + official plugin state + multi-bot isolation
+   * - dingtalk: legacy cleanup + fallback config validation
+   * - wecom/qqbot: generic cleanup (cleanup IDs removal, canonical allow)
+   * - openclaw-weixin: conditional cleanup (only when installedOnDisk=true)
+   */
+  reconcileConfig(
+    config: Record<string, any> | null | undefined,
+    runtime: { installedOnDisk: boolean; installPath: string; homeDir: string }
+  ): { config: Record<string, any>; changed: boolean }
+  /**
+   * Channel-specific preflight hook. Called during unified preflight
+   * after config reconciliation but before readiness check.
+   *
+   * - dingtalk: runs `openclaw doctor --fix --non-interactive`
+   * - others: undefined (no channel-specific preflight needed)
+   */
+  preflightHook?: (context: {
+    homeDir: string
+    config: Record<string, any>
+  }) => Promise<{ ok: boolean; evidence?: string[]; error?: string }>
+  /**
+   * Channel-specific readiness check.
+   *
+   * - feishu: installedOnDisk && officialPluginConfigured
+   * - others: installedOnDisk && registeredInPluginsList
+   */
+  isReady?: (state: {
+    installedOnDisk: boolean
+    registeredInPluginsList: boolean
+    configuredInConfig: boolean
+  }) => boolean
 }
 
 export type ManagedChannelPluginInspectResult =
@@ -222,7 +260,11 @@ export type ManagedChannelPluginRepairResult =
       pluginScope: 'channel'
       entityScope: ManagedChannelEntityScope
       reloadReason: string
+      retryable?: boolean
       status: ManagedChannelPluginStatusView
+      rolledBack?: boolean
+      failedPhase?: string
+      rollbackError?: string
     }
   | {
       kind: 'quarantine-failed'
@@ -233,6 +275,9 @@ export type ManagedChannelPluginRepairResult =
       failedPluginIds: string[]
       failedPaths: string[]
       status: ManagedChannelPluginStatusView
+      rolledBack?: boolean
+      failedPhase?: string
+      rollbackError?: string
     }
   | {
       kind: 'install-failed'
@@ -242,6 +287,9 @@ export type ManagedChannelPluginRepairResult =
       attemptedInstaller: ManagedChannelInstallStrategy
       status: ManagedChannelPluginStatusView
       error: string
+      rolledBack?: boolean
+      failedPhase?: string
+      rollbackError?: string
     }
   | {
       kind: 'capability-blocked'
@@ -258,6 +306,9 @@ export type ManagedChannelPluginRepairResult =
       entityScope: ManagedChannelEntityScope
       status: ManagedChannelPluginStatusView
       error: string
+      rolledBack?: boolean
+      failedPhase?: string
+      rollbackError?: string
     }
 
 function normalizeText(value: unknown): string {
@@ -436,6 +487,16 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
         config: cloneConfig(config),
         changed: false,
       }),
+      // Feishu reconciliation requires main-process imports (sanitizeManagedPluginConfig,
+      // reconcileTrustedPluginAllowlist, applyFeishuMultiBotIsolation) that can't live in
+      // src/shared/. The real logic is in reconcileFeishuPluginConfig (electron/main/
+      // feishu-official-plugin-state.ts), called by the reconciler directly.
+      // Do NOT call spec.reconcileConfig() for feishu outside the reconciler.
+      reconcileConfig: (config) => ({
+        config: cloneConfig(config),
+        changed: false,
+      }),
+      isReady: (state) => state.installedOnDisk && state.configuredInConfig,
     }
   }
 
@@ -454,6 +515,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       detectConfigured: ({ referenceConfig, currentConfig }) =>
         hasConfiguredDingtalkChannel(referenceConfig) || hasConfiguredDingtalkChannel(currentConfig),
       normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      reconcileConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      isReady: (state) => state.installedOnDisk && state.registeredInPluginsList,
     }
   }
 
@@ -472,6 +535,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       detectConfigured: ({ referenceConfig, currentConfig }) =>
         hasConfiguredWecomChannel(referenceConfig) || hasConfiguredWecomChannel(currentConfig),
       normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      reconcileConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      isReady: (state) => state.installedOnDisk && state.registeredInPluginsList,
     }
   }
 
@@ -490,6 +555,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       detectConfigured: ({ referenceConfig, currentConfig }) =>
         hasConfiguredQqbotChannel(referenceConfig) || hasConfiguredQqbotChannel(currentConfig),
       normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      reconcileConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      isReady: (state) => state.installedOnDisk && state.registeredInPluginsList,
     }
   }
 
@@ -516,6 +583,16 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       }
       return normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds)
     },
+    reconcileConfig: (config, runtime) => {
+      if (!runtime.installedOnDisk) {
+        return {
+          config: cloneConfig(config),
+          changed: false,
+        }
+      }
+      return normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds)
+    },
+    isReady: (state) => state.installedOnDisk && state.registeredInPluginsList,
   }
 }
 
