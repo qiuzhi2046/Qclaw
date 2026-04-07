@@ -15,6 +15,7 @@ import { tryNormalizeProcessCwd } from './runtime-working-directory'
 import { revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
+import { attachMainWindowStatePersistence, loadMainWindowStateSync } from './window-state-store'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -78,6 +79,12 @@ function createWindow() {
 
   const workAreaSize = screen.getPrimaryDisplay().workAreaSize
   const mainWindowBounds = resolveMainWindowBounds(workAreaSize)
+  const persistedState = loadMainWindowStateSync({
+    width: mainWindowBounds.width,
+    height: mainWindowBounds.height,
+    minWidth: mainWindowBounds.minWidth,
+    minHeight: mainWindowBounds.minHeight,
+  })
 
   const appIcon = process.platform === 'win32'
     ? path.join(process.env.VITE_PUBLIC!, 'favicon.ico')
@@ -93,8 +100,10 @@ function createWindow() {
   const browserWindow = new BrowserWindow({
     title: 'Qclaw',
     icon: appIcon,
-    width: mainWindowBounds.width,
-    height: mainWindowBounds.height,
+    x: persistedState.bounds.x,
+    y: persistedState.bounds.y,
+    width: persistedState.bounds.width,
+    height: persistedState.bounds.height,
     minWidth: mainWindowBounds.minWidth,
     minHeight: mainWindowBounds.minHeight,
     titleBarStyle: 'hiddenInset',
@@ -103,9 +112,13 @@ function createWindow() {
     webPreferences: { preload },
   })
   win = browserWindow
+  attachMainWindowStatePersistence(browserWindow)
 
   browserWindow.once('ready-to-show', () => {
     if (win !== browserWindow) return
+    if (persistedState.isMaximized && !browserWindow.isDestroyed()) {
+      browserWindow.maximize()
+    }
     revealWindow(browserWindow, focusApp)
   })
 
