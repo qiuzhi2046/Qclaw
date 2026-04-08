@@ -1,4 +1,5 @@
 import type { ManagedChannelPluginRepairResult } from '../../src/shared/managed-channel-plugin-lifecycle'
+import { resolveManualInstallCommand } from '../../src/shared/managed-channel-plugin-lifecycle'
 import { buildManagedChannelRepairOutcome } from '../../src/shared/managed-channel-repair'
 import { sendRepairResult, type RepairResultEvent } from './renderer-notification-bridge'
 
@@ -27,6 +28,7 @@ export function notifyRepairResult(
     ok: outcome.ok,
     summary: outcome.summary,
     retryable: result.kind === 'gateway-reload-failed' ? result.retryable : undefined,
+    manualCommand: outcome.ok ? undefined : resolveManualInstallCommand(result.channelId) || undefined,
     trigger,
     timestamp: Date.now(),
   }

@@ -12,6 +12,9 @@ const {
   resolveMainAuthStorePathMock,
   resolveLocalAuthStorePathMock,
   upsertApiKeyAuthProfileMock,
+  callGatewayRpcViaControlUiBrowserMock,
+  cliReadConfigMock,
+  readEnvFileMock,
 } = vi.hoisted(() => ({
   confirmRuntimeReconcileMock: vi.fn(),
   issueDesiredRuntimeRevisionMock: vi.fn(),
@@ -34,6 +37,9 @@ const {
   resolveMainAuthStorePathMock: vi.fn(),
   resolveLocalAuthStorePathMock: vi.fn(),
   upsertApiKeyAuthProfileMock: vi.fn(),
+  callGatewayRpcViaControlUiBrowserMock: vi.fn(),
+  cliReadConfigMock: vi.fn(),
+  readEnvFileMock: vi.fn(),
 }))
 
 vi.mock('../openclaw-runtime-reconcile', () => ({
@@ -48,6 +54,15 @@ vi.mock('../local-model-probe', () => ({
   resolveMainAuthStorePath: resolveMainAuthStorePathMock,
   resolveLocalAuthStorePath: resolveLocalAuthStorePathMock,
   upsertApiKeyAuthProfile: upsertApiKeyAuthProfileMock,
+}))
+
+vi.mock('../openclaw-control-ui-rpc', () => ({
+  callGatewayRpcViaControlUiBrowser: callGatewayRpcViaControlUiBrowserMock,
+}))
+
+vi.mock('../cli', () => ({
+  readConfig: cliReadConfigMock,
+  readEnvFile: readEnvFileMock,
 }))
 
 const qwenMethod: OpenClawAuthMethodDescriptor = {
@@ -133,6 +148,12 @@ describe('executeAuthRoute', () => {
     resolveMainAuthStorePathMock.mockReset()
     resolveLocalAuthStorePathMock.mockReset()
     upsertApiKeyAuthProfileMock.mockReset()
+    callGatewayRpcViaControlUiBrowserMock.mockReset()
+    cliReadConfigMock.mockReset()
+    readEnvFileMock.mockReset()
+
+    // By default, RPC rejects so the fast path falls through to CLI in existing tests
+    callGatewayRpcViaControlUiBrowserMock.mockRejectedValue(new Error('no gateway'))
 
     confirmRuntimeReconcileMock.mockResolvedValue({
       runtime: {
@@ -2227,5 +2248,334 @@ describe('executeAuthRoute', () => {
     expect(result.message).toContain('plugins enable')
     expect(runCommand).not.toHaveBeenCalled()
     expect(runStreamingCommand).not.toHaveBeenCalled()
+  })
+
+  describe('RPC fast path for onboard API key routes', () => {
+    const gatewayConfig = {
+      gateway: { auth: { token: 'same-token' } },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: 'https://api.openai.com/v1',
+            models: [{ id: 'gpt-4o' }],
+          },
+        },
+      },
+    }
+
+    it('completes onboard via RPC without spawning a CLI subprocess', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: '', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+      const writeConfig = vi.fn(async () => {})
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock
+        .mockResolvedValueOnce({
+          config: gatewayConfig,
+          baseHash: 'abc123',
+          valid: true,
+        })
+        .mockResolvedValueOnce({ ok: true })
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig, writeConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(result.routeKind).toBe('onboard')
+      expect(runCommand).not.toHaveBeenCalled()
+      expect(upsertApiKeyAuthProfileMock).toHaveBeenCalledWith({
+        provider: 'openai',
+        apiKey: 'sk-live-123',
+      })
+      expect(callGatewayRpcViaControlUiBrowserMock).toHaveBeenCalledWith(
+        expect.objectContaining({ readConfig: cliReadConfigMock }),
+        'config.get',
+        {}
+      )
+      expect(callGatewayRpcViaControlUiBrowserMock).toHaveBeenCalledWith(
+        expect.objectContaining({ readConfig: cliReadConfigMock }),
+        'config.apply',
+        expect.objectContaining({
+          baseHash: 'abc123',
+          raw: expect.any(String),
+        })
+      )
+    })
+
+    it('falls back to CLI when gateway is unreachable (config.get throws)', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock.mockRejectedValue(new Error('ECONNREFUSED'))
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).toHaveBeenCalled()
+      expect((runCommand.mock.calls as any[][])[0]?.[0]?.[0]).toBe('onboard')
+    })
+
+    it('falls back to CLI when auth profile write fails', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      upsertApiKeyAuthProfileMock
+        .mockResolvedValueOnce({ ok: false })
+        .mockResolvedValue({
+          ok: true,
+          created: true,
+          updated: false,
+          profileId: 'openai:default',
+          authStorePath: '/tmp/openclaw/profiles/team-a/agents/main/agent/auth-profiles.json',
+        })
+      callGatewayRpcViaControlUiBrowserMock
+        .mockResolvedValueOnce({
+          config: gatewayConfig,
+          baseHash: 'abc123',
+          valid: true,
+        })
+        .mockResolvedValueOnce({ ok: true })
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).toHaveBeenCalled()
+      expect((runCommand.mock.calls as any[][])[0]?.[0]?.[0]).toBe('onboard')
+    })
+
+    it('falls back to CLI when config.apply throws', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock
+        .mockResolvedValueOnce({
+          config: gatewayConfig,
+          baseHash: 'abc123',
+          valid: true,
+        })
+        .mockRejectedValueOnce(new Error('config.apply failed'))
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).toHaveBeenCalled()
+      expect((runCommand.mock.calls as any[][])[0]?.[0]?.[0]).toBe('onboard')
+    })
+
+    it('does not attempt RPC for non-secret routes', async () => {
+      const oauthRoute: OpenClawAuthMethodDescriptor = {
+        authChoice: 'qwen-portal',
+        label: 'OAuth · qwen-portal',
+        kind: 'oauth',
+        route: {
+          kind: 'models-auth-login',
+          providerId: 'qwen-portal',
+          methodId: 'device',
+          pluginId: 'qwen-portal-auth',
+          requiresBrowser: true,
+        },
+      }
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'enabled', stderr: '', code: 0 }))
+      const runStreamingCommand = vi.fn(async () => ({ ok: true, stdout: 'done', stderr: '', code: 0 }))
+
+      callGatewayRpcViaControlUiBrowserMock.mockReset()
+
+      await executeAuthRoute(
+        {
+          method: oauthRoute,
+          providerId: 'qwen',
+          methodId: 'qwen-portal',
+        },
+        { runCommand, runStreamingCommand }
+      )
+
+      expect(callGatewayRpcViaControlUiBrowserMock).not.toHaveBeenCalled()
+    })
+
+    it('does not attempt RPC when secret is not provided', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      callGatewayRpcViaControlUiBrowserMock.mockReset()
+
+      await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(callGatewayRpcViaControlUiBrowserMock).not.toHaveBeenCalled()
+    })
+
+    it('propagates config repairs through config.apply RPC', async () => {
+      const minimaxConfig = {
+        gateway: { auth: { token: 'same-token' } },
+        models: {
+          providers: {
+            'minimax-portal': {
+              baseUrl: 'https://api.minimax.io/anthropic',
+              models: [],
+            },
+          },
+        },
+      }
+      const minimaxApiKeyMethod: OpenClawAuthMethodDescriptor = {
+        authChoice: 'minimax-api-key',
+        label: 'API Key · minimax',
+        kind: 'apiKey',
+        route: {
+          kind: 'onboard',
+          cliFlag: '--minimax-api-key',
+          requiresSecret: true,
+        },
+      }
+
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: '', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(minimaxConfig)
+      const writeConfig = vi.fn(async () => {})
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock
+        .mockResolvedValueOnce({
+          config: minimaxConfig,
+          baseHash: 'hash1',
+          valid: true,
+        })
+        .mockResolvedValueOnce({ ok: true })
+
+      const result = await executeAuthRoute(
+        {
+          method: minimaxApiKeyMethod,
+          providerId: 'minimax',
+          methodId: 'minimax-api-key',
+          secret: 'sk-minimax-123',
+        },
+        { runCommand, readConfig, writeConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).not.toHaveBeenCalled()
+
+      const applyCall = callGatewayRpcViaControlUiBrowserMock.mock.calls.find(
+        (c: any[]) => c[1] === 'config.apply'
+      )
+      expect(applyCall).toBeDefined()
+      const appliedRaw = JSON.parse(applyCall![2].raw)
+      expect(appliedRaw.models.providers['minimax-portal'].api).toBe('anthropic-messages')
+      expect(writeConfig).toHaveBeenCalled()
+    })
+
+    it('falls back to CLI when config.get returns valid: false', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock.mockResolvedValueOnce({
+        config: gatewayConfig,
+        baseHash: 'abc123',
+        valid: false,
+      })
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).toHaveBeenCalled()
+      expect((runCommand.mock.calls as any[][])[0]?.[0]?.[0]).toBe('onboard')
+    })
+
+    it('falls back to CLI when config.get returns null config', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock.mockResolvedValueOnce({
+        config: null,
+        baseHash: 'abc123',
+        valid: true,
+      })
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).toHaveBeenCalled()
+      expect((runCommand.mock.calls as any[][])[0]?.[0]?.[0]).toBe('onboard')
+    })
+
+    it('falls back to CLI when config snapshot has no hash', async () => {
+      const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+      const readConfig = vi.fn().mockResolvedValue(gatewayConfig)
+
+      upsertApiKeyAuthProfileMock.mockResolvedValue({ ok: true, created: true })
+      callGatewayRpcViaControlUiBrowserMock.mockResolvedValueOnce({
+        config: gatewayConfig,
+        valid: true,
+      })
+
+      const result = await executeAuthRoute(
+        {
+          method: openaiApiKeyMethod,
+          providerId: 'openai',
+          methodId: 'openai-api-key',
+          secret: 'sk-live-123',
+        },
+        { runCommand, readConfig } as any
+      )
+
+      expect(result.ok).toBe(true)
+      expect(runCommand).toHaveBeenCalled()
+      expect((runCommand.mock.calls as any[][])[0]?.[0]?.[0]).toBe('onboard')
+    })
   })
 })

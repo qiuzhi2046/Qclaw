@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Alert, Badge, Button, Card, PasswordInput, ScrollArea, SegmentedControl, Stack, Tabs, Text, TextInput, Title, Modal, Loader } from '@mantine/core'
+import { Alert, Badge, Button, Card, Code, PasswordInput, ScrollArea, SegmentedControl, Stack, Tabs, Text, TextInput, Title, Modal, Loader } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { QRCodeSVG } from 'qrcode.react'
 import FeishuInstallTutorialModal from '../components/FeishuInstallTutorialModal'
@@ -36,7 +36,7 @@ import {
   shouldDisableFeishuInstallerManualInput,
 } from '../shared/feishu-installer-session'
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
-import type { ManagedChannelPluginStatusView } from '../shared/managed-channel-plugin-lifecycle'
+import { resolveManualInstallCommand, type ManagedChannelPluginStatusView } from '../shared/managed-channel-plugin-lifecycle'
 import { pollWithBackoff } from '../shared/polling'
 import { UI_RUNTIME_DEFAULTS } from '../shared/runtime-policies'
 import type { OpenClawGuardedWriteReason } from '../shared/openclaw-phase2'
@@ -2941,6 +2941,12 @@ export default function ChannelConnect({
           {status === 'error' && (
             <div>
               <Text size="xs" c="danger" mb="sm">{error}</Text>
+              {resolveManualInstallCommand(selectedChannelId) && (
+                <Alert color="orange" variant="light" title="手动修复" mb="sm">
+                  <Text size="xs">如果重试仍然失败，请在终端中运行：</Text>
+                  <Code block mt={4}>{resolveManualInstallCommand(selectedChannelId)}</Code>
+                </Alert>
+              )}
               <div className="flex gap-2">
                 <Button
                   onClick={() => {

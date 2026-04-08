@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Alert, ActionIcon, Button, Badge, Text, Group, Loader, Collapse, Modal, Progress, SegmentedControl, Tooltip } from '@mantine/core'
+import { Alert, ActionIcon, Button, Badge, Code, Text, Group, Loader, Collapse, Modal, Progress, SegmentedControl, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconChevronRight, IconRefresh } from '@tabler/icons-react'
 import { getChannelDefinition } from '../lib/openclaw-channel-registry'
@@ -1261,6 +1261,12 @@ export default function Dashboard({
                   ? `自动修复完成: ${repairLastResult.summary}`
                   : `自动修复失败: ${repairLastResult.summary}`}
               </Text>
+            )}
+            {repairLastResult && !repairLastResult.ok && repairLastResult.manualCommand && (
+              <Alert color="orange" variant="light" title="手动修复" mt={4}>
+                <Text size="xs">自动修复失败，请在终端中运行以下命令手动安装：</Text>
+                <Code block mt={4}>{repairLastResult.manualCommand}</Code>
+              </Alert>
             )}
           </div>
         </Collapse>

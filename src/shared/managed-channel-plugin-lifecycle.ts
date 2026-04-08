@@ -621,6 +621,26 @@ export function getManagedChannelLifecycleSpec(
     : null
 }
 
+/**
+ * Derive the manual CLI install command for a managed channel plugin.
+ * Returns null for unknown channel IDs.
+ */
+export function resolveManualInstallCommand(channelId: string): string | null {
+  const spec = getManagedChannelLifecycleSpec(channelId)
+  if (!spec) return null
+
+  if (spec.channelId === 'feishu') {
+    return 'npx -y @larksuite/openclaw-lark-tools install'
+  }
+  if (spec.npxSpecifier) {
+    return `npx ${spec.npxSpecifier}`
+  }
+  if (spec.packageName) {
+    return `openclaw plugins install ${spec.packageName}`
+  }
+  return null
+}
+
 export function createManagedChannelCapabilitySnapshot(params: {
   supportsBackgroundRestore: boolean
   supportsInteractiveRepair: boolean

@@ -26,6 +26,7 @@ import { restoreTrustedPluginConfig } from './openclaw-plugin-config'
 import { extractStalePluginConfigEntryIds, pruneStalePluginConfigEntries } from './openclaw-config-warnings'
 import { repairKnownProviderConfigGaps } from './openclaw-provider-config-repair'
 import { applyGatewaySecretAction } from './gateway-secret-apply'
+import { callGatewayRpcViaControlUiBrowser } from './openclaw-control-ui-rpc'
 import {
   confirmRuntimeReconcile,
   issueDesiredRuntimeRevision,
@@ -863,6 +864,70 @@ function buildOnboardGatewayRecoveryFailureMessage(params: {
   ].join('\n')
 }
 
+async function tryOnboardApiKeyViaRpc(input: {
+  providerId: string
+  methodId?: string
+  apiKey: string
+  route: OpenClawAuthRouteDescriptor
+  readConfig: () => Promise<Record<string, any> | null>
+  writeAuthConfig: (
+    beforeConfig: Record<string, any> | null,
+    nextConfig: Record<string, any>
+  ) => Promise<void>
+}): Promise<ExecuteAuthRouteResult | null> {
+  const { upsertApiKeyAuthProfile } = await import('./local-model-probe')
+  const profileResult = await upsertApiKeyAuthProfile({
+    provider: input.providerId,
+    apiKey: input.apiKey,
+  })
+  if (!profileResult.ok) return null
+
+  const { readConfig: cliReadConfig, readEnvFile } = await import('./cli')
+  const rpcDeps = { readConfig: cliReadConfig, readEnvFile }
+  const snapshot = (await callGatewayRpcViaControlUiBrowser(rpcDeps, 'config.get', {})) as {
+    config?: Record<string, any> | null
+    hash?: string
+    baseHash?: string
+    valid?: boolean
+  }
+  if (snapshot?.valid === false || !snapshot?.config) return null
+  const baseHash = String(snapshot.baseHash ?? snapshot.hash ?? '').trim()
+  if (!baseHash) return null
+
+  const snapshotConfig = JSON.parse(JSON.stringify(snapshot.config)) as Record<string, any>
+  const repairResult = repairKnownProviderConfigGaps(snapshotConfig)
+  let nextConfig = repairResult.changed && repairResult.config ? repairResult.config : snapshotConfig
+
+  const configBeforeAuth = await input.readConfig().catch(() => null)
+  const pluginRestore = restoreTrustedPluginConfig(configBeforeAuth, nextConfig, {
+    blockedPluginIds: [],
+  })
+  if (pluginRestore.changed) {
+    nextConfig = pluginRestore.config
+  }
+
+  await callGatewayRpcViaControlUiBrowser(rpcDeps, 'config.apply', {
+    raw: `${JSON.stringify(nextConfig, null, 2)}\n`,
+    baseHash,
+  })
+
+  if (repairResult.changed || pluginRestore.changed) {
+    await input.writeAuthConfig(snapshotConfig, nextConfig).catch(() => null)
+  }
+
+  return {
+    ok: true,
+    stdout: '',
+    stderr: '',
+    code: 0,
+    attemptedCommands: [],
+    routeKind: 'onboard',
+    loginProviderId: input.route.providerId,
+    routeMethodId: input.methodId,
+    pluginId: input.route.pluginId?.trim(),
+  }
+}
+
 async function executeOnboardCommandWithGatewayRecovery(params: {
   routeKind: OnboardRouteKind
   authChoice: string
@@ -1428,6 +1493,20 @@ export async function executeAuthRoute(
   }
 
   if (route.kind === 'onboard') {
+    if (route.requiresSecret && input.secret) {
+      const rpcResult = await tryOnboardApiKeyViaRpc({
+        providerId: input.providerId,
+        methodId: resolvedRouteMethodId.value,
+        apiKey: input.secret,
+        route,
+        readConfig,
+        writeAuthConfig,
+      }).catch(() => null)
+      if (rpcResult) {
+        return rpcResult
+      }
+    }
+
     const configBeforeAuth = await readConfig().catch(() => null)
     gatewayTokenBeforeAuth = readGatewayAuthToken(configBeforeAuth)
     const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)

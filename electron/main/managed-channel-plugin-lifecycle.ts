@@ -839,7 +839,7 @@ export function createManagedChannelPluginLifecycleService(
     }
   }
 
-  async function repairManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginRepairResult> {
+  async function repairManagedChannelPlugin(channelId: string, options?: { skipGatewayReload?: boolean }): Promise<ManagedChannelPluginRepairResult> {
     const spec = getManagedChannelLifecycleSpec(channelId)
     if (!spec) {
       return {
@@ -878,6 +878,17 @@ export function createManagedChannelPluginLifecycleService(
         if (!installOutcome.ok) return installOutcome.result
         const configOutcome = await reconcileAndWriteConfig(spec)
         if (!configOutcome.ok) return configOutcome.result
+        if (options?.skipGatewayReload) {
+          resetFailure(spec.channelId)
+          return {
+            kind: 'ok',
+            channelId: spec.channelId,
+            pluginScope: 'channel',
+            entityScope: spec.entityScope,
+            action: installOutcome.action,
+            status: configOutcome.status,
+          }
+        }
         return reloadGatewayAfterRepair(spec, installOutcome.action, configOutcome.status)
       })
     } catch (error) {
@@ -994,7 +1005,7 @@ export async function prepareManagedChannelPluginForSetup(channelId: string): Pr
   return service.prepareManagedChannelPluginForSetup(channelId)
 }
 
-export async function repairManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginRepairResult> {
+export async function repairManagedChannelPlugin(channelId: string, options?: { skipGatewayReload?: boolean }): Promise<ManagedChannelPluginRepairResult> {
   const service = await getDefaultManagedChannelPluginLifecycleService()
-  return service.repairManagedChannelPlugin(channelId)
+  return service.repairManagedChannelPlugin(channelId, options)
 }

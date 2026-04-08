@@ -486,6 +486,23 @@ function ensureManagedPluginAllowed(
   }
 }
 
+const MANAGED_CHANNEL_REPAIR_COOLDOWN_MS = 30_000
+const recentManagedChannelRepairs = new Map<string, number>()
+
+/** @internal — exposed for test isolation only */
+export function _resetManagedChannelRepairCooldowns(): void {
+  recentManagedChannelRepairs.clear()
+}
+
+function pruneExpiredRepairCooldowns(): void {
+  const now = Date.now()
+  for (const [channelId, timestamp] of recentManagedChannelRepairs) {
+    if (now - timestamp >= MANAGED_CHANNEL_REPAIR_COOLDOWN_MS) {
+      recentManagedChannelRepairs.delete(channelId)
+    }
+  }
+}
+
 async function tryRepairUnknownManagedChannels(
   options: EnsureGatewayRunningOptions,
   context: GatewayRecoveryContext,
@@ -497,7 +514,12 @@ async function tryRepairUnknownManagedChannels(
   health: GatewayHealthCheckResult
   summary: string
 } | null> {
+  pruneExpiredRepairCooldowns()
   const repairableRecords = extractUnknownManagedChannelRecords(sourceOutput)
+    .filter((record) => {
+      const lastRepairAt = recentManagedChannelRepairs.get(record.channelId)
+      return !lastRepairAt || Date.now() - lastRepairAt >= MANAGED_CHANNEL_REPAIR_COOLDOWN_MS
+    })
   if (repairableRecords.length === 0) {
     return null
   }
@@ -511,12 +533,13 @@ async function tryRepairUnknownManagedChannels(
   const { repairManagedChannelPlugin } = await import('./managed-channel-plugin-lifecycle')
 
   for (const record of repairableRecords) {
+    recentManagedChannelRepairs.set(record.channelId, Date.now())
     recordGatewayAction(
       context,
       'install-plugin',
       ['managed-channel-plugin', 'repair', record.channelId]
     )
-    const repairResult = await repairManagedChannelPlugin(record.channelId)
+    const repairResult = await repairManagedChannelPlugin(record.channelId, { skipGatewayReload: true })
     const shouldDeferRepairNotification =
       record.channelId === 'openclaw-weixin' && repairResult.kind === 'manual-action-required'
     if (!shouldDeferRepairNotification) {
@@ -543,6 +566,7 @@ async function tryRepairUnknownManagedChannels(
             message: summary,
             detail: summary,
           })
+          notifyRepairResult(repairResult, 'gateway-self-heal')
           return {
             handled: true,
             recovered: false,
@@ -560,6 +584,7 @@ async function tryRepairUnknownManagedChannels(
           message: repairResult.reason,
           detail: '当前 OpenClaw 配置读取失败，后台不会在未知配置上继续写入个人微信插件修复。',
         })
+        notifyRepairResult(repairResult, 'gateway-self-heal')
         return {
           handled: true,
           recovered: false,
@@ -582,6 +607,7 @@ async function tryRepairUnknownManagedChannels(
             message: summary,
             detail: '个人微信插件已补装，但受管配置写入失败，后台停止继续修复。',
           })
+          notifyRepairResult(repairResult, 'gateway-self-heal')
           return {
             handled: true,
             recovered: false,
@@ -652,6 +678,13 @@ async function tryRepairUnknownManagedChannels(
       summary,
     }
   }
+
+  // All managed channel plugins repaired with config writes batched (no individual reloads).
+  // Trigger a single gateway reload to apply all config changes at once.
+  const { reloadGatewayForConfigChange } = await import('./gateway-lifecycle-controller')
+  await reloadGatewayForConfigChange('managed-channel-plugin-batch-repair', {
+    preferEnsureWhenNotRunning: true,
+  })
 
   const repairedHealth = await safeGatewayHealth()
   appendGatewayEvidence(context, {

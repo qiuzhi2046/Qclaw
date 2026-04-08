@@ -24,6 +24,7 @@ const {
   markRuntimeRevisionInProgressMock,
   notifyRepairResultMock,
   probeGatewayPortOwnerMock,
+  reloadGatewayForConfigChangeMock,
   repairManagedChannelPluginMock,
   repairDingtalkOfficialChannelMock,
   repairIncompatibleExtensionPluginsMock,
@@ -57,6 +58,7 @@ const {
   markRuntimeRevisionInProgressMock: vi.fn(),
   notifyRepairResultMock: vi.fn(),
   probeGatewayPortOwnerMock: vi.fn(),
+  reloadGatewayForConfigChangeMock: vi.fn(),
   repairManagedChannelPluginMock: vi.fn(),
   repairDingtalkOfficialChannelMock: vi.fn(),
   repairIncompatibleExtensionPluginsMock: vi.fn(),
@@ -128,6 +130,10 @@ vi.mock('../managed-channel-plugin-lifecycle', () => ({
   repairManagedChannelPlugin: repairManagedChannelPluginMock,
 }))
 
+vi.mock('../gateway-lifecycle-controller', () => ({
+  reloadGatewayForConfigChange: reloadGatewayForConfigChangeMock,
+}))
+
 vi.mock('../managed-channel-repair-notifications', () => ({
   notifyRepairResult: notifyRepairResultMock,
 }))
@@ -149,7 +155,7 @@ vi.mock('../../../src/shared/polling', () => ({
   pollWithBackoff: pollWithBackoffMock,
 }))
 
-import { ensureGatewayRunning } from '../openclaw-gateway-service'
+import { ensureGatewayRunning, _resetManagedChannelRepairCooldowns } from '../openclaw-gateway-service'
 
 describe('openclaw gateway service', () => {
   const tempDirs: string[] = []
@@ -169,6 +175,7 @@ describe('openclaw gateway service', () => {
   }
 
   beforeEach(async () => {
+    _resetManagedChannelRepairCooldowns()
     checkNodeMock.mockReset()
     checkOpenClawMock.mockReset()
     confirmRuntimeReconcileMock.mockReset()
@@ -186,6 +193,7 @@ describe('openclaw gateway service', () => {
     markRuntimeRevisionInProgressMock.mockReset()
     notifyRepairResultMock.mockReset()
     probeGatewayPortOwnerMock.mockReset()
+    reloadGatewayForConfigChangeMock.mockReset()
     repairManagedChannelPluginMock.mockReset()
     repairDingtalkOfficialChannelMock.mockReset()
     repairIncompatibleExtensionPluginsMock.mockReset()
@@ -937,8 +945,8 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
-    expect(repairManagedChannelPluginMock).toHaveBeenNthCalledWith(1, 'wecom')
-    expect(repairManagedChannelPluginMock).toHaveBeenNthCalledWith(2, 'qqbot')
+    expect(repairManagedChannelPluginMock).toHaveBeenNthCalledWith(1, 'wecom', { skipGatewayReload: true })
+    expect(repairManagedChannelPluginMock).toHaveBeenNthCalledWith(2, 'qqbot', { skipGatewayReload: true })
     expect(runDoctorMock).not.toHaveBeenCalled()
     expect(result.ok).toBe(true)
     expect(result.running).toBe(true)
@@ -1017,7 +1025,7 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
-    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('wecom')
+    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('wecom', { skipGatewayReload: true })
     expect(gatewayStartMock).not.toHaveBeenCalled()
     expect(runDoctorMock).toHaveBeenNthCalledWith(1, undefined)
     expect(runDoctorMock).toHaveBeenNthCalledWith(2, { fix: true })
@@ -1086,7 +1094,7 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
-    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('dingtalk')
+    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('dingtalk', { skipGatewayReload: true })
     expect(result.ok).toBe(true)
     expect(result.running).toBe(true)
   })
@@ -1148,7 +1156,7 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
-    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('openclaw-weixin')
+    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('openclaw-weixin', { skipGatewayReload: true })
     expect(installPluginMock).toHaveBeenCalledWith(
       '@tencent-weixin/openclaw-weixin',
       ['openclaw-weixin']
@@ -1373,7 +1381,7 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
-    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('openclaw-weixin')
+    expect(repairManagedChannelPluginMock).toHaveBeenCalledWith('openclaw-weixin', { skipGatewayReload: true })
     expect(installPluginMock).toHaveBeenCalledWith(
       '@tencent-weixin/openclaw-weixin',
       ['openclaw-weixin']

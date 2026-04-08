@@ -12,6 +12,7 @@ export interface RepairResultEvent {
   ok: boolean
   summary: string
   retryable?: boolean
+  manualCommand?: string
   trigger: 'user-manual' | 'startup' | 'gateway-self-heal' | 'page-load' | 'channel-connect'
   timestamp: number
 }
