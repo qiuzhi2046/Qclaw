@@ -259,6 +259,10 @@ function buildPluginRepairRequestKey(options?: PluginRepairOptions): string {
     : `global${officialPolicyKey}${restorePolicyKey}`
 }
 
+export function shouldShowPluginRepairIntroNotification(trigger: 'startup' | 'manual'): boolean {
+  return trigger === 'manual'
+}
+
 function App() {
   const [appState, setAppState] = useState<AppState>('welcome')
   const [setupStep, setSetupStep] = useState<SetupStep>('api-keys')
@@ -419,7 +423,7 @@ function App() {
       await activeTask.promise.catch(() => null)
     }
 
-    const loadingNotificationId = trigger === 'manual'
+    const loadingNotificationId = shouldShowPluginRepairIntroNotification(trigger)
       ? notifications.show({
           loading: true,
           autoClose: false,
@@ -428,15 +432,6 @@ function App() {
           message: PLUGIN_REPAIR_NOTICE_MESSAGE,
         })
       : null
-
-    if (trigger === 'startup') {
-      notifications.show({
-        color: 'blue',
-        title: '插件修复说明',
-        message: PLUGIN_REPAIR_NOTICE_MESSAGE,
-        autoClose: 4000,
-      })
-    }
 
     setPluginRepairRunning(true)
     const task = window.api.repairIncompatiblePlugins(normalizedOptions)

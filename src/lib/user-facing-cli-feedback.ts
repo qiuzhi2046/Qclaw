@@ -11,6 +11,8 @@ const GATEWAY_UNREADY_REGEX =
 const CLAWHUB_RATE_LIMIT_REGEX =
   /\bclawhub\b[\s\S]*\b(?:429|rate limit exceeded|too many requests)\b/i
 const CLAWHUB_RESOLUTION_FAILED_REGEX = /resolving clawhub:[\s\S]*fetch failed/i
+const PLUGIN_QUARANTINE_REGEX =
+  /\b(smoke test|quarantin(?:e|ed)|qclaw-quarantined-extensions|compatibility check)\b|已自动隔离|兼容性校验|隔离.*插件/i
 const NETWORK_BLOCKED_REGEX =
   /\b(timeout|timed out|network|dns|proxy|certificate|tls|ssl|socket hang up|econnreset|enotfound|fetch failed)\b/i
 const PLUGIN_INSTALL_PERMISSION_MARKER = 'QCLAW_PLUGIN_INSTALL_PERMISSION_DENIED'
@@ -95,13 +97,16 @@ export function toUserFacingCliFailureMessage(params: {
     return '配置写入失败，请检查本机权限后重试。'
   }
   if (GATEWAY_UNREADY_REGEX.test(corpus)) {
-    return '网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。'
+    return '网关 token 已变更，请刷新后重新尝试'
   }
   if (CLAWHUB_RATE_LIMIT_REGEX.test(corpus)) {
     return 'ClawHub 当前请求过于频繁，已被限流，请稍后再试。'
   }
   if (CLAWHUB_RESOLUTION_FAILED_REGEX.test(corpus)) {
     return '插件源解析失败，请稍后重试。若该插件此前已安装，可直接继续绑定渠道。'
+  }
+  if (PLUGIN_QUARANTINE_REGEX.test(corpus)) {
+    return '插件安装后未通过兼容性校验，已被自动隔离。请升级 Qclaw 或官方插件后重试。'
   }
   if (NETWORK_BLOCKED_REGEX.test(corpus)) {
     return '网络连接异常，请检查网络或代理配置后重试。'

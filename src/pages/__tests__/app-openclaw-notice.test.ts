@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { applyLiveOpenClawVersionToRuntimeStore, buildOpenClaw322Notice } from '../../App'
+import {
+  applyLiveOpenClawVersionToRuntimeStore,
+  buildOpenClaw322Notice,
+  shouldShowPluginRepairIntroNotification,
+} from '../../App'
 
 describe('buildOpenClaw322Notice', () => {
+  it('skips the startup plugin repair intro notification while keeping the manual flow explained', () => {
+    expect(shouldShowPluginRepairIntroNotification('startup')).toBe(false)
+    expect(shouldShowPluginRepairIntroNotification('manual')).toBe(true)
+  })
+
   it('prefers the live detected version over stale runtime-store version text', () => {
     const runtimeStore = applyLiveOpenClawVersionToRuntimeStore(
       {

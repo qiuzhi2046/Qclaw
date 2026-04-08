@@ -31,6 +31,7 @@ import {
   resolveRecordedModelVerificationStateFromSwitchResult,
   type ModelVerificationRecord,
 } from '../shared/model-verification-state'
+import { resolveManagedChannelIdentity } from '../shared/managed-channel-identity'
 import {
   getUpstreamCatalogItemsLike,
   getUpstreamModelStatusLike,
@@ -431,13 +432,25 @@ function resolveDashboardActionErrorMessage(
 const DEFAULT_MODEL_SWITCH_FAILURE_MESSAGE = '默认模型切换失败，请稍后重试。'
 const DASHBOARD_PLUGIN_CENTER_FAILURE_MESSAGE = '插件处理失败，请稍后重试。'
 
-function extractChannelsFromConfig(config: Record<string, any> | null): ChannelInfo[] {
+export function extractChannelsFromConfig(config: Record<string, any> | null): ChannelInfo[] {
   if (!config || typeof config !== 'object') return []
-  return Object.entries(config.channels || {}).map(([id, cfg]: any) => ({
-    id,
-    name: cfg.name || id,
-    platform: cfg.domain || 'unknown',
-  }))
+  return Object.entries(config.channels || {}).map(([id, cfg]: any) => {
+    const channelConfig = (cfg || {}) as Record<string, any>
+    const normalizedPlatform =
+      (typeof channelConfig.domain === 'string' && channelConfig.domain.trim())
+      || (id === 'dingtalk-connector' ? 'dingtalk' : id)
+    const identity = resolveManagedChannelIdentity({
+      configChannelId: id,
+      platform: normalizedPlatform,
+    })
+    const channelDef = getChannelDefinition(identity.channelId) || getChannelDefinition(identity.platform)
+
+    return {
+      id,
+      name: channelConfig.name || channelDef?.name || identity.channelId || id,
+      platform: identity.platform,
+    }
+  })
 }
 
 export default function Dashboard({

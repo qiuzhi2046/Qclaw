@@ -568,6 +568,98 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     ).resolves.toContain('@tencent-weixin/openclaw-weixin')
   })
 
+  it('does not quarantine the wecom managed plugin when only host sdk resolution is missing during targeted repair', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'wecom-openclaw-plugin',
+      '@wecom/wecom-openclaw-plugin',
+      'index.js',
+      'import "./dist/src/accounts.js"\nexport default { id: "wecom-openclaw-plugin" }'
+    )
+    await writePluginFile(
+      homeDir,
+      'wecom-openclaw-plugin',
+      'dist/src/accounts.js',
+      'import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/account-id"\nexport default DEFAULT_ACCOUNT_ID'
+    )
+
+    const writeConfig = vi.fn(async () => {})
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      now: () => 0,
+      scopePluginIds: ['wecom-openclaw-plugin', 'wecom'],
+      quarantineOfficialManagedPlugins: true,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
+          entries: {
+            'wecom-openclaw-plugin': { enabled: true },
+          },
+          installs: {
+            'wecom-openclaw-plugin': {
+              installPath: path.join(homeDir, 'extensions', 'wecom-openclaw-plugin'),
+            },
+          },
+        },
+      }),
+      writeConfig,
+    })
+
+    expect(result.quarantinedPluginIds).toEqual([])
+    expect(result.prunedPluginIds).toEqual([])
+    expect(writeConfig).not.toHaveBeenCalled()
+    await expect(
+      readFile(path.join(homeDir, 'extensions', 'wecom-openclaw-plugin', 'package.json'), 'utf8')
+    ).resolves.toContain('@wecom/wecom-openclaw-plugin')
+  })
+
+  it('does not quarantine the dingtalk managed plugin when only host sdk resolution is missing during targeted repair', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'dingtalk-connector',
+      '@dingtalk-real-ai/dingtalk-connector',
+      'index.ts',
+      'import "./src/channel.ts"\nexport default { id: "dingtalk-connector" }'
+    )
+    await writePluginFile(
+      homeDir,
+      'dingtalk-connector',
+      'src/channel.ts',
+      'import { buildChannelConfigSchema } from "openclaw/plugin-sdk/core"\nexport default buildChannelConfigSchema'
+    )
+
+    const writeConfig = vi.fn(async () => {})
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      now: () => 0,
+      scopePluginIds: ['dingtalk-connector', 'dingtalk'],
+      quarantineOfficialManagedPlugins: true,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['dingtalk-connector'],
+          entries: {
+            'dingtalk-connector': { enabled: true },
+          },
+          installs: {
+            'dingtalk-connector': {
+              installPath: path.join(homeDir, 'extensions', 'dingtalk-connector'),
+            },
+          },
+        },
+      }),
+      writeConfig,
+    })
+
+    expect(result.quarantinedPluginIds).toEqual([])
+    expect(result.prunedPluginIds).toEqual([])
+    expect(writeConfig).not.toHaveBeenCalled()
+    await expect(
+      readFile(path.join(homeDir, 'extensions', 'dingtalk-connector', 'package.json'), 'utf8')
+    ).resolves.toContain('@dingtalk-real-ai/dingtalk-connector')
+  })
+
   it('returns a repair summary when incompatible plugins are fixed', async () => {
     const homeDir = await createTempHome()
     await writePluginPackage(

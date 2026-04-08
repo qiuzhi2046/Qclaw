@@ -517,7 +517,11 @@ async function tryRepairUnknownManagedChannels(
       ['managed-channel-plugin', 'repair', record.channelId]
     )
     const repairResult = await repairManagedChannelPlugin(record.channelId)
-    notifyRepairResult(repairResult, 'gateway-self-heal')
+    const shouldDeferRepairNotification =
+      record.channelId === 'openclaw-weixin' && repairResult.kind === 'manual-action-required'
+    if (!shouldDeferRepairNotification) {
+      notifyRepairResult(repairResult, 'gateway-self-heal')
+    }
     if (repairResult.kind === 'ok') {
       continue
     }

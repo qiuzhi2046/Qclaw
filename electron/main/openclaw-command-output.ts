@@ -86,7 +86,7 @@ function classifyCliFailureOutput(output: string): { message: string; warningOnl
 
   if (GATEWAY_UNREADY_REGEX.test(combined)) {
     return {
-      message: '网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。',
+      message: '网关 token 已变更，请刷新后重新尝试',
       warningOnly: false,
       priority: 3,
     }

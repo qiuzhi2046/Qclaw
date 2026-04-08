@@ -109,7 +109,18 @@ function looksLikePluginSdkCompatibilityFailure(detail: string): boolean {
   )
 }
 
-function shouldSkipManagedPluginQuarantine(pluginId: string): boolean {
+function looksLikeHostPluginSdkImportFailure(detail: string): boolean {
+  const text = String(detail || '')
+  return /cannot find module ['"]openclaw\/plugin-sdk(?:\/[^'"]+)?['"]|cannot find package ['"]openclaw['"]|err_module_not_found[\s\S]*openclaw(?:\/plugin-sdk)?/i.test(text)
+}
+
+function shouldSkipManagedPluginQuarantine(params: {
+  pluginId: string
+  pluginSdkResolutionFailure: boolean
+  pluginSdkCompatibilityFailure: boolean
+  smokeTestFailure: string
+}): boolean {
+  const { pluginId, pluginSdkResolutionFailure, pluginSdkCompatibilityFailure, smokeTestFailure } = params
   const managedPlugin = getManagedChannelPluginByPluginId(pluginId)
   if (!managedPlugin) return false
 
@@ -118,6 +129,12 @@ function shouldSkipManagedPluginQuarantine(pluginId: string): boolean {
   // a reliable compatibility signal for that package, so quarantining it causes false
   // positives and breaks unrelated features such as skills listing/install.
   return managedPlugin.channelId === 'openclaw-weixin'
+    || (
+      (managedPlugin.channelId === 'wecom' || managedPlugin.channelId === 'dingtalk')
+      && pluginSdkResolutionFailure
+      && !pluginSdkCompatibilityFailure
+      && looksLikeHostPluginSdkImportFailure(smokeTestFailure)
+    )
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -270,7 +287,14 @@ async function findIncompatibleExtensionPlugins(
       if (!shouldQuarantineOfficialManagedPlugin(entry.name, options)) {
         break
       }
-      if (shouldSkipManagedPluginQuarantine(entry.name)) {
+      if (
+        shouldSkipManagedPluginQuarantine({
+          pluginId: entry.name,
+          pluginSdkResolutionFailure,
+          pluginSdkCompatibilityFailure,
+          smokeTestFailure: smokeTestFailure || '',
+        })
+      ) {
         break
       }
       incompatible.push({

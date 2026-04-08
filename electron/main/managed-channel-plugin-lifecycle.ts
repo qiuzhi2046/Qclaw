@@ -781,11 +781,23 @@ export function createManagedChannelPluginLifecycleService(
     if (statusBeforeNormalize.normalizedConfig.changed) {
       emitRepairProgress(spec.channelId, 'config-write', 'in-progress', '正在同步配置...')
       const { applyConfigPatchGuarded } = await import('./openclaw-config-coordinator')
-      await applyConfigPatchGuarded({
+      const writeResult = await applyConfigPatchGuarded({
         beforeConfig: statusBeforeNormalize.currentConfig,
         afterConfig: statusBeforeNormalize.normalizedConfig.config,
         reason: 'managed-channel-plugin-repair',
       })
+      if (!writeResult.ok) {
+        emitRepairProgress(spec.channelId, 'config-write', 'failed', writeResult.message || '插件配置同步失败')
+        recordFailure(spec.channelId, 'repair-failed')
+        return { ok: false, result: {
+          kind: 'repair-failed',
+          channelId: spec.channelId,
+          pluginScope: 'channel',
+          entityScope: spec.entityScope,
+          status: statusBeforeNormalize.status,
+          error: writeResult.message || '插件配置同步失败',
+        } }
+      }
     }
     return { ok: true, status: statusBeforeNormalize.status }
   }
@@ -801,6 +813,7 @@ export function createManagedChannelPluginLifecycleService(
       { preferEnsureWhenNotRunning: true }
     )
     if (!reloadResult.ok || reloadResult.running !== true) {
+      emitRepairProgress(spec.channelId, 'gateway-reload', 'failed', reloadResult.summary || reloadResult.stderr || '网关重载失败')
       recordFailure(spec.channelId, 'gateway-reload-failed')
       return {
         kind: 'gateway-reload-failed',
@@ -815,6 +828,7 @@ export function createManagedChannelPluginLifecycleService(
     }
     resetFailure(spec.channelId)
     const finalStatus = await buildGenericStatus(spec, resolvedDependencies)
+    emitRepairProgress(spec.channelId, 'gateway-reload', 'success', finalStatus.status.summary)
     return {
       kind: 'ok',
       channelId: spec.channelId,

@@ -90,7 +90,7 @@ describe('getCliFailureMessage', () => {
         },
         'fallback'
       )
-    ).toBe('网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。')
+    ).toBe('网关 token 已变更，请刷新后重新尝试')
   })
 
   it('hides internal multi-model fallback chains behind a user-facing recovery message', () => {

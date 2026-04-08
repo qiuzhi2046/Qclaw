@@ -143,7 +143,6 @@ describe('setupDingtalkOfficialChannel', () => {
               enabled: true,
               clientId: 'cli_ding',
               clientSecret: 'ding-secret',
-              gatewayToken: 'gw-token',
             }),
           },
         }),
@@ -202,7 +201,6 @@ describe('setupDingtalkOfficialChannel', () => {
           enabled: true,
           clientId: 'cli_ding',
           clientSecret: 'ding-secret',
-          gatewayToken: 'gw-token',
         },
       },
     })

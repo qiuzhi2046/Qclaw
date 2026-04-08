@@ -70,7 +70,7 @@ function resolveDimension(options: {
 
 const defaultWindowPolicy = desktopPolicy?.window || {
   defaultWidth: 800,
-  defaultHeight: 600,
+  defaultHeight: 630,
   minimumWidth: 640,
   minimumHeight: 480,
   backgroundColor: '#09090b',
@@ -83,7 +83,7 @@ const defaultCompatibilityPolicy = desktopPolicy?.compatibility || {
 
 export const DESKTOP_WINDOW_POLICY = Object.freeze({
   defaultWidth: toPositiveInteger(defaultWindowPolicy.defaultWidth, 800),
-  defaultHeight: toPositiveInteger(defaultWindowPolicy.defaultHeight, 600),
+  defaultHeight: toPositiveInteger(defaultWindowPolicy.defaultHeight, 630),
   minimumWidth: toPositiveInteger(defaultWindowPolicy.minimumWidth, 640),
   minimumHeight: toPositiveInteger(defaultWindowPolicy.minimumHeight, 480),
   backgroundColor: String(defaultWindowPolicy.backgroundColor || '#09090b').trim() || '#09090b',

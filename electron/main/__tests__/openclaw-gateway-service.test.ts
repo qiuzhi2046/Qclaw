@@ -22,6 +22,7 @@ const {
   getOpenClawPathsMock,
   issueDesiredRuntimeRevisionMock,
   markRuntimeRevisionInProgressMock,
+  notifyRepairResultMock,
   probeGatewayPortOwnerMock,
   repairManagedChannelPluginMock,
   repairDingtalkOfficialChannelMock,
@@ -54,6 +55,7 @@ const {
   getOpenClawPathsMock: vi.fn(),
   issueDesiredRuntimeRevisionMock: vi.fn(),
   markRuntimeRevisionInProgressMock: vi.fn(),
+  notifyRepairResultMock: vi.fn(),
   probeGatewayPortOwnerMock: vi.fn(),
   repairManagedChannelPluginMock: vi.fn(),
   repairDingtalkOfficialChannelMock: vi.fn(),
@@ -126,6 +128,10 @@ vi.mock('../managed-channel-plugin-lifecycle', () => ({
   repairManagedChannelPlugin: repairManagedChannelPluginMock,
 }))
 
+vi.mock('../managed-channel-repair-notifications', () => ({
+  notifyRepairResult: notifyRepairResultMock,
+}))
+
 vi.mock('../openclaw-runtime-reconcile', () => ({
   confirmRuntimeReconcile: confirmRuntimeReconcileMock,
   issueDesiredRuntimeRevision: issueDesiredRuntimeRevisionMock,
@@ -178,6 +184,7 @@ describe('openclaw gateway service', () => {
     getOpenClawPathsMock.mockReset()
     issueDesiredRuntimeRevisionMock.mockReset()
     markRuntimeRevisionInProgressMock.mockReset()
+    notifyRepairResultMock.mockReset()
     probeGatewayPortOwnerMock.mockReset()
     repairManagedChannelPluginMock.mockReset()
     repairDingtalkOfficialChannelMock.mockReset()
@@ -1169,6 +1176,67 @@ describe('openclaw gateway service', () => {
     })
     expect(result.ok).toBe(true)
     expect(result.running).toBe(true)
+  })
+
+  it('does not emit a premature gateway-self-heal notification for weixin before the fallback install path finishes', async () => {
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+      },
+      channels: {
+        'openclaw-weixin': {
+          enabled: true,
+          accounts: {
+            'wx-account': {
+              enabled: true,
+            },
+          },
+        },
+      },
+      plugins: {},
+    })
+
+    isPluginInstalledOnDiskMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true)
+
+    gatewayHealthMock
+      .mockResolvedValueOnce({
+        running: false,
+        raw: '',
+        stderr: '- channels.openclaw-weixin: unknown channel id: openclaw-weixin',
+        code: 1,
+        stateCode: 'config_invalid',
+        summary: 'Config invalid',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        raw: '{"ok":true}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'Gateway healthy',
+      })
+
+    repairManagedChannelPluginMock.mockResolvedValueOnce({
+      kind: 'manual-action-required',
+      channelId: 'openclaw-weixin',
+      pluginScope: 'channel',
+      entityScope: 'account',
+      action: 'launch-interactive-installer',
+      reason: '该渠道需要交互式安装器，不能通过后台修复自动完成。',
+      status: {
+        channelId: 'openclaw-weixin',
+        pluginId: 'openclaw-weixin',
+        summary: '微信插件仍待交互式安装器完成安装。',
+        stages: [],
+        evidence: [],
+      },
+    })
+
+    await ensureGatewayRunning()
+
+    expect(notifyRepairResultMock).not.toHaveBeenCalled()
   })
 
   it('classifies post-weixin-self-heal startup failures from the new startup error instead of the stale initial config_invalid state', async () => {

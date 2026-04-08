@@ -8,18 +8,23 @@ import {
   canFinalizeWeixinSetup,
   canPrepareFeishuManualBindingWithoutInstall,
   canFinishFeishuCreateMode,
+  createFeishuFinalizeSingleFlight,
   captureFeishuBotConfigSnapshot,
   ensureGatewayReadyForChannelConnect,
   hasRecoveredFeishuCreateMode,
   hasFeishuManualCredentialInput,
+  isFeishuFinalizeContextCurrent,
   isFeishuManualBindingReady,
   mergeFeishuCreateModeBots,
   resolveFeishuCreateModeRecoveryNotice,
   resolveChannelConnectBindingStrategy,
   resolveFeishuAutoRecoveryTarget,
+  resolveFeishuAutoFinalizeReadyKey,
   resolveFeishuManualBindingPreparationCopy,
   resolveFeishuPairingTarget,
   resolveFeishuCreateModeFinishStrategy,
+  resolveChannelConnectProgressCopy,
+  shouldFreezeFeishuSetupInteractions,
   isSafeAlreadyInstalledManagedPluginInstallError,
   resolveManagedPluginInstallPreflight,
   resolveManagedPluginInstallStrategy,
@@ -47,6 +52,36 @@ describe('ChannelConnect source copy cleanup', () => {
     expect(channelConnectSource).not.toContain('点击“开始连接”后，Qclaw 会安装个人微信插件')
     expect(channelConnectSource).not.toContain('如果二维码过期，安装器会自动刷新；连接成功后')
   })
+
+  it('shows the wecom managed-plugin precheck hint inline on the config page', () => {
+    expect(channelConnectSource).toContain('首次连接企业微信时，Qclaw 会先检查并补装官方插件')
+    expect(channelConnectSource).toContain('若配置里已有安装记录但本机插件目录缺失')
+  })
+
+  it('enters the installing state before managed plugin preflight starts', () => {
+    expect(channelConnectSource.indexOf("setInstallProgressPhase('preflight')")).toBeGreaterThanOrEqual(0)
+    expect(channelConnectSource.indexOf("setInstallProgressPhase('preflight')")).toBeLessThan(
+      channelConnectSource.indexOf('managedPluginInstallPreflight = await resolveManagedPluginInstallPreflight(window.api')
+    )
+  })
+
+  it('shows the Feishu finalize loading copy while auto-finalize is running', () => {
+    expect(channelConnectSource).toContain('正在启动配置，请稍候')
+  })
+
+  it('re-checks finalize context before writing Feishu config to disk', () => {
+    expect(channelConnectSource).toContain(
+      "if (!isCurrentFinalizeContext()) return\n          await writeConfigDirect("
+    )
+  })
+
+  it('clears the Feishu finishing state when channel changes invalidate finalize', () => {
+    const handleChannelChangeStart = channelConnectSource.indexOf('const handleChannelChange = (channelId: string) => {')
+    const handleFieldChangeStart = channelConnectSource.indexOf('const handleFieldChange = (key: string, value: string) => {')
+    const handleChannelChangeSource = channelConnectSource.slice(handleChannelChangeStart, handleFieldChangeStart)
+
+    expect(handleChannelChangeSource).toContain('invalidateFeishuFinalizeRequest({ resetFinishingState: true })')
+  })
 })
 describe('shouldShowChannelConnectSkipButton', () => {
   it('stays hidden by default when the channel has not earned skip availability yet', () => {
@@ -65,6 +100,16 @@ describe('shouldShowChannelConnectSkipButton', () => {
         forceShowSkip: true,
       })
     ).toBe(true)
+  })
+})
+
+describe('resolveChannelConnectProgressCopy', () => {
+  it('shows the plugin preflight wording before the real install begins', () => {
+    expect(resolveChannelConnectProgressCopy('installing', 'preflight')).toBe('正在检查插件兼容性...')
+  })
+
+  it('keeps the existing startup wording for the service boot stage', () => {
+    expect(resolveChannelConnectProgressCopy('starting', 'plugin-install')).toBe('正在启动服务...')
   })
 })
 
@@ -852,6 +897,191 @@ describe('resolveFeishuCreateModeRecoveryNotice', () => {
 
   it('keeps completion locked when the installer exited abnormally', () => {
     expect(resolveFeishuCreateModeRecoveryNotice(true, false, false)).toContain('安装器未正常完成')
+  })
+})
+
+describe('resolveFeishuAutoFinalizeReadyKey', () => {
+  it('auto-finalizes Feishu create mode once the installer exited cleanly and recovery is complete', () => {
+    expect(
+      resolveFeishuAutoFinalizeReadyKey({
+        channelId: 'feishu',
+        status: 'form',
+        setupMode: 'create',
+        createModeCanFinish: true,
+        manualCredentialsReady: false,
+        preparingManualBinding: false,
+        finishingFeishuSetup: false,
+        recoveredBotCount: 2,
+        installerExitCode: 0,
+      })
+    ).toBe('create:2:0')
+  })
+
+  it('waits for complete manual credentials before auto-finalizing link mode', () => {
+    expect(
+      resolveFeishuAutoFinalizeReadyKey({
+        channelId: 'feishu',
+        status: 'form',
+        setupMode: 'link',
+        createModeCanFinish: false,
+        manualCredentialsReady: false,
+        preparingManualBinding: false,
+        finishingFeishuSetup: false,
+        appId: 'cli_123',
+        appSecret: 'secret',
+      })
+    ).toBeNull()
+
+    expect(
+      resolveFeishuAutoFinalizeReadyKey({
+        channelId: 'feishu',
+        status: 'form',
+        setupMode: 'link',
+        createModeCanFinish: false,
+        manualCredentialsReady: true,
+        preparingManualBinding: false,
+        finishingFeishuSetup: false,
+        appId: 'cli_123',
+        appSecret: 'secret',
+      })
+    ).toBe('link:cli_123:secret')
+  })
+
+  it('blocks auto-finalize while the page is already finishing or still preparing manual binding', () => {
+    expect(
+      resolveFeishuAutoFinalizeReadyKey({
+        channelId: 'feishu',
+        status: 'form',
+        setupMode: 'create',
+        createModeCanFinish: true,
+        manualCredentialsReady: false,
+        preparingManualBinding: false,
+        finishingFeishuSetup: true,
+        recoveredBotCount: 1,
+        installerExitCode: 0,
+      })
+    ).toBeNull()
+
+    expect(
+      resolveFeishuAutoFinalizeReadyKey({
+        channelId: 'feishu',
+        status: 'form',
+        setupMode: 'link',
+        createModeCanFinish: false,
+        manualCredentialsReady: true,
+        preparingManualBinding: true,
+        finishingFeishuSetup: false,
+        appId: 'cli_123',
+        appSecret: 'secret',
+      })
+    ).toBeNull()
+  })
+})
+
+describe('createFeishuFinalizeSingleFlight', () => {
+  it('reuses the in-flight finalize promise instead of starting duplicate runs', async () => {
+    let resolveRun: () => void = () => {}
+    const runner = createFeishuFinalizeSingleFlight(async () => {
+      await new Promise<void>((resolve) => {
+        resolveRun = resolve
+      })
+    })
+
+    const firstRun = runner()
+    const secondRun = runner()
+
+    expect(firstRun).toBe(secondRun)
+
+    resolveRun()
+    await firstRun
+  })
+
+  it('allows retrying after the previous finalize run failed', async () => {
+    const finalize = vi.fn()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(undefined)
+    const runner = createFeishuFinalizeSingleFlight(finalize)
+
+    await expect(runner()).rejects.toThrow('boom')
+    await expect(runner()).resolves.toBeUndefined()
+    expect(finalize).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('isFeishuFinalizeContextCurrent', () => {
+  it('rejects stale finalize requests after the user switches channel or setup mode', () => {
+    expect(
+      isFeishuFinalizeContextCurrent({
+        requestVersion: 3,
+        activeRequestVersion: 4,
+        currentChannelId: 'feishu',
+        expectedChannelId: 'feishu',
+        currentSetupMode: 'create',
+        expectedSetupMode: 'create',
+      })
+    ).toBe(false)
+
+    expect(
+      isFeishuFinalizeContextCurrent({
+        requestVersion: 4,
+        activeRequestVersion: 4,
+        currentChannelId: 'wecom',
+        expectedChannelId: 'feishu',
+        currentSetupMode: 'create',
+        expectedSetupMode: 'create',
+      })
+    ).toBe(false)
+
+    expect(
+      isFeishuFinalizeContextCurrent({
+        requestVersion: 4,
+        activeRequestVersion: 4,
+        currentChannelId: 'feishu',
+        expectedChannelId: 'feishu',
+        currentSetupMode: 'link',
+        expectedSetupMode: 'create',
+      })
+    ).toBe(false)
+  })
+
+  it('accepts finalize results only when the request still matches the active Feishu context', () => {
+    expect(
+      isFeishuFinalizeContextCurrent({
+        requestVersion: 7,
+        activeRequestVersion: 7,
+        currentChannelId: 'feishu',
+        expectedChannelId: 'feishu',
+        currentSetupMode: 'link',
+        expectedSetupMode: 'link',
+      })
+    ).toBe(true)
+  })
+})
+
+describe('shouldFreezeFeishuSetupInteractions', () => {
+  it('freezes Feishu form interactions while finalize is running', () => {
+    expect(
+      shouldFreezeFeishuSetupInteractions({
+        channelId: 'feishu',
+        finishingFeishuSetup: true,
+      })
+    ).toBe(true)
+  })
+
+  it('keeps other channels and idle Feishu setups interactive', () => {
+    expect(
+      shouldFreezeFeishuSetupInteractions({
+        channelId: 'feishu',
+        finishingFeishuSetup: false,
+      })
+    ).toBe(false)
+
+    expect(
+      shouldFreezeFeishuSetupInteractions({
+        channelId: 'wecom',
+        finishingFeishuSetup: true,
+      })
+    ).toBe(false)
   })
 })
 
