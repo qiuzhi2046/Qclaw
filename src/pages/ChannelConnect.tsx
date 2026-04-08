@@ -942,6 +942,7 @@ export default function ChannelConnect({
   const [installProgressPhase, setInstallProgressPhase] = useState<InstallProgressPhase>('plugin-install')
   const [log, setLog] = useState('')
   const [error, setError] = useState('')
+  const [manualInstallCommand, setManualInstallCommand] = useState('')
   const [canSkip, setCanSkip] = useState(false)
   const [showFieldErrors, setShowFieldErrors] = useState(false)
   const [bindingMode, setBindingMode] = useState<'qr' | 'manual'>('qr')
@@ -1509,6 +1510,7 @@ export default function ChannelConnect({
     setStatus('form')
     setLog('')
     setError('')
+    setManualInstallCommand('')
     setShowFieldErrors(false)
     setBindingMode('qr')
     setFeishuBotSetupMode('create')
@@ -2199,6 +2201,7 @@ export default function ChannelConnect({
     setStatus('installing')
     setInstallProgressPhase('preflight')
     setError('')
+    setManualInstallCommand('')
     setLog((prev) => prev + `正在检查 ${selectedChannel.name} 插件兼容性与历史安装状态...\n`)
     let currentConfig = await window.api.readConfig().catch(() => null)
 
@@ -2234,6 +2237,7 @@ export default function ChannelConnect({
         // 官方插件通过 npx 安装
         setStatus('installing')
         setInstallProgressPhase('plugin-install')
+        const installFailureManualCommand = resolveManualInstallCommand(selectedChannel.id) || ''
         const pluginInstalledOnDisk = managedPluginInstallPreflight?.pluginInstalledOnDisk || false
         const pluginInstallStrategy =
           managedPluginInstallPreflight?.pluginInstallStrategy ||
@@ -2260,6 +2264,7 @@ export default function ChannelConnect({
               if (isSafeAlreadyInstalledManagedPluginInstallError(result.stderr || '')) {
                 setLog(prev => prev + '✅ 官方插件已存在，跳过重装\n\n')
               } else {
+                setManualInstallCommand(installFailureManualCommand)
                 setError(
                   toUserFacingCliFailureMessage({
                     stderr: result.stderr,
@@ -2277,6 +2282,7 @@ export default function ChannelConnect({
             setLog(prev => prev + '✅ 已复用已安装插件\n\n')
           }
         } catch (e: any) {
+          setManualInstallCommand(installFailureManualCommand)
           setError(toUserFacingUnknownErrorMessage(e, '插件安装失败，请检查网络与 npm 环境后重试。'))
           setStatus('error')
           return
@@ -2285,6 +2291,7 @@ export default function ChannelConnect({
         // 插件通过 openclaw plugins install 安装
         setStatus('installing')
         setInstallProgressPhase('plugin-install')
+        const installFailureManualCommand = resolveManualInstallCommand(selectedChannel.id) || ''
         const pluginAllowId = resolveChannelPluginAllowId(selectedChannel)
         const pluginInstalledOnDisk = managedPluginInstallPreflight?.pluginInstalledOnDisk || false
         const pluginInstallStrategy =
@@ -2326,6 +2333,7 @@ export default function ChannelConnect({
               if (isSafeAlreadyInstalledManagedPluginInstallError(result.stderr || '')) {
                 setLog(prev => prev + `✅ 插件已存在，跳过安装\n\n`)
               } else {
+                setManualInstallCommand(installFailureManualCommand)
                 setError(
                   toUserFacingCliFailureMessage({
                     stderr: result.stderr,
@@ -2343,6 +2351,7 @@ export default function ChannelConnect({
             setLog(prev => prev + '✅ 已复用已安装插件\n\n')
           }
         } catch (e: any) {
+          setManualInstallCommand(installFailureManualCommand)
           setError(toUserFacingUnknownErrorMessage(e, '插件安装失败，请检查网络与权限后重试。'))
           setStatus('error')
           return
@@ -2941,10 +2950,10 @@ export default function ChannelConnect({
           {status === 'error' && (
             <div>
               <Text size="xs" c="danger" mb="sm">{error}</Text>
-              {resolveManualInstallCommand(selectedChannelId) && (
+              {manualInstallCommand && (
                 <Alert color="orange" variant="light" title="手动修复" mb="sm">
                   <Text size="xs">如果重试仍然失败，请在终端中运行：</Text>
-                  <Code block mt={4}>{resolveManualInstallCommand(selectedChannelId)}</Code>
+                  <Code block mt={4}>{manualInstallCommand}</Code>
                 </Alert>
               )}
               <div className="flex gap-2">
@@ -2954,6 +2963,7 @@ export default function ChannelConnect({
                     setInstallProgressPhase('plugin-install')
                     setLog('')
                     setError('')
+                    setManualInstallCommand('')
                     pluginInstalledRef.current = false
                   }}
                   variant="default"

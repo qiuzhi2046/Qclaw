@@ -633,7 +633,7 @@ export function resolveManualInstallCommand(channelId: string): string | null {
     return 'npx -y @larksuite/openclaw-lark-tools install'
   }
   if (spec.npxSpecifier) {
-    return `npx ${spec.npxSpecifier}`
+    return `npx -y ${spec.npxSpecifier} install`
   }
   if (spec.packageName) {
     return `openclaw plugins install ${spec.packageName}`

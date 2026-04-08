@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildManagedChannelRepairOutcome } from '../managed-channel-repair'
-import type { ManagedChannelPluginStatusView } from '../managed-channel-plugin-lifecycle'
+import {
+  resolveManualInstallCommand,
+  type ManagedChannelPluginStatusView,
+} from '../managed-channel-plugin-lifecycle'
 
 function createStatus(summary: string): ManagedChannelPluginStatusView {
   return {
@@ -54,5 +57,14 @@ describe('buildManagedChannelRepairOutcome', () => {
       log: '✅ 企微官方插件已安装并已注册；loaded / ready 仍待上游证据。',
       nextAction: null,
     })
+  })
+})
+
+describe('resolveManualInstallCommand', () => {
+  it('returns the full runnable npx install command for npx-managed channels', () => {
+    expect(resolveManualInstallCommand('wecom')).toBe('npx -y @wecom/wecom-openclaw-cli install')
+    expect(resolveManualInstallCommand('openclaw-weixin')).toBe(
+      'npx -y @tencent-weixin/openclaw-weixin-cli@latest install'
+    )
   })
 })

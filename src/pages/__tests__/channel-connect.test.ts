@@ -53,6 +53,11 @@ describe('ChannelConnect source copy cleanup', () => {
     expect(channelConnectSource).not.toContain('如果二维码过期，安装器会自动刷新；连接成功后')
   })
 
+  it('does not show a manual install command for every generic error state', () => {
+    expect(channelConnectSource).not.toContain("{resolveManualInstallCommand(selectedChannelId) && (")
+    expect(channelConnectSource).toContain('{manualInstallCommand && (')
+  })
+
   it('shows the wecom managed-plugin precheck hint inline on the config page', () => {
     expect(channelConnectSource).toContain('首次连接企业微信时，Qclaw 会先检查并补装官方插件')
     expect(channelConnectSource).toContain('若配置里已有安装记录但本机插件目录缺失')

@@ -5,6 +5,11 @@ import { sendRepairResult, type RepairResultEvent } from './renderer-notificatio
 
 export type RepairTrigger = 'user-manual' | 'startup' | 'gateway-self-heal' | 'page-load' | 'channel-connect'
 
+function resolveRepairManualCommand(result: ManagedChannelPluginRepairResult): string | undefined {
+  if (result.kind !== 'install-failed') return undefined
+  return resolveManualInstallCommand(result.channelId) || undefined
+}
+
 /**
  * Unified repair result notification.
  *
@@ -28,7 +33,7 @@ export function notifyRepairResult(
     ok: outcome.ok,
     summary: outcome.summary,
     retryable: result.kind === 'gateway-reload-failed' ? result.retryable : undefined,
-    manualCommand: outcome.ok ? undefined : resolveManualInstallCommand(result.channelId) || undefined,
+    manualCommand: outcome.ok ? undefined : resolveRepairManualCommand(result),
     trigger,
     timestamp: Date.now(),
   }
