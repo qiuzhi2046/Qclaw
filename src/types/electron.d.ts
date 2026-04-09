@@ -231,7 +231,6 @@ interface WeixinInstallerSessionSnapshot {
   ok: boolean
   canceled: boolean
   command: string[]
-  forceMode: boolean
   beforeAccountIds: string[]
   afterAccountIds: string[]
   newAccountIds: string[]
@@ -239,7 +238,7 @@ interface WeixinInstallerSessionSnapshot {
 
 interface WeixinInstallerSessionEvent {
   sessionId: string
-  type: 'started' | 'output' | 'exit' | 'force-retry-started'
+  type: 'started' | 'output' | 'exit'
   stream?: 'stdout' | 'stderr'
   chunk?: string
   phase?: WeixinInstallerSessionSnapshot['phase']
@@ -247,7 +246,6 @@ interface WeixinInstallerSessionEvent {
   ok?: boolean
   canceled?: boolean
   command?: string[]
-  forceMode?: boolean
   beforeAccountIds?: string[]
   afterAccountIds?: string[]
   newAccountIds?: string[]

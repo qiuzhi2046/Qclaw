@@ -29,7 +29,7 @@
   "mac": {
     "icon": "build/icon.icns",
     "category": "public.app-category.developer-tools",
-    "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}.${ext}",
+    "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}-${arch}.${ext}",
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "strictVerify": false,

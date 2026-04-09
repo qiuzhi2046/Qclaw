@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 import {
@@ -8,11 +9,14 @@ import {
   consumeCanceledProcess,
   setActiveProcess,
 } from './command-control'
+import { getOpenClawPaths, readConfig } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
+import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { listWeixinAccountState } from './weixin-account-state'
+import { prepareWeixinInstallerConfig } from './weixin-installer-config'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 
 const childProcess = process.getBuiltinModule('node:child_process') as typeof import('node:child_process')
@@ -21,12 +25,51 @@ const { spawn } = childProcess
 const WEIXIN_INSTALLER_CONTROL_DOMAIN = 'weixin-installer'
 const WEIXIN_INSTALLER_PACKAGE = '@tencent-weixin/openclaw-weixin-cli@latest'
 const WEIXIN_INSTALLER_COMMAND = ['npx', '-y', WEIXIN_INSTALLER_PACKAGE, 'install'] as const
-const WEIXIN_INSTALLER_FORCE_COMMAND = ['npx', '-y', WEIXIN_INSTALLER_PACKAGE, 'install', '--force'] as const
-const WEIXIN_INSTALLER_INITIAL_TIMEOUT_MS = 90_000
-const WEIXIN_INSTALLER_FORCE_TIMEOUT_MS = MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs
 
 function resolveWeixinInstallerNpmCacheDir(): string {
   return path.join(app.getPath('userData'), 'npm-cache')
+}
+
+function resolveWeixinOfficialPluginInstallPath(homeDir: string): string {
+  return path.join(homeDir, 'extensions', 'openclaw-weixin')
+}
+
+async function isWeixinPluginInstalledOnDisk(): Promise<boolean> {
+  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const homeDir = String(openClawPaths?.homeDir || '').trim()
+  if (!homeDir) return false
+
+  try {
+    await fs.promises.access(resolveWeixinOfficialPluginInstallPath(homeDir))
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function prepareConfigForWeixinInstaller(): Promise<void> {
+  const [config, pluginInstalledOnDisk] = await Promise.all([
+    readConfig().catch(() => null),
+    isWeixinPluginInstalledOnDisk().catch(() => false),
+  ])
+
+  const result = prepareWeixinInstallerConfig(config, {
+    pluginInstalledOnDisk,
+  })
+  if (!result.changed) return
+
+  const writeResult = await applyConfigPatchGuarded(
+    {
+      beforeConfig: config,
+      afterConfig: result.config,
+      reason: 'channel-connect-onboard-prepare',
+    },
+    undefined,
+    { applyGatewayPolicy: false }
+  )
+  if (!writeResult.ok) {
+    throw new Error(writeResult.message || '准备个人微信安装器配置失败')
+  }
 }
 
 export interface WeixinInstallerSessionSnapshot {
@@ -38,7 +81,6 @@ export interface WeixinInstallerSessionSnapshot {
   ok: boolean
   canceled: boolean
   command: string[]
-  forceMode: boolean
   beforeAccountIds: string[]
   afterAccountIds: string[]
   newAccountIds: string[]
@@ -46,7 +88,7 @@ export interface WeixinInstallerSessionSnapshot {
 
 export interface WeixinInstallerSessionEvent {
   sessionId: string
-  type: 'started' | 'output' | 'exit' | 'force-retry-started'
+  type: 'started' | 'output' | 'exit'
   stream?: 'stdout' | 'stderr'
   chunk?: string
   phase?: WeixinInstallerSessionSnapshot['phase']
@@ -54,7 +96,6 @@ export interface WeixinInstallerSessionEvent {
   ok?: boolean
   canceled?: boolean
   command?: string[]
-  forceMode?: boolean
   beforeAccountIds?: string[]
   afterAccountIds?: string[]
   newAccountIds?: string[]
@@ -69,7 +110,6 @@ interface ActiveWeixinInstallerSession {
   ok: boolean
   canceled: boolean
   command: string[]
-  forceMode: boolean
   beforeAccountIds: string[]
   afterAccountIds: string[]
   newAccountIds: string[]
@@ -89,7 +129,6 @@ function buildSnapshot(): WeixinInstallerSessionSnapshot {
       ok: false,
       canceled: false,
       command: [...WEIXIN_INSTALLER_COMMAND],
-      forceMode: false,
       beforeAccountIds: [],
       afterAccountIds: [],
       newAccountIds: [],
@@ -105,7 +144,6 @@ function buildSnapshot(): WeixinInstallerSessionSnapshot {
     ok: activeSession.ok,
     canceled: activeSession.canceled,
     command: activeSession.command,
-    forceMode: activeSession.forceMode,
     beforeAccountIds: [...activeSession.beforeAccountIds],
     afterAccountIds: [...activeSession.afterAccountIds],
     newAccountIds: [...activeSession.newAccountIds],
@@ -191,12 +229,13 @@ export async function startWeixinInstallerSession(
       ok: false,
       canceled: false,
       command: [...WEIXIN_INSTALLER_COMMAND],
-      forceMode: false,
       beforeAccountIds: [],
       afterAccountIds: [],
       newAccountIds: [],
     }
   }
+
+  await prepareConfigForWeixinInstaller()
 
   const npmCacheDir = resolveWeixinInstallerNpmCacheDir()
   const isolatedNpmCache = await createIsolatedNpmCacheEnv(npmCacheDir)
@@ -221,7 +260,6 @@ export async function startWeixinInstallerSession(
     },
     detached: process.platform !== 'win32',
     shell: process.platform === 'win32',
-    timeout: WEIXIN_INSTALLER_INITIAL_TIMEOUT_MS,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
@@ -234,7 +272,6 @@ export async function startWeixinInstallerSession(
     ok: false,
     canceled: false,
     command: [...WEIXIN_INSTALLER_COMMAND],
-    forceMode: false,
     beforeAccountIds,
     afterAccountIds: [],
     newAccountIds: [],
@@ -262,14 +299,6 @@ export async function startWeixinInstallerSession(
     if (!activeSession || activeSession.id !== sessionId) return
     clearActiveProcessIfMatch(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
     const canceled = consumeCanceledProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    const failed = (code === null || code !== 0) && !canceled
-
-    if (failed && !activeSession.forceMode) {
-      emit({ sessionId, type: 'force-retry-started', forceMode: true })
-      void startForceRetry(sessionId, emit)
-      return
-    }
-
     void finalizeSession(sessionId, emit, {
       code: canceled ? null : code,
       ok: code === 0 && !canceled,
@@ -281,13 +310,6 @@ export async function startWeixinInstallerSession(
     if (!activeSession || activeSession.id !== sessionId) return
     clearActiveProcessIfMatch(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
     const canceled = consumeCanceledProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-
-    if (!canceled && !activeSession.forceMode) {
-      activeSession.output += `\n${error instanceof Error ? error.message : String(error)}`
-      emit({ sessionId, type: 'force-retry-started', forceMode: true })
-      void startForceRetry(sessionId, emit)
-      return
-    }
 
     void finalizeSession(sessionId, emit, {
       code: canceled ? null : 1,
@@ -298,79 +320,6 @@ export async function startWeixinInstallerSession(
   })
 
   return buildSnapshot()
-}
-
-async function startForceRetry(
-  sessionId: string,
-  emit: (event: WeixinInstallerSessionEvent) => void
-): Promise<void> {
-  if (!activeSession || activeSession.id !== sessionId) return
-
-  const npmCacheDir = activeSession.npmCacheDir
-  const isolatedNpmCache = await createIsolatedNpmCacheEnv(npmCacheDir)
-
-  if (!activeSession || activeSession.id !== sessionId || activeSession.phase === 'exited') return
-
-  activeSession.forceMode = true
-  activeSession.command = [...WEIXIN_INSTALLER_FORCE_COMMAND]
-  activeSession.output += '\n--- force 模式重试 ---\n'
-  activeSession.phase = 'running'
-
-  const proc = spawn(WEIXIN_INSTALLER_FORCE_COMMAND[0], WEIXIN_INSTALLER_FORCE_COMMAND.slice(1), {
-    cwd: resolveSafeWorkingDirectory({
-      env: process.env,
-      platform: process.platform,
-    }),
-    env: {
-      ...process.env,
-      PATH: buildCliPathWithCandidates({
-        platform: process.platform,
-        currentPath: process.env.PATH || '',
-        env: process.env,
-      }),
-      NO_COLOR: '1',
-      FORCE_COLOR: '0',
-      ...isolatedNpmCache.env,
-    },
-    detached: process.platform !== 'win32',
-    shell: process.platform === 'win32',
-    timeout: WEIXIN_INSTALLER_FORCE_TIMEOUT_MS,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-
-  activeSession.process = proc
-  setActiveProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-
-  proc.stdout?.on('data', (chunk) => {
-    appendOutput('stdout', String(chunk), emit)
-  })
-
-  proc.stderr?.on('data', (chunk) => {
-    appendOutput('stderr', String(chunk), emit)
-  })
-
-  proc.on('close', (code) => {
-    if (!activeSession || activeSession.id !== sessionId) return
-    clearActiveProcessIfMatch(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    const canceled = consumeCanceledProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    void finalizeSession(sessionId, emit, {
-      code: canceled ? null : code,
-      ok: code === 0 && !canceled,
-      canceled,
-    })
-  })
-
-  proc.on('error', (error) => {
-    if (!activeSession || activeSession.id !== sessionId) return
-    clearActiveProcessIfMatch(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    const canceled = consumeCanceledProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    void finalizeSession(sessionId, emit, {
-      code: canceled ? null : 1,
-      ok: false,
-      canceled,
-      extraOutput: `\n${error instanceof Error ? error.message : String(error)}`,
-    })
-  })
 }
 
 export async function stopWeixinInstallerSession(): Promise<{ ok: boolean }> {

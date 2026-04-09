@@ -94,10 +94,9 @@ type PluginRepairOptions = Parameters<typeof window.api.repairIncompatiblePlugin
 type WeixinInstallerSnapshot = Awaited<ReturnType<typeof window.api.getWeixinInstallerState>>
 type DashboardWeixinInstallerEvent = {
   sessionId: string
-  type: 'started' | 'output' | 'exit' | 'force-retry-started'
+  type: 'started' | 'output' | 'exit'
   ok?: boolean
   canceled?: boolean
-  forceMode?: boolean
   newAccountIds?: string[]
 }
 

@@ -972,7 +972,6 @@ export default function ChannelConnect({
   const [weixinInstallerOutput, setWeixinInstallerOutput] = useState('')
   const [weixinInstallerExitCode, setWeixinInstallerExitCode] = useState<number | null>(null)
   const [weixinInstallerCanceled, setWeixinInstallerCanceled] = useState(false)
-  const [weixinInstallerForceMode, setWeixinInstallerForceMode] = useState(false)
   const [weixinInstallerBusy, setWeixinInstallerBusy] = useState(false)
   const [finishingWeixinSetup, setFinishingWeixinSetup] = useState(false)
   const [weixinInstallerNewAccountIds, setWeixinInstallerNewAccountIds] = useState<string[]>([])
@@ -1121,7 +1120,6 @@ export default function ChannelConnect({
       setWeixinInstallerOutput(snapshot.output || '')
       setWeixinInstallerExitCode(snapshot.code ?? null)
       setWeixinInstallerCanceled(Boolean(snapshot.canceled))
-      setWeixinInstallerForceMode(Boolean(snapshot.forceMode))
       setWeixinInstallerNewAccountIds(snapshot.newAccountIds || [])
     },
     []
@@ -2023,13 +2021,7 @@ export default function ChannelConnect({
         setWeixinInstallerRunning(true)
         setWeixinInstallerExitCode(null)
         setWeixinInstallerCanceled(false)
-        setWeixinInstallerForceMode(false)
         setWeixinInstallerNewAccountIds([])
-        return
-      }
-
-      if (payload.type === 'force-retry-started') {
-        setWeixinInstallerForceMode(true)
         return
       }
 
@@ -2743,9 +2735,7 @@ export default function ChannelConnect({
                           >
                             {finishingWeixinSetup
                               ? '同步中'
-                              : weixinInstallerRunning && weixinInstallerForceMode
-                                ? 'force 重试中'
-                                : weixinInstallerRunning
+                              : weixinInstallerRunning
                                   ? '运行中'
                                   : weixinInstallerCanceled
                                     ? '已取消'

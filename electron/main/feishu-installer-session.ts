@@ -22,7 +22,6 @@ import {
   FEISHU_OFFICIAL_PLUGIN_ID,
   prepareFeishuInstallerConfig,
 } from './feishu-installer-config'
-import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
@@ -503,11 +502,10 @@ export async function startFeishuInstallerSession(
             }
           : {}),
         ...isolatedNpmCache.env,
-      },
-      shell: process.platform === 'win32',
-      timeout: MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    },
+    shell: process.platform === 'win32',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
 
     activeSession = {
       id: sessionId,
