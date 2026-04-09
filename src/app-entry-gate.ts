@@ -1,6 +1,7 @@
 export type AppState =
   | 'welcome'
   | 'env-check'
+  | 'update-intercept'
   | 'setup'
   | 'gateway-bootstrap'
   | 'dashboard'

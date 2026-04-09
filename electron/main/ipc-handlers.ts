@@ -616,6 +616,7 @@ export function registerIpcHandlers() {
   )
   ipcMain.handle('qclaw:update:status', () => getQClawUpdateStatus())
   ipcMain.handle('qclaw:update:check', () => checkQClawUpdate())
+  ipcMain.handle('qclaw:update:check-on-startup', () => checkQClawUpdate())
   ipcMain.handle('qclaw:update:download', () => downloadQClawUpdate())
   ipcMain.handle('qclaw:update:install', () => installQClawUpdate())
   ipcMain.handle('qclaw:update:open-download-url', () => openQClawUpdateDownloadUrl())

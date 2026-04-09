@@ -55,6 +55,8 @@ export interface ChannelDefinition {
   skipPairing?: boolean
   /** When true, use QR code scanning to bind the channel instead of manual form fields */
   useQrBinding?: boolean
+  /** Optional hint shown during plugin installation (e.g. estimated duration) */
+  installHint?: string
 }
 
 function hasOwnRecord(value: unknown): value is Record<string, any> {
@@ -117,6 +119,7 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
     },
     useQrBinding: true,
     skipPairing: true,
+    installHint: '整个过程大概需要 1-3 分钟',
   },
   {
     id: 'dingtalk',
@@ -167,6 +170,7 @@ const CHANNEL_DEFINITIONS: ChannelDefinition[] = [
       cleanupPluginIds: WEIXIN_MANAGED_PLUGIN?.cleanupPluginIds,
     },
     skipPairing: true,
+    installHint: '整个过程大概需要 1-3 分钟',
   },
 ]
 

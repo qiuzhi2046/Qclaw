@@ -27,3 +27,16 @@ export function sendRepairResult(event: RepairResultEvent): void {
     }
   }
 }
+
+export const UPDATE_AVAILABLE_CHANNEL = 'qclaw:update:available'
+
+/**
+ * Send an update-available event to all renderer windows.
+ */
+export function sendUpdateAvailable(payload: Record<string, unknown>): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send(UPDATE_AVAILABLE_CHANNEL, payload)
+    }
+  }
+}

@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Tooltip } from '@mantine/core'
 import logoSrc from '@/assets/logo.png'
 import tooltips from '@/constants/tooltips.json'
+import { useUpdateNotification } from '../contexts/UpdateNotificationContext'
 
 const NAV_ITEMS = [
   {
@@ -58,6 +59,7 @@ const NAV_ITEMS = [
 
 export default function MainLayout() {
   const location = useLocation()
+  const { state: updateState, openConfirmDialog } = useUpdateNotification()
 
   const isActive = (to: string) => {
     if (to === '/') return location.pathname === '/'
@@ -120,6 +122,14 @@ export default function MainLayout() {
               </svg>
               <span>设置</span>
             </NavLink>
+            {updateState.hasUpdate && (
+              <button
+                onClick={() => openConfirmDialog()}
+                className="text-xs text-red-500 font-medium px-3 py-1 cursor-pointer hover:text-red-400 transition-colors"
+              >
+                新版本
+              </button>
+            )}
           </div>
         </nav>
 

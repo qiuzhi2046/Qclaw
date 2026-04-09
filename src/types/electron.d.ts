@@ -1752,6 +1752,10 @@ interface ElectronApi {
   onRepairResult: (listener: (payload: Record<string, any>) => void) => () => void
   getActiveRepairs: () => Promise<Record<string, any>[]>
 
+  // Update available notification (background checker → renderer)
+  onUpdateAvailable: (listener: (payload: QClawUpdateStatus & { source?: string }) => void) => () => void
+  checkQClawUpdateOnStartup: () => Promise<QClawUpdateStatus>
+
   // Channels
   channelsAdd: (channel: string, token: string) => Promise<CliResult>
   setupDingtalkOfficialChannel: (formData: Record<string, string>) => Promise<DingtalkOfficialSetupResult>

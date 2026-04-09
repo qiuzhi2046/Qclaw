@@ -195,6 +195,11 @@ export const api = {
     subscribeToChannel('managed-plugin:repair:result', listener),
   getActiveRepairs: () => ipcRenderer.invoke('managed-plugin:repair:active'),
 
+  // Update available notification (background checker → renderer)
+  onUpdateAvailable: (listener: (payload: Record<string, unknown>) => void) =>
+    subscribeToChannel('qclaw:update:available', listener),
+  checkQClawUpdateOnStartup: () => ipcRenderer.invoke('qclaw:update:check-on-startup'),
+
   // Channels
   channelsAdd: (channel: string, token: string) => ipcRenderer.invoke('channels:add', channel, token),
   setupDingtalkOfficialChannel: (formData: Record<string, string>) =>

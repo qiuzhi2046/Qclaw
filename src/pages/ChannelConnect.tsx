@@ -2916,6 +2916,9 @@ export default function ChannelConnect({
                   100% { width: 10%; margin-left: 90%; }
                 }
               `}</style>
+              {selectedChannel?.installHint && (
+                <span className="text-xs app-text-muted mt-1 block">{selectedChannel.installHint}</span>
+              )}
             </div>
           )}
 
