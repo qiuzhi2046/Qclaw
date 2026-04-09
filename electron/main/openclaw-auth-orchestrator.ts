@@ -18,6 +18,7 @@ import {
   loadEffectiveAuthRegistry,
   resolveAuthMethodDescriptor,
 } from './openclaw-auth-executor'
+import { appendModelAuthDiagnosticLog } from './model-auth-diagnostic-log'
 import {
   loadOpenClawAuthRegistry,
   type OpenClawAuthRegistry,
@@ -217,6 +218,26 @@ function fromBuildFailure(
   }
 }
 
+async function appendRunAuthDiagnostic(entry: {
+  event: string
+  action: AuthAction
+  details?: Record<string, unknown>
+}) {
+  await appendModelAuthDiagnosticLog({
+    source: 'main:auth-orchestrator',
+    event: entry.event,
+    providerId: 'providerId' in entry.action ? String(entry.action.providerId || '').trim() || undefined : undefined,
+    methodId:
+      'methodId' in entry.action
+        ? String((entry.action as { methodId?: string }).methodId || '').trim() || undefined
+        : undefined,
+    details: {
+      actionKind: entry.action.kind,
+      ...entry.details,
+    },
+  }).catch(() => null)
+}
+
 async function resolveCapabilities(options: RunAuthActionOptions): Promise<OpenClawCapabilities | undefined> {
   if (options.capabilities) return options.capabilities
   if (options.loadCapabilities) return options.loadCapabilities()
@@ -231,6 +252,11 @@ export async function runAuthAction(
   options: RunAuthActionOptions = {}
 ): Promise<RunAuthActionResult> {
   if (authRunning) {
+    await appendRunAuthDiagnostic({
+      event: 'run-auth-action-rejected-busy',
+      action,
+      details: {},
+    })
     return {
       ok: false,
       action: action.kind,
@@ -253,6 +279,15 @@ export async function runAuthAction(
   const attemptedCommands: string[][] = []
 
   try {
+    await appendRunAuthDiagnostic({
+      event: 'run-auth-action-start',
+      action,
+      details: {
+        hasSecret: 'secret' in action ? Boolean(String(action.secret || '').trim()) : false,
+        selectedExtraOption:
+          'selectedExtraOption' in action ? String(action.selectedExtraOption || '').trim() || undefined : undefined,
+      },
+    })
     if (action.kind === 'login') {
       const providerId = action.providerId.trim()
       const methodId = normalizeAuthChoice(action.methodId)
@@ -298,6 +333,19 @@ export async function runAuthAction(
       )
 
       attemptedCommands.push(...result.attemptedCommands)
+      await appendRunAuthDiagnostic({
+        event: 'run-auth-action-result',
+        action,
+        details: {
+          ok: result.ok,
+          errorCode: result.errorCode,
+          attemptedCommandCount: result.attemptedCommands.length,
+          routeKind: result.routeKind,
+          routeMethodId: result.routeMethodId,
+          pluginId: result.pluginId,
+          message: result.message,
+        },
+      })
       if (result.ok) {
         return successFromCommand(action.kind, attemptedCommands, result)
       }
@@ -491,6 +539,13 @@ export async function runAuthAction(
     const unreachableAction: never = action
     return invalidInput('onboard-fallback', `Unsupported auth action: ${String(unreachableAction)}`)
   } finally {
+    await appendRunAuthDiagnostic({
+      event: 'run-auth-action-finished',
+      action,
+      details: {
+        authRunningBeforeRelease: authRunning,
+      },
+    })
     authRunning = false
   }
 }

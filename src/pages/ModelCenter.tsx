@@ -20,10 +20,58 @@ import {
   getKnownProviderCatalog,
   resolveProviderDisplayName,
 } from '../lib/openclaw-provider-registry'
+import { summarizeModelAuthDiagnosticState } from '../shared/model-auth-diagnostic'
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
 
 const LOCAL_PROVIDER_IDS = new Set(['ollama', 'vllm', 'custom-openai'])
 const CUSTOM_PROVIDER_AMBIGUOUS_ERROR_MESSAGE = '检测到多个同 endpoint/model 的自定义提供商，请填写提供商 ID 后重试。'
+
+async function appendModelCenterDiagnosticLog(entry: {
+  event: string
+  providerId: string
+  methodId?: string
+  attemptId?: string | number
+  details?: Record<string, unknown>
+}) {
+  await window.api.appendModelAuthDiagnosticLog({
+    source: 'renderer:model-center',
+    event: entry.event,
+    providerId: entry.providerId,
+    methodId: entry.methodId,
+    attemptId: entry.attemptId,
+    details: entry.details,
+  }).catch(() => false)
+}
+
+async function captureModelCenterDiagnosticSnapshot(input: {
+  event: string
+  providerId: string
+  methodId?: string
+  attemptId?: string | number
+  details?: Record<string, unknown>
+}) {
+  const [envVars, configData, statusResult] = await Promise.all([
+    window.api.readEnvFile().catch(() => ({})),
+    window.api.readConfig().catch(() => null),
+    window.api.getModelStatus().catch(() => null),
+  ])
+  const statusData = statusResult && statusResult.ok ? (statusResult.data as Record<string, any> | null) : null
+  return appendModelCenterDiagnosticLog({
+    event: input.event,
+    providerId: input.providerId,
+    methodId: input.methodId,
+    attemptId: input.attemptId,
+    details: {
+      ...(input.details || {}),
+      summary: summarizeModelAuthDiagnosticState({
+        providerId: input.providerId,
+        envVars,
+        config: configData,
+        statusData,
+      }),
+    },
+  })
+}
 
 function isLocalProvider(providerId: string): boolean {
   return LOCAL_PROVIDER_IDS.has(providerId)
@@ -2253,6 +2301,21 @@ export default function ModelCenter({
     }
 
     try {
+      await captureModelCenterDiagnosticSnapshot({
+        event: 'submit-start',
+        providerId: selectedProviderId,
+        methodId: selectedMethod.id,
+        attemptId: authAttemptId,
+        details: {
+          methodKind: selectedMethod.kind,
+          requiresBrowser,
+          requiresCustomConfig,
+          selectedExtraOption: selectedExtraOption || undefined,
+          preferRuntimeModelSignals: shouldPreferRuntimeModelSignalsAfterAuth(selectedMethod),
+          deferPostAuthDefaultModelApply: shouldDeferPostAuthDefaultModelApply(selectedMethod),
+          requireBlockingPostAuthVerification: shouldRequireBlockingPostAuthVerification(selectedMethod),
+        },
+      })
       setStatusText(
         requiresBrowser ? '正在准备浏览器授权登录...' : requiresCustomConfig ? '正在写入自定义提供商配置...' : '正在执行认证...'
       )
@@ -2279,7 +2342,29 @@ export default function ModelCenter({
         applyCanceledState()
         return
       }
+      await appendModelCenterDiagnosticLog({
+        event: 'submit-auth-result',
+        providerId: selectedProviderId,
+        methodId: selectedMethod.id,
+        attemptId: authAttemptId,
+        details: {
+          ok: authResult.ok,
+          fallbackUsed: 'fallbackUsed' in authResult ? Boolean(authResult.fallbackUsed) : undefined,
+          errorCode: 'errorCode' in authResult ? authResult.errorCode : undefined,
+          message: 'message' in authResult ? authResult.message : undefined,
+        },
+      })
       if (!authResult.ok) {
+        await captureModelCenterDiagnosticSnapshot({
+          event: 'submit-failed-state',
+          providerId: selectedProviderId,
+          methodId: selectedMethod.id,
+          attemptId: authAttemptId,
+          details: {
+            errorCode: 'errorCode' in authResult ? authResult.errorCode : undefined,
+            message: 'message' in authResult ? authResult.message : undefined,
+          },
+        })
         if ('preflightAction' in authResult && authResult.preflightAction) {
           setOAuthDependencyAction(authResult.preflightAction as OAuthExternalDependencyPreflightAction)
         }
@@ -2336,10 +2421,27 @@ export default function ModelCenter({
           return
         }
         if (customVerificationResult?.status === 'ambiguous') {
+          await captureModelCenterDiagnosticSnapshot({
+            event: 'blocking-verification-ambiguous',
+            providerId: selectedProviderId,
+            methodId: selectedMethod.id,
+            attemptId: authAttemptId,
+            details: {},
+          })
           applyAuthFailureState(CUSTOM_PROVIDER_AMBIGUOUS_ERROR_MESSAGE)
           return
         }
         if (!verified) {
+          await captureModelCenterDiagnosticSnapshot({
+            event: 'blocking-verification-failed',
+            providerId: selectedProviderId,
+            methodId: selectedMethod.id,
+            attemptId: authAttemptId,
+            details: {
+              verified,
+              verifiedProviderId,
+            },
+          })
           applyAuthFailureState('认证结果尚未生效，请重试或检查网络后再试。')
           return
         }
@@ -2386,6 +2488,19 @@ export default function ModelCenter({
           })
           setStatusText(gatewayReloadWarning)
         }
+        await captureModelCenterDiagnosticSnapshot({
+          event: 'immediate-default-model-apply',
+          providerId: verifiedProviderId,
+          methodId: selectedMethod.id,
+          attemptId: authAttemptId,
+          details: {
+            preferredModelKey,
+            ok: applyResult?.ok,
+            message: applyResult?.message,
+            writeSource: applyResult?.writeSource,
+            upstreamFallbackReason: applyResult?.upstreamFallbackReason,
+          },
+        })
       }
       if (shouldRepairLegacyMiniMaxAliases && !cancelRequestedRef.current) {
         setStatusText('正在同步历史 MiniMax 配置...')
@@ -2411,6 +2526,20 @@ export default function ModelCenter({
         needsInitialization: false,
         preferredModelKey: preferredModelKey || undefined,
       }
+      await captureModelCenterDiagnosticSnapshot({
+        event: 'configured-context',
+        providerId: verifiedProviderId,
+        methodId: selectedMethod.id,
+        attemptId: authAttemptId,
+        details: {
+          verified,
+          providerCandidates,
+          preferredModelKey: preferredModelKey || undefined,
+          shouldQueueDeferredDefaultModelApply,
+          gatewayReloadWarning: gatewayReloadWarning || undefined,
+          context,
+        },
+      })
       setStatusText('配置成功，正在进入下一步...')
       if (shouldQueueDeferredDefaultModelApply && !cancelRequestedRef.current) {
         void (async () => {
@@ -2455,6 +2584,18 @@ export default function ModelCenter({
           if (!deferredWarning) return
 
           setWarning((current) => joinModelCenterNonBlockingMessages(current, deferredWarning))
+          await captureModelCenterDiagnosticSnapshot({
+            event: 'deferred-default-model-apply',
+            providerId: verifiedProviderId,
+            methodId: selectedMethod.id,
+            attemptId: authAttemptId,
+            details: {
+              preferredModelKey: deferredPreferredModelKey,
+              ok: applyResult?.ok,
+              message: applyResult?.message,
+              warning: deferredWarning,
+            },
+          })
         })()
       }
       if (stayOnConfigured) {

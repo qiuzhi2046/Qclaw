@@ -21,6 +21,13 @@ describe('openclaw-download-fallbacks', () => {
     ])
   })
 
+  it('uses the explicit npmjs registry url for the final official-source fallback', () => {
+    expect(OPENCLAW_NPM_REGISTRY_MIRRORS.at(-1)).toMatchObject({
+      id: 'npmjs',
+      registryUrl: 'https://registry.npmjs.org',
+    })
+  })
+
   it('retries npm registries in order and stops at first success', async () => {
     const runner = vi.fn(async (mirror: (typeof OPENCLAW_NPM_REGISTRY_MIRRORS)[number]) => {
       if (mirror.id === 'npmmirror') {

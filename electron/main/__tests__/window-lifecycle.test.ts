@@ -1,12 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
-import { getLiveWindow, revealWindow, showOrCreateWindow } from '../window-lifecycle'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { deliverToWindowWhenReady, getLiveWindow, revealWindow, showOrCreateWindow } from '../window-lifecycle'
 
 function createWindowMock(overrides: Partial<{
   destroyed: boolean
   minimized: boolean
+  loadingMainFrame: boolean
 }> = {}) {
   let destroyed = Boolean(overrides.destroyed)
   let minimized = Boolean(overrides.minimized)
+  let loadingMainFrame = Boolean(overrides.loadingMainFrame)
+  let didFinishLoadHandler: (() => void) | null = null
 
   return {
     isDestroyed: vi.fn(() => destroyed),
@@ -16,11 +19,31 @@ function createWindowMock(overrides: Partial<{
     }),
     show: vi.fn(),
     focus: vi.fn(),
+    webContents: {
+      isLoadingMainFrame: vi.fn(() => loadingMainFrame),
+      once: vi.fn((event: string, handler: () => void) => {
+        if (event === 'did-finish-load') {
+          didFinishLoadHandler = handler
+        }
+      }),
+    },
     destroy: () => {
       destroyed = true
     },
+    finishLoad: () => {
+      loadingMainFrame = false
+      didFinishLoadHandler?.()
+    },
   }
 }
+
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('getLiveWindow', () => {
   it('returns null for destroyed windows', () => {
@@ -98,5 +121,34 @@ describe('showOrCreateWindow', () => {
       window: browserWindow,
       created: false,
     })
+  })
+})
+
+describe('deliverToWindowWhenReady', () => {
+  it('runs immediately when the renderer main frame has already loaded', () => {
+    const browserWindow = createWindowMock()
+    const deliver = vi.fn()
+
+    deliverToWindowWhenReady(browserWindow, deliver)
+
+    expect(deliver).toHaveBeenCalledTimes(1)
+    expect(browserWindow.webContents.once).not.toHaveBeenCalled()
+  })
+
+  it('waits for did-finish-load before delivering to a newly created window', () => {
+    const browserWindow = createWindowMock({ loadingMainFrame: true })
+    const deliver = vi.fn()
+
+    deliverToWindowWhenReady(browserWindow, deliver)
+
+    expect(deliver).not.toHaveBeenCalled()
+    expect(browserWindow.webContents.once).toHaveBeenCalledWith('did-finish-load', expect.any(Function))
+
+    browserWindow.finishLoad()
+    vi.advanceTimersByTime(49)
+    expect(deliver).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
+    expect(deliver).toHaveBeenCalledTimes(1)
   })
 })

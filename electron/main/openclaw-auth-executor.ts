@@ -24,7 +24,7 @@ import {
 import { normalizeAuthChoice } from './openclaw-spawn'
 import { restoreTrustedPluginConfig } from './openclaw-plugin-config'
 import { extractStalePluginConfigEntryIds, pruneStalePluginConfigEntries } from './openclaw-config-warnings'
-import { repairKnownProviderConfigGaps } from './openclaw-provider-config-repair'
+import { ensureProviderSnapshotEnabled, repairKnownProviderConfigGaps } from './openclaw-provider-config-repair'
 import { applyGatewaySecretAction } from './gateway-secret-apply'
 import { callGatewayRpcViaControlUiBrowser } from './openclaw-control-ui-rpc'
 import {
@@ -41,6 +41,8 @@ import {
   resolveConfiguredCustomProviderMatchFromConfig,
   type CustomProviderConfigMatchResult,
 } from '../../src/shared/custom-provider-config-match'
+import { summarizeModelAuthDiagnosticState } from '../../src/shared/model-auth-diagnostic'
+import { appendModelAuthDiagnosticLog } from './model-auth-diagnostic-log'
 const { dirname } = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 const PLUGIN_TIMEOUT_MS = MAIN_RUNTIME_POLICY.auth.pluginEnableTimeoutMs
@@ -73,6 +75,38 @@ interface OAuthCodePayload {
 export interface ResolvedOpenClawAuthMethod {
   provider: OpenClawAuthProviderDescriptor
   method: OpenClawAuthMethodDescriptor
+}
+
+async function appendAuthExecutorDiagnostic(entry: {
+  event: string
+  providerId?: string
+  methodId?: string
+  details?: Record<string, unknown>
+}) {
+  await appendModelAuthDiagnosticLog({
+    source: 'main:auth-executor',
+    event: entry.event,
+    providerId: String(entry.providerId || '').trim() || undefined,
+    methodId: String(entry.methodId || '').trim() || undefined,
+    details: entry.details,
+  }).catch(() => null)
+}
+
+function summarizeConfigOnly(providerId: string, config: Record<string, any> | null | undefined) {
+  return summarizeModelAuthDiagnosticState({
+    providerId,
+    config: config || null,
+  })
+}
+
+async function safeReadConfig(
+  readConfig: (() => Promise<Record<string, any> | null>) | (() => Record<string, any> | null)
+): Promise<Record<string, any> | null> {
+  try {
+    return await Promise.resolve(readConfig())
+  } catch {
+    return null
+  }
 }
 
 export async function loadEffectiveAuthRegistry(params: {
@@ -435,7 +469,7 @@ async function prepareTemporaryMainAgentDefaultScope(params: {
     ok: true,
     restore: async () => {
       try {
-        const currentConfig = await params.readConfig().catch(() => null)
+        const currentConfig = await safeReadConfig(params.readConfig)
         const restored = restoreOriginalAgentDefaultSelection(currentConfig, params.configBeforeAuth)
         if (!restored.changed || !restored.config) {
           return { ok: true }
@@ -741,7 +775,7 @@ async function ensureKnownProviderConfigAfterAuth(params: {
       message: string
     }
 > {
-  const currentConfig = await params.readConfig().catch(() => null)
+  const currentConfig = await safeReadConfig(params.readConfig)
   const repairResult = repairKnownProviderConfigGaps(currentConfig)
   if (!repairResult.changed || !repairResult.config) {
     return {
@@ -875,21 +909,74 @@ async function tryOnboardApiKeyViaRpc(input: {
     nextConfig: Record<string, any>
   ) => Promise<void>
 }): Promise<ExecuteAuthRouteResult | null> {
+  await appendAuthExecutorDiagnostic({
+    event: 'onboard-rpc-start',
+    providerId: input.providerId,
+    methodId: input.methodId,
+    details: {
+      routeProviderId: input.route.providerId,
+      routeMethodId: input.route.methodId,
+      cliFlag: input.route.cliFlag,
+      requiresSecret: input.route.requiresSecret === true,
+    },
+  })
   const { upsertApiKeyAuthProfile } = await import('./local-model-probe')
   const profileResult = await upsertApiKeyAuthProfile({
     provider: input.providerId,
     apiKey: input.apiKey,
   })
+  await appendAuthExecutorDiagnostic({
+    event: 'onboard-rpc-profile-upsert',
+    providerId: input.providerId,
+    methodId: input.methodId,
+    details: {
+      ok: profileResult.ok,
+      created: profileResult.ok ? profileResult.created : undefined,
+      updated: profileResult.ok ? profileResult.updated : undefined,
+      profileId: profileResult.ok ? profileResult.profileId : undefined,
+      authStorePath: profileResult.ok ? profileResult.authStorePath : undefined,
+      error: profileResult.ok ? undefined : profileResult.error,
+    },
+  })
   if (!profileResult.ok) return null
 
   const { readConfig: cliReadConfig, readEnvFile } = await import('./cli')
   const rpcDeps = { readConfig: cliReadConfig, readEnvFile }
-  const snapshot = (await callGatewayRpcViaControlUiBrowser(rpcDeps, 'config.get', {})) as {
+  let snapshot: {
     config?: Record<string, any> | null
     hash?: string
     baseHash?: string
     valid?: boolean
   }
+  try {
+    snapshot = (await callGatewayRpcViaControlUiBrowser(rpcDeps, 'config.get', {})) as {
+      config?: Record<string, any> | null
+      hash?: string
+      baseHash?: string
+      valid?: boolean
+    }
+  } catch (error) {
+    await appendAuthExecutorDiagnostic({
+      event: 'onboard-rpc-config-get-threw',
+      providerId: input.providerId,
+      methodId: input.methodId,
+      details: {
+        message: error instanceof Error ? error.message : String(error || ''),
+      },
+    })
+    throw error
+  }
+  await appendAuthExecutorDiagnostic({
+    event: 'onboard-rpc-config-get',
+    providerId: input.providerId,
+    methodId: input.methodId,
+    details: {
+      valid: snapshot?.valid,
+      hasConfig: Boolean(snapshot?.config),
+      hasBaseHash: Boolean(String(snapshot?.baseHash ?? snapshot?.hash ?? '').trim()),
+      snapshotSummary: summarizeConfigOnly(input.providerId, snapshot?.config || null),
+    },
+  })
   if (snapshot?.valid === false || !snapshot?.config) return null
   const baseHash = String(snapshot.baseHash ?? snapshot.hash ?? '').trim()
   if (!baseHash) return null
@@ -898,20 +985,60 @@ async function tryOnboardApiKeyViaRpc(input: {
   const repairResult = repairKnownProviderConfigGaps(snapshotConfig)
   let nextConfig = repairResult.changed && repairResult.config ? repairResult.config : snapshotConfig
 
-  const configBeforeAuth = await input.readConfig().catch(() => null)
+  const configBeforeAuth = await safeReadConfig(input.readConfig)
   const pluginRestore = restoreTrustedPluginConfig(configBeforeAuth, nextConfig, {
     blockedPluginIds: [],
   })
   if (pluginRestore.changed) {
     nextConfig = pluginRestore.config
   }
+  const providerSnapshotRepair = ensureProviderSnapshotEnabled(nextConfig, input.providerId)
+  if (providerSnapshotRepair.changed && providerSnapshotRepair.config) {
+    nextConfig = providerSnapshotRepair.config
+  }
 
-  await callGatewayRpcViaControlUiBrowser(rpcDeps, 'config.apply', {
-    raw: `${JSON.stringify(nextConfig, null, 2)}\n`,
-    baseHash,
+  await appendAuthExecutorDiagnostic({
+    event: 'onboard-rpc-pre-config-apply',
+    providerId: input.providerId,
+    methodId: input.methodId,
+    details: {
+      repairChanged: repairResult.changed,
+      repairedJsonPaths: repairResult.repairedJsonPaths,
+      pluginRestoreChanged: pluginRestore.changed,
+      providerSnapshotRepairChanged: providerSnapshotRepair.changed,
+      providerSnapshotRepairPaths: providerSnapshotRepair.repairedJsonPaths,
+      nextSummary: summarizeConfigOnly(input.providerId, nextConfig),
+    },
   })
 
-  if (repairResult.changed || pluginRestore.changed) {
+  try {
+    await callGatewayRpcViaControlUiBrowser(rpcDeps, 'config.apply', {
+      raw: `${JSON.stringify(nextConfig, null, 2)}\n`,
+      baseHash,
+    })
+  } catch (error) {
+    await appendAuthExecutorDiagnostic({
+      event: 'onboard-rpc-config-apply-threw',
+      providerId: input.providerId,
+      methodId: input.methodId,
+      details: {
+        message: error instanceof Error ? error.message : String(error || ''),
+        nextSummary: summarizeConfigOnly(input.providerId, nextConfig),
+      },
+    })
+    throw error
+  }
+
+  await appendAuthExecutorDiagnostic({
+    event: 'onboard-rpc-config-apply',
+    providerId: input.providerId,
+    methodId: input.methodId,
+    details: {
+      persistedSummary: summarizeConfigOnly(input.providerId, nextConfig),
+    },
+  })
+
+  if (repairResult.changed || pluginRestore.changed || providerSnapshotRepair.changed) {
     await input.writeAuthConfig(snapshotConfig, nextConfig).catch(() => null)
   }
 
@@ -1051,8 +1178,26 @@ export async function executeAuthRoute(
     beforeConfig: Record<string, any> | null,
     nextConfig: Record<string, any>
   ): Promise<void> => {
+    await appendAuthExecutorDiagnostic({
+      event: 'write-auth-config-start',
+      providerId: input.providerId,
+      methodId: input.methodId,
+      details: {
+        beforeSummary: summarizeConfigOnly(input.providerId, beforeConfig),
+        nextSummary: summarizeConfigOnly(input.providerId, nextConfig),
+      },
+    })
     if (writeConfig) {
       await writeConfig(nextConfig)
+      await appendAuthExecutorDiagnostic({
+        event: 'write-auth-config-finished',
+        providerId: input.providerId,
+        methodId: input.methodId,
+        details: {
+          persistedSummary: summarizeConfigOnly(input.providerId, nextConfig),
+          writeMode: 'direct-write-config',
+        },
+      })
       return
     }
     const coordinator = await import('./openclaw-config-coordinator')
@@ -1062,8 +1207,25 @@ export async function executeAuthRoute(
       reason: 'unknown',
     })
     if (!writeResult.ok) {
+      await appendAuthExecutorDiagnostic({
+        event: 'write-auth-config-failed',
+        providerId: input.providerId,
+        methodId: input.methodId,
+        details: {
+          message: writeResult.message,
+        },
+      })
       throw new Error(writeResult.message || '认证流程配置写入失败')
     }
+    await appendAuthExecutorDiagnostic({
+      event: 'write-auth-config-finished',
+      providerId: input.providerId,
+      methodId: input.methodId,
+      details: {
+        persistedSummary: summarizeConfigOnly(input.providerId, nextConfig),
+        writeMode: 'guarded-config-patch',
+      },
+    })
   }
 
   if (route.kind === 'unsupported') {
@@ -1074,6 +1236,22 @@ export async function executeAuthRoute(
   if (!resolvedRouteMethodId.ok) {
     return failed(route.kind, attemptedCommands, resolvedRouteMethodId.message, 'invalid_input')
   }
+
+  await appendAuthExecutorDiagnostic({
+    event: 'execute-auth-route-start',
+    providerId: input.providerId,
+    methodId: normalizedMethodId,
+    details: {
+      routeKind: route.kind,
+      routeProviderId: route.providerId,
+      routeMethodId: resolvedRouteMethodId.value,
+      pluginId,
+      requiresSecret: route.requiresSecret === true,
+      requiresBrowser: route.requiresBrowser === true,
+      hasSecret: Boolean(String(input.secret || '').trim()),
+      selectedExtraOption: String(input.selectedExtraOption || '').trim() || undefined,
+    },
+  })
 
   if (route.kind === 'models-auth-login' && pluginId) {
     const pluginCommand = buildPluginEnableCommand(pluginId, capabilities)
@@ -1123,7 +1301,7 @@ export async function executeAuthRoute(
       })
     }
 
-    const configBeforeAuth = await readConfig().catch(() => null)
+    const configBeforeAuth = await safeReadConfig(readConfig)
     const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
     const mainAgentScope = await prepareTemporaryMainAgentDefaultScope({
       configBeforeAuth,
@@ -1388,7 +1566,7 @@ export async function executeAuthRoute(
       })
     }
 
-    const configBeforeAuth = await readConfig().catch(() => null)
+    const configBeforeAuth = await safeReadConfig(readConfig)
     const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
     const mainAgentScope = await prepareTemporaryMainAgentDefaultScope({
       configBeforeAuth,
@@ -1503,11 +1681,26 @@ export async function executeAuthRoute(
         writeAuthConfig,
       }).catch(() => null)
       if (rpcResult) {
+        await appendAuthExecutorDiagnostic({
+          event: 'onboard-rpc-finished',
+          providerId: input.providerId,
+          methodId: normalizedMethodId,
+          details: {
+            ok: rpcResult.ok,
+            routeKind: rpcResult.routeKind,
+          },
+        })
         return rpcResult
       }
+      await appendAuthExecutorDiagnostic({
+        event: 'onboard-rpc-fell-through',
+        providerId: input.providerId,
+        methodId: normalizedMethodId,
+        details: {},
+      })
     }
 
-    const configBeforeAuth = await readConfig().catch(() => null)
+    const configBeforeAuth = await safeReadConfig(readConfig)
     gatewayTokenBeforeAuth = readGatewayAuthToken(configBeforeAuth)
     const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
     const onboardCommand = buildOnboardRouteCommand(method, input.secret, capabilities)
@@ -1561,9 +1754,29 @@ export async function executeAuthRoute(
       })
     }
     if (onboardResult.status === 'failure') {
+      await appendAuthExecutorDiagnostic({
+        event: 'onboard-cli-failed',
+        providerId: input.providerId,
+        methodId: normalizedMethodId,
+        details: {
+          message: onboardResult.failure.message,
+          errorCode: onboardResult.failure.errorCode,
+        },
+      })
       return onboardResult.failure
     }
     const result = onboardResult.result
+    await appendAuthExecutorDiagnostic({
+      event: 'onboard-cli-result',
+      providerId: input.providerId,
+      methodId: normalizedMethodId,
+      details: {
+        ok: result.ok,
+        stdout: String(result.stdout || '').trim() ? '[present]' : '',
+        stderr: String(result.stderr || '').trim() ? '[present]' : '',
+        code: result.code,
+      },
+    })
     if (result.ok) {
       const stalePluginIds = extractStalePluginIdsFromResult(result)
       if (stalePluginIds.length > 0) {
@@ -1572,6 +1785,18 @@ export async function executeAuthRoute(
       const providerConfigRepair = await ensureKnownProviderConfigAfterAuth({
         readConfig,
         writeConfig: writeAuthConfig,
+      })
+      await appendAuthExecutorDiagnostic({
+        event: 'onboard-provider-config-repair',
+        providerId: input.providerId,
+        methodId: normalizedMethodId,
+        details: {
+          ok: providerConfigRepair.ok,
+          configSummary: providerConfigRepair.ok
+            ? summarizeConfigOnly(input.providerId, providerConfigRepair.config)
+            : undefined,
+          message: providerConfigRepair.ok ? undefined : providerConfigRepair.message,
+        },
       })
       if (!providerConfigRepair.ok) {
         return failed(route.kind, attemptedCommands, providerConfigRepair.message, 'command_failed', {
@@ -1586,6 +1811,15 @@ export async function executeAuthRoute(
       const authProfileSync = await syncMainApiKeyAuthProfile({
         providerId: input.providerId,
         apiKey: input.secret,
+      })
+      await appendAuthExecutorDiagnostic({
+        event: 'onboard-auth-profile-sync',
+        providerId: input.providerId,
+        methodId: normalizedMethodId,
+        details: {
+          ok: authProfileSync.ok,
+          message: authProfileSync.ok ? undefined : authProfileSync.message,
+        },
       })
       if (!authProfileSync.ok) {
         return failed(route.kind, attemptedCommands, authProfileSync.message, 'command_failed', {
@@ -1609,6 +1843,16 @@ export async function executeAuthRoute(
           effectiveConfigAfterAuth = configAfterAuth || restoredPluginConfig.config
         }
       }
+      await appendAuthExecutorDiagnostic({
+        event: 'onboard-post-auth-state',
+        providerId: input.providerId,
+        methodId: normalizedMethodId,
+        details: {
+          stalePluginIds,
+          restoredPluginConfigChanged: restoredPluginConfig.changed,
+          configSummary: summarizeConfigOnly(input.providerId, effectiveConfigAfterAuth),
+        },
+      })
       const gatewayTokenAfterAuth = readGatewayAuthToken(effectiveConfigAfterAuth)
       if (gatewayTokenBeforeAuth !== gatewayTokenAfterAuth) {
         const pendingStore = await issueDesiredRuntimeRevision('auth', 'gateway_token_rotated_by_auth', {
@@ -1729,7 +1973,7 @@ export async function executeAuthRoute(
   }
 
   if (route.kind === 'onboard-custom') {
-    const configBeforeAuth = await readConfig().catch(() => null)
+    const configBeforeAuth = await safeReadConfig(readConfig)
     gatewayTokenBeforeAuth = readGatewayAuthToken(configBeforeAuth)
     const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
     const onboardCommand = buildCustomProviderOnboardRouteCommand(method, input.customConfig || ({} as any), input.secret, capabilities)

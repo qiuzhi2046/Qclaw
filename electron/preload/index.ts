@@ -276,6 +276,8 @@ export const api = {
   validateProviderCredential: (input: Record<string, any>) => ipcRenderer.invoke('models:provider:validate', input),
   applyModelConfig: (action: Record<string, any>) => ipcRenderer.invoke('models:config:apply', action),
   runModelAuth: (action: Record<string, any>) => ipcRenderer.invoke('models:auth:run', action),
+  appendModelAuthDiagnosticLog: (entry: Record<string, any>) =>
+    ipcRenderer.invoke('model-auth:diagnostic:append', entry),
   startModelOAuth: (request: { providerId: string; methodId: string; selectedExtraOption?: string; setDefault?: boolean }) =>
     ipcRenderer.invoke('models:oauth:start', request),
   cancelModelOAuth: () => ipcRenderer.invoke('models:oauth:cancel'),

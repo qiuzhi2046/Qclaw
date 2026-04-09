@@ -12,6 +12,13 @@ export interface AppFocusOptions {
 
 export type FocusApp = (options: AppFocusOptions) => void
 
+export interface MainFrameLoadAwareWindow extends Pick<RevealableWindow, 'isDestroyed'> {
+  webContents: {
+    isLoadingMainFrame(): boolean
+    once(event: 'did-finish-load', listener: () => void): void
+  }
+}
+
 export function getLiveWindow<T extends Pick<RevealableWindow, 'isDestroyed'>>(
   browserWindow: T | null
 ): T | null {
@@ -50,4 +57,23 @@ export function showOrCreateWindow<T extends RevealableWindow>(options: {
     window: existingWindow,
     created: false,
   }
+}
+
+export function deliverToWindowWhenReady(
+  browserWindow: MainFrameLoadAwareWindow,
+  deliver: () => void,
+  delayMs = 50
+) {
+  if (browserWindow.webContents.isLoadingMainFrame()) {
+    browserWindow.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        if (browserWindow.isDestroyed()) return
+        deliver()
+      }, delayMs)
+    })
+    return
+  }
+
+  if (browserWindow.isDestroyed()) return
+  deliver()
 }

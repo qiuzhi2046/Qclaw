@@ -17,6 +17,47 @@ export interface OpenClawProviderConfigRepairResult {
   repairedJsonPaths: string[]
 }
 
+export function ensureProviderSnapshotEnabled(
+  config: Record<string, any> | null | undefined,
+  providerId: string
+): OpenClawProviderConfigRepairResult {
+  const normalizedProviderId = String(providerId || '').trim()
+  if (!isPlainObject(config) || !normalizedProviderId) {
+    return {
+      changed: false,
+      config: config ?? null,
+      repairedJsonPaths: [],
+    }
+  }
+
+  const existingProviderConfig = config.models?.providers?.[normalizedProviderId]
+  if (isPlainObject(existingProviderConfig) && existingProviderConfig.enabled === true) {
+    return {
+      changed: false,
+      config,
+      repairedJsonPaths: [],
+    }
+  }
+
+  const nextConfig = cloneJsonValue(config)
+  nextConfig.models = isPlainObject(nextConfig.models) ? nextConfig.models : {}
+  nextConfig.models.providers = isPlainObject(nextConfig.models.providers) ? nextConfig.models.providers : {}
+  const nextProviderConfig = isPlainObject(nextConfig.models.providers[normalizedProviderId])
+    ? nextConfig.models.providers[normalizedProviderId]
+    : {}
+
+  nextConfig.models.providers[normalizedProviderId] = {
+    ...nextProviderConfig,
+    enabled: true,
+  }
+
+  return {
+    changed: true,
+    config: nextConfig,
+    repairedJsonPaths: [`$.models.providers.${normalizedProviderId}.enabled`],
+  }
+}
+
 export function repairKnownProviderConfigGaps(
   config: Record<string, any> | null | undefined
 ): OpenClawProviderConfigRepairResult {
@@ -74,4 +115,3 @@ export async function repairKnownProviderConfigGapsOnDisk(params: {
   await params.writeConfig(repairResult.config)
   return repairResult
 }
-

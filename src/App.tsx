@@ -20,6 +20,7 @@ import GatewayBootstrapGate from './pages/GatewayBootstrapGate'
 import UpdateInterceptPage from './pages/UpdateInterceptPage'
 import { UpdateNotificationProvider } from './contexts/UpdateNotificationContext'
 import type { QClawUpdateStatus } from './shared/openclaw-phase4'
+import { resolveStartupUpdateReminderState } from './shared/qclaw-update-reminder'
 import {
   readTooltipEnabled,
   writeTooltipEnabled,
@@ -684,12 +685,13 @@ function App() {
     return renderWithContactModal(renderFrame(
       <UpdateInterceptPage
         onCheckComplete={(status) => {
-          if (status?.status === 'available' && status.availableVersion) {
-            const skippedVersion = localStorage.getItem('qclaw-update-skipped-version')
-            if (skippedVersion !== status.availableVersion) {
-              setStartupUpdateInfo(status)
-              return // 留在拦截页
-            }
+          const { rememberedUpdate, shouldIntercept } = resolveStartupUpdateReminderState(
+            status,
+            localStorage.getItem('qclaw-update-skipped-version')
+          )
+          setStartupUpdateInfo(rememberedUpdate)
+          if (shouldIntercept) {
+            return // 留在拦截页
           }
           // 无更新 / 已跳过 / 超时 / 失败 → 继续原有流程
           proceedAfterUpdateCheck()
@@ -718,7 +720,7 @@ function App() {
   // Dashboard — now with sidebar layout
   if (appState === 'dashboard') {
     return renderWithContactModal(
-      <UpdateNotificationProvider>
+      <UpdateNotificationProvider initialUpdate={startupUpdateInfo}>
         <HashRouter>
           <Routes>
             <Route element={<MainLayout />}>

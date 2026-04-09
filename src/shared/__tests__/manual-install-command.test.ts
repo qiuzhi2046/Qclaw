@@ -7,7 +7,7 @@ describe('resolveManualInstallCommand', () => {
   })
 
   it('returns the npx command for wecom', () => {
-    expect(resolveManualInstallCommand('wecom')).toBe('npx @wecom/wecom-openclaw-cli')
+    expect(resolveManualInstallCommand('wecom')).toBe('npx -y @wecom/wecom-openclaw-cli install')
   })
 
   it('returns the plugins install command for dingtalk', () => {
@@ -19,7 +19,7 @@ describe('resolveManualInstallCommand', () => {
   })
 
   it('returns the npx command for openclaw-weixin', () => {
-    expect(resolveManualInstallCommand('openclaw-weixin')).toBe('npx @tencent-weixin/openclaw-weixin-cli@latest')
+    expect(resolveManualInstallCommand('openclaw-weixin')).toBe('npx -y @tencent-weixin/openclaw-weixin-cli@latest install')
   })
 
   it('returns null for unknown channel ids', () => {

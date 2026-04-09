@@ -19,6 +19,7 @@ import {
 } from './models-page-state'
 import { extractConfiguredProviderIds } from './dashboard-provider-extraction'
 import { applyDefaultModelWithGatewayReload } from '../shared/model-config-gateway'
+import { summarizeModelAuthDiagnosticState } from '../shared/model-auth-diagnostic'
 import {
   resolveRecordedModelVerificationStateFromSwitchResult,
   type ModelVerificationRecord,
@@ -78,6 +79,33 @@ interface ProviderRemovalVerificationDeps {
     authStorePath?: string
     error?: string
   }>
+}
+
+function extractProviderIdFromModelKey(modelKey: unknown): string {
+  return String(modelKey || '').trim().split('/')[0] || ''
+}
+
+function extractRuntimeProviderId(statusData: Record<string, any> | null | undefined): string {
+  const providers = [
+    ...(Array.isArray(statusData?.auth?.providers) ? statusData.auth.providers : []),
+    ...(Array.isArray(statusData?.auth?.oauth?.providers) ? statusData.auth.oauth.providers : []),
+  ]
+  return String(providers.find((provider) => provider?.provider || provider?.providerId)?.provider
+    || providers.find((provider) => provider?.provider || provider?.providerId)?.providerId
+    || '').trim()
+}
+
+async function appendModelsPageDiagnosticLog(entry: {
+  event: string
+  providerId?: string
+  details?: Record<string, unknown>
+}) {
+  await window.api.appendModelAuthDiagnosticLog({
+    source: 'renderer:models-page',
+    event: entry.event,
+    providerId: entry.providerId,
+    details: entry.details,
+  }).catch(() => false)
 }
 
 function toCatalogItemFromUpstream(item: {
@@ -1001,6 +1029,12 @@ export default function ModelsPage() {
   const [error, setError] = useState('')
   const [cleanupNotice, setCleanupNotice] = useState<ProviderCleanupNotice | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const diagnosticProviderIdRef = useRef<string>(
+    extractProviderIdFromModelKey(
+      initialSnapshot?.modelStatus?.defaultModel
+      || initialSnapshot?.config?.agents?.defaults?.model?.primary
+    )
+  )
 
   useEffect(() => {
     modelStatusRef.current = modelStatus
@@ -1014,10 +1048,21 @@ export default function ModelsPage() {
     const background = Boolean(options?.background)
     const forceRefresh = Boolean(options?.forceRefresh)
     const allowCliStatusFallback = options?.allowCliStatusFallback !== false
+    void appendModelsPageDiagnosticLog({
+      event: 'load-data-start',
+      providerId: diagnosticProviderIdRef.current || undefined,
+      details: {
+        background,
+        forceRefresh,
+        allowCliStatusFallback,
+      },
+    })
     if (!background) {
       setLoading(true)
     }
     const nextErrors: string[] = []
+    let resolvedModelStatusForLog: Record<string, any> | null = modelStatusRef.current
+    let resolvedCatalogForLog: CatalogItem[] = latestCatalogRef.current
 
     try {
       const [env, cfg, upstreamState] = await Promise.all([
@@ -1071,6 +1116,7 @@ export default function ModelsPage() {
       } else {
         resolvedModelStatus = modelStatusRef.current
       }
+      resolvedModelStatusForLog = resolvedModelStatus
 
       let resolvedVerificationRecords = verificationRecordsRef.current
       try {
@@ -1093,6 +1139,7 @@ export default function ModelsPage() {
           cliItems: cliCatalogResult?.items || [],
           upstreamItems: normalizedUpstreamCatalog,
         })
+        resolvedCatalogForLog = nextCatalog
         latestCatalogRef.current = nextCatalog
         setCatalog(nextCatalog)
         modelsPageCache.set({
@@ -1105,6 +1152,7 @@ export default function ModelsPage() {
       } catch {
         if (normalizedUpstreamCatalog.length > 0) {
           nextErrors.push('模型目录刷新失败，已回退到上游目录快照')
+          resolvedCatalogForLog = normalizedUpstreamCatalog
           latestCatalogRef.current = normalizedUpstreamCatalog
           setCatalog(normalizedUpstreamCatalog)
           modelsPageCache.set({
@@ -1116,6 +1164,7 @@ export default function ModelsPage() {
           })
         } else {
           nextErrors.push('模型目录刷新失败，已保留当前显示的数据')
+          resolvedCatalogForLog = latestCatalogRef.current
           modelsPageCache.set({
             envVars: env,
             config: cfg,
@@ -1125,8 +1174,64 @@ export default function ModelsPage() {
           })
         }
       }
+      const activeModelKey = resolveModelsPageActiveModel(resolvedModelStatus, cfg)
+      const diagnosticProviderId =
+        diagnosticProviderIdRef.current
+        || extractProviderIdFromModelKey(activeModelKey)
+        || extractRuntimeProviderId(resolvedModelStatus)
+      if (diagnosticProviderId) {
+        diagnosticProviderIdRef.current = diagnosticProviderId
+      }
+      const derivedState = resolveModelsPageCatalogState({
+        catalog: resolvedCatalogForLog,
+        envVars: env,
+        config: cfg,
+        statusData: resolvedModelStatus,
+        verificationRecords: resolvedVerificationRecords,
+        preferredModelKey: activeModelKey,
+        mode: 'all',
+      })
+      await appendModelsPageDiagnosticLog({
+        event: 'load-data-finished',
+        providerId: diagnosticProviderId || undefined,
+        details: {
+          background,
+          forceRefresh,
+          errors: nextErrors,
+          activeModelKey,
+          configuredProviderIds: derivedState.configuredProviders.map((provider) => provider.id),
+          effectiveCatalogCount: derivedState.effectiveCatalog.length,
+          visibleCatalogCount: derivedState.visibleCatalog.length,
+          scopedCatalogCount: derivedState.scopedCatalog.length,
+          providerSummary: diagnosticProviderId
+            ? summarizeModelAuthDiagnosticState({
+                providerId: diagnosticProviderId,
+                envVars: env,
+                config: cfg,
+                statusData: resolvedModelStatus,
+                catalog: resolvedCatalogForLog,
+              })
+            : undefined,
+        },
+      })
       setError(nextErrors.join('；'))
     } catch (e) {
+      await appendModelsPageDiagnosticLog({
+        event: 'load-data-failed',
+        providerId: diagnosticProviderIdRef.current || undefined,
+        details: {
+          message: (e as Error).message,
+          statusSummary: diagnosticProviderIdRef.current
+            ? summarizeModelAuthDiagnosticState({
+                providerId: diagnosticProviderIdRef.current,
+                config,
+                statusData: resolvedModelStatusForLog,
+                catalog: resolvedCatalogForLog,
+                envVars,
+              })
+            : undefined,
+        },
+      })
       setError('读取配置失败: ' + (e as Error).message)
     } finally {
       if (!background) {
@@ -1201,6 +1306,14 @@ export default function ModelsPage() {
 
   const handleConfigured = (context?: SetupModelContext) => {
     if (context) {
+      diagnosticProviderIdRef.current = context.providerId
+      const beforeSummary = summarizeModelAuthDiagnosticState({
+        providerId: context.providerId,
+        envVars,
+        config,
+        statusData: modelStatusRef.current,
+        catalog: latestCatalogRef.current,
+      })
       const optimisticState = applyOptimisticConfiguredProviderState({
         config,
         statusData: modelStatusRef.current,
@@ -1219,6 +1332,21 @@ export default function ModelsPage() {
         catalog: optimisticState.nextCatalog,
         verificationRecords,
       })
+      void appendModelsPageDiagnosticLog({
+        event: 'handle-configured-optimistic',
+        providerId: context.providerId,
+        details: {
+          context,
+          beforeSummary,
+          afterSummary: summarizeModelAuthDiagnosticState({
+            providerId: context.providerId,
+            envVars,
+            config: optimisticState.nextConfig,
+            statusData: optimisticState.nextStatus,
+            catalog: optimisticState.nextCatalog,
+          }),
+        },
+      })
     }
     setShowAddForm(false)
     void loadData({ background: true })
@@ -1227,6 +1355,11 @@ export default function ModelsPage() {
   const handleManualRefresh = async () => {
     if (refreshing) return
     setRefreshing(true)
+    void appendModelsPageDiagnosticLog({
+      event: 'manual-refresh',
+      providerId: diagnosticProviderIdRef.current || undefined,
+      details: {},
+    })
     try {
       await loadData({ background: true, forceRefresh: true })
     } finally {

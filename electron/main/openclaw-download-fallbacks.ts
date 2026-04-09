@@ -67,7 +67,7 @@ export const OPENCLAW_NPM_REGISTRY_MIRRORS: OpenClawNpmRegistryMirror[] = [
   {
     id: 'npmjs',
     label: 'npm 官方源',
-    registryUrl: null,
+    registryUrl: 'https://registry.npmjs.org',
   },
 ]
 

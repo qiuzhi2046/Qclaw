@@ -2,36 +2,74 @@ import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { app } from 'electron'
-import {
-  cancelActiveProcess,
-  clearActiveProcessIfMatch,
-  consumeCanceledProcess,
-  setActiveProcess,
-} from './command-control'
-import { getOpenClawPaths, readConfig } from './cli'
+import { cancelActiveProcess } from './command-control'
+import { getOpenClawPaths, readConfig, runShellStreaming } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
-import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { listWeixinAccountState } from './weixin-account-state'
 import { prepareWeixinInstallerConfig } from './weixin-installer-config'
-import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
-
-const childProcess = process.getBuiltinModule('node:child_process') as typeof import('node:child_process')
-const { spawn } = childProcess
+import { cleanupIsolatedNpmCacheEnv } from './npm-cache-env'
+import { ensureManagedOpenClawNpmRuntime } from './openclaw-npm-runtime'
+import {
+  runOpenClawNpmRegistryFallback,
+  type OpenClawCommandResultLike,
+  type OpenClawNpmCommandOptions,
+  type OpenClawNpmRegistryMirror,
+} from './openclaw-download-fallbacks'
 
 const WEIXIN_INSTALLER_CONTROL_DOMAIN = 'weixin-installer'
 const WEIXIN_INSTALLER_PACKAGE = '@tencent-weixin/openclaw-weixin-cli@latest'
 const WEIXIN_INSTALLER_COMMAND = ['npx', '-y', WEIXIN_INSTALLER_PACKAGE, 'install'] as const
 
-function resolveWeixinInstallerNpmCacheDir(): string {
-  return path.join(app.getPath('userData'), 'npm-cache')
-}
-
 function resolveWeixinOfficialPluginInstallPath(homeDir: string): string {
   return path.join(homeDir, 'extensions', 'openclaw-weixin')
+}
+
+function buildWeixinInstallerArgs(
+  registryUrl: string | null | undefined,
+  options: OpenClawNpmCommandOptions
+): string[] {
+  const args: string[] = []
+  const userConfigPath = String(options.userConfigPath || '').trim()
+  const globalConfigPath = String(options.globalConfigPath || '').trim()
+  const cachePath = String(options.cachePath || '').trim()
+  const fetchTimeoutMs = Number(options.fetchTimeoutMs)
+  const fetchRetries = Number(options.fetchRetries)
+  const normalizedRegistryUrl = String(registryUrl || '').trim()
+
+  if (userConfigPath) {
+    args.push(`--userconfig=${userConfigPath}`)
+  }
+  if (globalConfigPath) {
+    args.push(`--globalconfig=${globalConfigPath}`)
+  }
+  if (cachePath) {
+    args.push(`--cache=${cachePath}`)
+  }
+  if (Number.isFinite(fetchTimeoutMs) && fetchTimeoutMs > 0) {
+    args.push(`--fetch-timeout=${Math.floor(fetchTimeoutMs)}`)
+  }
+  if (Number.isFinite(fetchRetries) && fetchRetries >= 0) {
+    args.push(`--fetch-retries=${Math.floor(fetchRetries)}`)
+  }
+  if (normalizedRegistryUrl) {
+    args.push(`--registry=${normalizedRegistryUrl}`)
+  }
+  if (options.noAudit !== false) {
+    args.push('--no-audit')
+  }
+  if (options.noFund !== false) {
+    args.push('--no-fund')
+  }
+
+  return [...args, '-y', WEIXIN_INSTALLER_PACKAGE, 'install']
+}
+
+function buildWeixinInstallerRetryMessage(mirror: OpenClawNpmRegistryMirror | null | undefined): string {
+  const label = String(mirror?.label || '下一个来源').trim()
+  return `\n[Qclaw] 个人微信安装器启动失败，正在切换到 ${label} 重试...\n`
 }
 
 async function isWeixinPluginInstalledOnDisk(): Promise<boolean> {
@@ -103,7 +141,7 @@ export interface WeixinInstallerSessionEvent {
 
 interface ActiveWeixinInstallerSession {
   id: string
-  process: ChildProcess
+  process: ChildProcess | null
   phase: WeixinInstallerSessionSnapshot['phase']
   output: string
   code: number | null
@@ -237,35 +275,18 @@ export async function startWeixinInstallerSession(
 
   await prepareConfigForWeixinInstaller()
 
-  const npmCacheDir = resolveWeixinInstallerNpmCacheDir()
-  const isolatedNpmCache = await createIsolatedNpmCacheEnv(npmCacheDir)
-
+  const workingDirectory = resolveSafeWorkingDirectory({
+    env: process.env,
+    platform: process.platform,
+  })
+  const runtime = await ensureManagedOpenClawNpmRuntime({
+    workingDirectory,
+  })
   const beforeAccountIds = await collectAccountIds().catch(() => [])
   const sessionId = randomUUID()
-  const proc = spawn(WEIXIN_INSTALLER_COMMAND[0], WEIXIN_INSTALLER_COMMAND.slice(1), {
-    cwd: resolveSafeWorkingDirectory({
-      env: process.env,
-      platform: process.platform,
-    }),
-    env: {
-      ...process.env,
-      PATH: buildCliPathWithCandidates({
-        platform: process.platform,
-        currentPath: process.env.PATH || '',
-        env: process.env,
-      }),
-      NO_COLOR: '1',
-      FORCE_COLOR: '0',
-      ...isolatedNpmCache.env,
-    },
-    detached: process.platform !== 'win32',
-    shell: process.platform === 'win32',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-
   activeSession = {
     id: sessionId,
-    process: proc,
+    process: null,
     phase: 'running',
     output: '',
     code: null,
@@ -275,49 +296,84 @@ export async function startWeixinInstallerSession(
     beforeAccountIds,
     afterAccountIds: [],
     newAccountIds: [],
-    npmCacheDir: isolatedNpmCache.cacheDir,
+    npmCacheDir: String(runtime.commandOptions.cachePath || '').trim(),
   }
-  setActiveProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
+  const runAttempt = (
+    mirror: OpenClawNpmRegistryMirror,
+    emitStarted: boolean
+  ): Promise<OpenClawCommandResultLike> => {
+    if (!activeSession || activeSession.id !== sessionId) {
+      return Promise.resolve({
+        ok: false,
+        stdout: '',
+        stderr: 'weixin installer session is no longer active',
+        code: 1,
+        canceled: true,
+      })
+    }
 
-  emit({
-    sessionId,
-    type: 'started',
-    phase: 'running',
-    command: [...WEIXIN_INSTALLER_COMMAND],
-    beforeAccountIds: [...beforeAccountIds],
-  })
+    if (emitStarted) {
+      emit({
+        sessionId,
+        type: 'started',
+        phase: 'running',
+        command: [...WEIXIN_INSTALLER_COMMAND],
+        beforeAccountIds: [...beforeAccountIds],
+      })
+    } else {
+      appendOutput('stderr', buildWeixinInstallerRetryMessage(mirror), emit)
+    }
 
-  proc.stdout?.on('data', (chunk) => {
-    appendOutput('stdout', String(chunk), emit)
-  })
+    return runShellStreaming(
+      'npx',
+      buildWeixinInstallerArgs(mirror.registryUrl, runtime.commandOptions),
+      0,
+      {
+        cwd: workingDirectory,
+        controlDomain: WEIXIN_INSTALLER_CONTROL_DOMAIN,
+        detached: process.platform !== 'win32',
+        shell: process.platform === 'win32',
+        env: {
+          NO_COLOR: '1',
+          FORCE_COLOR: '0',
+        },
+        onSpawn: (proc) => {
+          if (!activeSession || activeSession.id !== sessionId) return
+          activeSession.process = proc
+        },
+        onStdout: (chunk) => {
+          appendOutput('stdout', chunk, emit)
+        },
+        onStderr: (chunk) => {
+          appendOutput('stderr', chunk, emit)
+        },
+      }
+    )
+  }
 
-  proc.stderr?.on('data', (chunk) => {
-    appendOutput('stderr', String(chunk), emit)
-  })
+  void (async () => {
+    try {
+      let emitStarted = true
+      const { result } = await runOpenClawNpmRegistryFallback(async (mirror) => {
+        const currentResult = await runAttempt(mirror, emitStarted)
+        emitStarted = false
+        return currentResult
+      })
 
-  proc.on('close', (code) => {
-    if (!activeSession || activeSession.id !== sessionId) return
-    clearActiveProcessIfMatch(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    const canceled = consumeCanceledProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    void finalizeSession(sessionId, emit, {
-      code: canceled ? null : code,
-      ok: code === 0 && !canceled,
-      canceled,
-    })
-  })
-
-  proc.on('error', (error) => {
-    if (!activeSession || activeSession.id !== sessionId) return
-    clearActiveProcessIfMatch(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-    const canceled = consumeCanceledProcess(proc, WEIXIN_INSTALLER_CONTROL_DOMAIN)
-
-    void finalizeSession(sessionId, emit, {
-      code: canceled ? null : 1,
-      ok: false,
-      canceled,
-      extraOutput: `\n${error instanceof Error ? error.message : String(error)}`,
-    })
-  })
+      await finalizeSession(sessionId, emit, {
+        code: result.code,
+        ok: result.ok,
+        canceled: Boolean(result.canceled),
+      })
+    } catch (error) {
+      await finalizeSession(sessionId, emit, {
+        code: 1,
+        ok: false,
+        canceled: false,
+        extraOutput: `\n${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  })()
 
   return buildSnapshot()
 }
@@ -330,7 +386,7 @@ export async function stopWeixinInstallerSession(): Promise<{ ok: boolean }> {
   activeSession.phase = 'exited'
   const ok = await cancelActiveProcess(WEIXIN_INSTALLER_CONTROL_DOMAIN)
 
-  if (process.platform !== 'win32' && typeof proc.pid === 'number' && proc.pid > 0) {
+  if (process.platform !== 'win32' && proc && typeof proc.pid === 'number' && proc.pid > 0) {
     try {
       process.kill(-proc.pid, 'SIGTERM')
     } catch {

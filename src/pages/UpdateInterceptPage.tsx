@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Group, Progress, Stack, Text, Title } from '@mantine/core'
 import type { QClawUpdateStatus } from '../shared/openclaw-phase4'
+import { shouldKeepInstallingState } from '../shared/qclaw-update-install-state'
 
 type CheckPhase = 'checking' | 'intercept' | 'done'
 
@@ -91,6 +92,7 @@ export default function UpdateInterceptPage({
     setError('')
     setDownloading(true)
     setProgress(null)
+    let keepInstalling = false
 
     pollRef.current = window.setInterval(async () => {
       try {
@@ -119,7 +121,8 @@ export default function UpdateInterceptPage({
 
       setInstalling(true)
       const installResult = await window.api.installQClawUpdate()
-      if (installResult.willQuitAndInstall) return // 即将重启，保持 installing 状态
+      keepInstalling = shouldKeepInstallingState(installResult)
+      if (keepInstalling) return // 即将重启，保持 installing 状态
       if (!installResult.ok) {
         if (isMac) {
           const fallback = await tryManualFallback('自动安装不可用，已为你打开安装包下载链接，请手动安装。')
@@ -138,7 +141,9 @@ export default function UpdateInterceptPage({
       setError(e instanceof Error ? e.message : '更新失败')
     } finally {
       clearPoll()
-      setInstalling(false)
+      if (!keepInstalling) {
+        setInstalling(false)
+      }
     }
   }
 

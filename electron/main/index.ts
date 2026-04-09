@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, screen, shell } from 'electron'
+import { app, autoUpdater, BrowserWindow, Menu, Notification, Tray, nativeImage, screen, shell } from 'electron'
 import { existsSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -12,12 +12,13 @@ import {
   shouldDisableHardwareAccelerationForPlatform,
 } from '../../src/shared/desktop-window-policy'
 import { tryNormalizeProcessCwd } from './runtime-working-directory'
-import { revealWindow, showOrCreateWindow } from './window-lifecycle'
+import { deliverToWindowWhenReady, revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { startBackgroundUpdateChecker } from './background-update-checker'
 import { checkQClawUpdate, getQClawUpdateStatus } from './qclaw-update-service'
 import { sendUpdateAvailable } from './renderer-notification-bridge'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
+import { registerQuitIntentFromUpdater, shouldHideWindowOnClose } from './app-quit-state'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -60,6 +61,11 @@ const indexHtml = path.join(RENDERER_DIST, 'index.html')
 const focusApp = process.platform === 'darwin'
   ? (options: { steal: boolean }) => app.focus(options)
   : undefined
+
+registerQuitIntentFromUpdater(autoUpdater, () => {
+  isQuitting = true
+})
+
 function resolveRuntimeAppIconPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'app-icon.png')
@@ -119,7 +125,7 @@ function createWindow() {
   })
 
   browserWindow.on('close', (event) => {
-    if (process.platform !== 'darwin' || isQuitting) return
+    if (!shouldHideWindowOnClose(process.platform, isQuitting)) return
     event.preventDefault()
     browserWindow.hide()
   })
@@ -301,8 +307,15 @@ app.whenReady().then(() => {
           silent: true,
         })
         n.on('click', () => {
-          showMainWindow()
-          sendUpdateAvailable({ ...status, source: 'notification-click' })
+          const result = showOrCreateWindow({
+            browserWindow: win,
+            createWindow,
+            focusApp,
+          })
+          win = result.window
+          deliverToWindowWhenReady(result.window, () => {
+            sendUpdateAvailable({ ...status, source: 'notification-click' })
+          })
         })
         n.show()
       }

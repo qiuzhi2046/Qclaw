@@ -247,6 +247,17 @@ describe('preload api model channels', () => {
       methodId: 'openai-codex',
     })
 
+    await api.appendModelAuthDiagnosticLog({
+      source: 'renderer:test',
+      event: 'sample',
+      providerId: 'zai',
+    })
+    expect(invokeMock).toHaveBeenLastCalledWith('model-auth:diagnostic:append', {
+      source: 'renderer:test',
+      event: 'sample',
+      providerId: 'zai',
+    })
+
     await api.refreshModelData({
       catalogQuery: { provider: 'openai' },
       statusOptions: { probe: true },

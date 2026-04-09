@@ -4,6 +4,8 @@ import {
   buildNextConfigWithAgentPrimaryModel,
   buildNextConfigWithDefaultModel,
 } from '../../src/shared/model-config-gateway'
+import { summarizeModelAuthDiagnosticState } from '../../src/shared/model-auth-diagnostic'
+import { appendModelAuthDiagnosticLog } from './model-auth-diagnostic-log'
 
 export interface UpstreamModelConfigWriteRequest {
   kind: 'default' | 'agent-primary'
@@ -49,6 +51,10 @@ function describeUpstreamWriteFailure(error: unknown, fallback: string): string 
   return message || fallback
 }
 
+function extractProviderIdFromModelKey(model: string): string {
+  return String(model || '').trim().split('/')[0] || ''
+}
+
 async function getUpstreamConfigSnapshot(): Promise<UpstreamConfigSnapshotLike> {
   return await callGatewayRpcViaControlUiBrowser(
     {
@@ -65,6 +71,17 @@ export async function applyModelConfigViaUpstreamControlUi(
 ): Promise<UpstreamModelConfigWriteResult> {
   const model = String(request.model || '').trim()
   const agentId = String(request.agentId || '').trim()
+  const providerId = extractProviderIdFromModelKey(model)
+  await appendModelAuthDiagnosticLog({
+    source: 'main:upstream-model-write',
+    event: 'upstream-model-write-start',
+    providerId,
+    details: {
+      kind: request.kind,
+      model,
+      agentId: agentId || undefined,
+    },
+  }).catch(() => null)
   if (!model) {
     return {
       ok: false,
@@ -92,6 +109,16 @@ export async function applyModelConfigViaUpstreamControlUi(
   try {
     snapshot = await getUpstreamConfigSnapshot()
   } catch (error) {
+    await appendModelAuthDiagnosticLog({
+      source: 'main:upstream-model-write',
+      event: 'upstream-model-write-config-get-failed',
+      providerId,
+      details: {
+        kind: request.kind,
+        model,
+        message: describeUpstreamWriteFailure(error, '读取 OpenClaw 上游配置失败'),
+      },
+    }).catch(() => null)
     return {
       ok: false,
       wrote: false,
@@ -117,6 +144,20 @@ export async function applyModelConfigViaUpstreamControlUi(
 
   const baseHash = resolveSnapshotHash(snapshot)
   const baseConfig = resolveSnapshotConfig(snapshot)
+  await appendModelAuthDiagnosticLog({
+    source: 'main:upstream-model-write',
+    event: 'upstream-model-write-config-get',
+    providerId,
+    details: {
+      kind: request.kind,
+      model,
+      hasBaseHash: Boolean(baseHash),
+      snapshotSummary: summarizeModelAuthDiagnosticState({
+        providerId,
+        config: baseConfig,
+      }),
+    },
+  }).catch(() => null)
   if (!baseHash || !baseConfig) {
     return {
       ok: false,
@@ -158,6 +199,19 @@ export async function applyModelConfigViaUpstreamControlUi(
         baseHash,
       },
     )
+    await appendModelAuthDiagnosticLog({
+      source: 'main:upstream-model-write',
+      event: 'upstream-model-write-success',
+      providerId,
+      details: {
+        kind: request.kind,
+        model,
+        nextSummary: summarizeModelAuthDiagnosticState({
+          providerId,
+          config: nextConfig,
+        }),
+      },
+    }).catch(() => null)
     return {
       ok: true,
       wrote: true,
@@ -166,6 +220,20 @@ export async function applyModelConfigViaUpstreamControlUi(
       fallbackUsed: false,
     }
   } catch (error) {
+    await appendModelAuthDiagnosticLog({
+      source: 'main:upstream-model-write',
+      event: 'upstream-model-write-failed',
+      providerId,
+      details: {
+        kind: request.kind,
+        model,
+        message: describeUpstreamWriteFailure(error, '通过 OpenClaw 上游配置写入模型失败'),
+        nextSummary: summarizeModelAuthDiagnosticState({
+          providerId,
+          config: nextConfig,
+        }),
+      },
+    }).catch(() => null)
     return {
       ok: false,
       wrote: false,

@@ -79,6 +79,7 @@ import { getOpenClawUpstreamModelState } from './openclaw-upstream-model-state'
 import { applyModelConfigViaUpstreamControlUi } from './openclaw-upstream-model-write'
 import { getModelVerificationState, recordModelVerification, syncModelVerificationState } from './model-verification-store'
 import { runAuthAction, type AuthAction } from './openclaw-auth-orchestrator'
+import { appendModelAuthDiagnosticLog } from './model-auth-diagnostic-log'
 import { startModelOAuthFlow, type StartModelOAuthRequest } from './model-oauth'
 import {
   getModelCenterCapabilities,
@@ -814,6 +815,20 @@ export function registerIpcHandlers() {
   ipcMain.handle('models:provider:validate', (_e, input: ValidateProviderCredentialInput) => validateProviderCredential(input))
   ipcMain.handle('models:config:apply', (_e, action: ModelConfigAction) => applyModelConfigAction(action))
   ipcMain.handle('models:auth:run', (_e, action: AuthAction) => runAuthAction(action))
+  ipcMain.handle('model-auth:diagnostic:append', async (_e, entry: Record<string, any>) => {
+    await appendModelAuthDiagnosticLog({
+      source: String(entry?.source || '').trim(),
+      event: String(entry?.event || '').trim(),
+      providerId: String(entry?.providerId || '').trim() || undefined,
+      methodId: String(entry?.methodId || '').trim() || undefined,
+      attemptId: entry?.attemptId,
+      details:
+        entry?.details && typeof entry.details === 'object' && !Array.isArray(entry.details)
+          ? entry.details
+          : undefined,
+    })
+    return true
+  })
   ipcMain.handle('models:oauth:start', (event, request: StartModelOAuthRequest) =>
     startModelOAuthFlow(request, {
       emit: (channel, payload) => {

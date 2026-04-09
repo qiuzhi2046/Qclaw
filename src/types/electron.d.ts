@@ -1970,6 +1970,14 @@ interface ElectronApi {
   validateProviderCredential: (input: ValidateProviderCredentialInput) => Promise<ValidateProviderCredentialResult>
   applyModelConfig: (action: ModelConfigAction) => Promise<ModelConfigCommandResult<Record<string, any>>>
   runModelAuth: (action: ModelAuthAction) => Promise<RunModelAuthResult>
+  appendModelAuthDiagnosticLog: (entry: {
+    source: string
+    event: string
+    providerId?: string
+    methodId?: string
+    attemptId?: string | number
+    details?: Record<string, unknown>
+  }) => Promise<boolean>
   startModelOAuth: (request: StartModelOAuthRequest) => Promise<StartModelOAuthResult>
   cancelModelOAuth: () => Promise<boolean>
   onOAuthState: (listener: (payload: OAuthStateEventPayload) => void) => () => void

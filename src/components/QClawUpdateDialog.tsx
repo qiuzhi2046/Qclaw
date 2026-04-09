@@ -138,21 +138,6 @@ export default function QClawUpdateDialog({
             <Button
               variant="default"
               size="sm"
-              onClick={() => void handleOpenDownloadUrl()}
-              disabled={
-                loading ||
-                downloading ||
-                installing ||
-                openingDownloadUrl ||
-                status.status === 'checking' ||
-                !canTryManualDownload
-              }
-            >
-              {openingDownloadUrl ? '打开中...' : '直接下载最新安装包'}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
               onClick={() => void handleDownload()}
               disabled={
                 downloading ||
@@ -239,22 +224,6 @@ export default function QClawUpdateDialog({
         setError(e?.message || '安装 Qclaw 更新失败')
       }
       setInstalling(false)
-    }
-  }
-
-  async function handleOpenDownloadUrl() {
-    setOpeningDownloadUrl(true)
-    setActionResult(null)
-    setError('')
-    try {
-      const result = await window.api.openQClawUpdateDownloadUrl()
-      setActionResult(result)
-      setStatus(result.status)
-    } catch (e: any) {
-      setError(e?.message || '打开 Qclaw 下载链接失败')
-    } finally {
-      setOpeningDownloadUrl(false)
-      await refreshStatus(false)
     }
   }
 }

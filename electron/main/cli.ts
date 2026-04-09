@@ -856,6 +856,10 @@ type RunShellOptions = {
   controlDomain?: CommandControlDomain
   env?: Partial<NodeJS.ProcessEnv>
   shell?: boolean
+  detached?: boolean
+  onStdout?: (chunk: string) => void
+  onStderr?: (chunk: string) => void
+  onSpawn?: (proc: ChildProcess) => void
 }
 
 const NPM_TLS_FALLBACK_SANITIZE_KEYS = [
@@ -869,7 +873,12 @@ const NPM_TLS_CERT_FAILURE_PATTERN =
 const MAC_SYSTEM_CERT_FILE_PATH = '/etc/ssl/cert.pem'
 
 function shouldSanitizeManagedEnv(controlDomain: CommandControlDomain): boolean {
-  return controlDomain === 'env-setup' || controlDomain === 'upgrade'
+  return (
+    controlDomain === 'env-setup'
+    || controlDomain === 'upgrade'
+    || controlDomain === 'plugin-install'
+    || controlDomain === 'weixin-installer'
+  )
 }
 
 function sanitizeManagedEnv(
@@ -884,11 +893,17 @@ function isNpmCommand(command: string): boolean {
   const normalized = String(command || '').trim().toLowerCase()
   return (
     normalized === 'npm' ||
+    normalized === 'npx' ||
     normalized === 'npm.cmd' ||
+    normalized === 'npx.cmd' ||
     normalized.endsWith('/npm') ||
+    normalized.endsWith('/npx') ||
     normalized.endsWith('\\npm') ||
+    normalized.endsWith('\\npx') ||
     normalized.endsWith('/npm.cmd') ||
-    normalized.endsWith('\\npm.cmd')
+    normalized.endsWith('/npx.cmd') ||
+    normalized.endsWith('\\npm.cmd') ||
+    normalized.endsWith('\\npx.cmd')
   )
 }
 
@@ -957,13 +972,23 @@ async function runShellOnce(
         env,
         cwd: normalizedOptions.cwd || resolveManagedSpawnCwd(),
         shell: forceOpenShell ? true : useShell,
+        detached: normalizedOptions.detached === true,
         timeout,
       })
       trackActiveProcess(proc, controlDomain)
+      normalizedOptions.onSpawn?.(proc)
       let stdout = ''
       let stderr = ''
-      proc.stdout?.on('data', (d) => (stdout += d.toString()))
-      proc.stderr?.on('data', (d) => (stderr += d.toString()))
+      proc.stdout?.on('data', (d) => {
+        const chunk = d.toString()
+        stdout += chunk
+        normalizedOptions.onStdout?.(chunk)
+      })
+      proc.stderr?.on('data', (d) => {
+        const chunk = d.toString()
+        stderr += chunk
+        normalizedOptions.onStderr?.(chunk)
+      })
       proc.on('close', (code) => {
         clearActiveProcessIfMatch(proc, controlDomain)
         const canceled = consumeCanceledProcess(proc, controlDomain)
@@ -1038,6 +1063,15 @@ export async function runShell(
     },
     createPermissionAutoRepairDependencies()
   )
+}
+
+export async function runShellStreaming(
+  command: string,
+  args: string[],
+  timeout = MAIN_RUNTIME_POLICY.cli.defaultShellTimeoutMs,
+  options?: CommandControlDomain | RunShellOptions
+): Promise<CliResult> {
+  return runShell(command, args, timeout, options)
 }
 
 /** Run command without shell (for osascript etc.) */

@@ -2307,6 +2307,13 @@ describe('executeAuthRoute', () => {
           raw: expect.any(String),
         })
       )
+      const applyCall = callGatewayRpcViaControlUiBrowserMock.mock.calls.find(
+        (c: any[]) => c[1] === 'config.apply'
+      )
+      expect(applyCall).toBeDefined()
+      const appliedRaw = JSON.parse(applyCall![2].raw)
+      expect(appliedRaw.models.providers.openai.enabled).toBe(true)
+      expect(writeConfig).toHaveBeenCalled()
     })
 
     it('falls back to CLI when gateway is unreachable (config.get throws)', async () => {
