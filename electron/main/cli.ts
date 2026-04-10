@@ -3327,13 +3327,27 @@ export async function pairingRemoveAllowFrom(
 }
 
 /** Install a plugin: openclaw plugins install <name> */
-export async function installPlugin(name: string, expectedPluginIds: string[] = []): Promise<CliResult> {
+export async function installPlugin(
+  name: string,
+  expectedPluginIds: string[] = [],
+  options: {
+    registryUrl?: string | null
+  } = {}
+): Promise<CliResult> {
   const npmEnv = await createPluginInstallNpmEnv()
   try {
     const result = await runCliStreaming(['plugins', 'install', name], {
       timeout: MAIN_RUNTIME_POLICY.cli.pluginInstallTimeoutMs,
       controlDomain: 'plugin-install',
-      env: npmEnv.env,
+      env: {
+        ...npmEnv.env,
+        ...(String(options.registryUrl || '').trim()
+          ? {
+              npm_config_registry: String(options.registryUrl || '').trim(),
+              NPM_CONFIG_REGISTRY: String(options.registryUrl || '').trim(),
+            }
+          : {}),
+      },
     })
     const annotated = await annotatePluginPermissionFailure(result)
     return finalizePluginInstallResult(annotated, expectedPluginIds)

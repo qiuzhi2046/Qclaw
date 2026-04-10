@@ -125,7 +125,10 @@ describe('setupDingtalkOfficialChannel', () => {
     expect(uninstallPluginMock).toHaveBeenNthCalledWith(2, 'dingtalk')
     expect(installPluginMock).toHaveBeenCalledWith(
       '@dingtalk-real-ai/dingtalk-connector',
-      ['dingtalk-connector']
+      ['dingtalk-connector'],
+      {
+        registryUrl: 'https://registry.npmmirror.com',
+      }
     )
     expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith(
       expect.objectContaining({

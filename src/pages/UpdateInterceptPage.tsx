@@ -209,9 +209,6 @@ export default function UpdateInterceptPage({
         </Button>
       </Group>
 
-      <Text size="xs" c="dimmed">
-        稍后再说将进入主界面，侧边栏仍会显示新版本提示
-      </Text>
     </Stack>
   )
 }

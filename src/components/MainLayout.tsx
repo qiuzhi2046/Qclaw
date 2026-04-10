@@ -127,7 +127,7 @@ export default function MainLayout() {
                 <button
                   type="button"
                   onClick={() => openConfirmDialog()}
-                  className="inline-flex shrink-0 items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors border-0 outline-none focus:outline-none focus-visible:outline-none appearance-none bg-[var(--mantine-color-brand-light)] text-[var(--mantine-color-brand-light-color)] hover:opacity-90"
+                  className="inline-flex shrink-0 items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors border-0 outline-none focus:outline-none focus-visible:outline-none appearance-none bg-[var(--mantine-primary-color-filled)] text-[var(--mantine-primary-color-contrast)] hover:bg-[var(--mantine-primary-color-filled-hover)]"
                 >
                   新版本
                 </button>

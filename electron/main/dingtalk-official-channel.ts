@@ -18,6 +18,8 @@ import { isPluginAlreadyInstalledError } from '../../src/shared/openclaw-cli-err
 import { stripLegacyOpenClawRootKeys } from '../../src/shared/openclaw-config-sanitize'
 import { getManagedChannelPluginByChannelId } from '../../src/shared/managed-channel-plugin-registry'
 
+const DINGTALK_PLUGIN_INSTALL_REGISTRY_URL = 'https://registry.npmmirror.com'
+
 interface CliLikeResult {
   stdout?: string
   stderr?: string
@@ -280,7 +282,9 @@ async function ensureDingtalkPluginInstalled(
     }
   }
 
-  const installResult = await installPlugin(context.packageName, [context.pluginId])
+  const installResult = await installPlugin(context.packageName, [context.pluginId], {
+    registryUrl: DINGTALK_PLUGIN_INSTALL_REGISTRY_URL,
+  })
   pushOutput(context.outputParts, installResult)
 
   if (!installResult.ok) {
@@ -315,7 +319,7 @@ async function ensureDingtalkPluginInstalled(
     source: 'plugin-install',
     channelId: 'dingtalk',
     pluginId: context.pluginId,
-    command: `openclaw plugins install ${context.packageName}`,
+    command: `NPM_CONFIG_REGISTRY=${DINGTALK_PLUGIN_INSTALL_REGISTRY_URL} openclaw plugins install ${context.packageName}`,
     message: '已安装钉钉官方插件',
   })
 

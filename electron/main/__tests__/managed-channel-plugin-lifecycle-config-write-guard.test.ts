@@ -148,4 +148,48 @@ describe('createManagedChannelPluginLifecycleService config write guard', () => 
       status: 'success',
     }))
   })
+
+  it('installs qqbot with the npmmirror registry override', async () => {
+    applyConfigPatchGuardedMock.mockResolvedValueOnce({
+      ok: true,
+      blocked: false,
+      wrote: true,
+      target: 'config',
+      snapshotCreated: false,
+      snapshot: null,
+      changedJsonPaths: ['plugins.allow'],
+      ownershipSummary: null,
+      message: 'written',
+    })
+
+    const dependencies = createDependencies()
+    dependencies.isPluginInstalledOnDisk.mockResolvedValue(false)
+    dependencies.readConfig.mockResolvedValue({
+      channels: {
+        qqbot: {
+          enabled: true,
+          appId: 'qq_app_id',
+          clientSecret: 'qq_secret',
+        },
+      },
+      plugins: {},
+    })
+    dependencies.listRegisteredPlugins.mockResolvedValue(['openclaw-qqbot'])
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+
+    const result = await service.repairManagedChannelPlugin('qqbot')
+
+    expect(result).toMatchObject({
+      kind: 'ok',
+      channelId: 'qqbot',
+      action: 'installed',
+    })
+    expect(dependencies.installPlugin).toHaveBeenCalledWith(
+      '@tencent-connect/openclaw-qqbot@latest',
+      ['openclaw-qqbot'],
+      {
+        registryUrl: 'https://registry.npmmirror.com',
+      }
+    )
+  })
 })

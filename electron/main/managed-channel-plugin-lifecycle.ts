@@ -36,7 +36,13 @@ export interface ManagedChannelPluginLifecycleDependencies {
   repairIncompatiblePlugins: (
     options?: RepairIncompatibleExtensionPluginsOptions
   ) => Promise<RepairIncompatibleExtensionsResult>
-  installPlugin: (name: string, expectedPluginIds?: string[]) => Promise<CliResult>
+  installPlugin: (
+    name: string,
+    expectedPluginIds?: string[],
+    options?: {
+      registryUrl?: string | null
+    }
+  ) => Promise<CliResult>
   installPluginNpx: (specifier: string, expectedPluginIds?: string[]) => Promise<CliResult>
   isPluginInstalledOnDisk: (pluginId: string) => Promise<boolean>
   listRegisteredPlugins: () => Promise<string[] | null>
@@ -54,6 +60,8 @@ interface ManagedChannelRepairCooldownState {
   lastFailureKind: string
   cooldownUntil: number
 }
+
+const QQBOT_PLUGIN_INSTALL_REGISTRY_URL = 'https://registry.npmmirror.com'
 
 function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -735,7 +743,13 @@ export function createManagedChannelPluginLifecycleService(
     if (!installedBefore) {
       const installResult = spec.installStrategy === 'npx'
         ? await resolvedDependencies.installPluginNpx(spec.npxSpecifier || '', [spec.canonicalPluginId])
-        : await resolvedDependencies.installPlugin(spec.packageName || '', [spec.canonicalPluginId])
+        : await resolvedDependencies.installPlugin(
+            spec.packageName || '',
+            [spec.canonicalPluginId],
+            spec.channelId === 'qqbot'
+              ? { registryUrl: QQBOT_PLUGIN_INSTALL_REGISTRY_URL }
+              : undefined
+          )
       if (!installResult.ok) {
         const installedAfterAlreadyExists = isSafeAlreadyInstalledManagedPluginInstallFailure(installResult)
           ? await resolvedDependencies.isPluginInstalledOnDisk(spec.canonicalPluginId)

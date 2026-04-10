@@ -27,7 +27,7 @@ describe('MainLayout', () => {
     vi.unstubAllGlobals()
   })
 
-  it('keeps settings and the update reminder in the same bottom navigation row', () => {
+  it('keeps settings and the update reminder in the same bottom navigation row with filled primary styling', () => {
     vi.stubGlobal('window', {
       api: {
         platform: 'darwin',
@@ -60,7 +60,8 @@ describe('MainLayout', () => {
     expect(html).not.toContain('<span class="truncate">设置</span>')
     expect(html).toContain('inline-flex shrink-0 items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors')
     expect(html).toContain('border-0 outline-none focus:outline-none focus-visible:outline-none appearance-none')
-    expect(html).toContain('bg-[var(--mantine-color-brand-light)]')
-    expect(html).toContain('text-[var(--mantine-color-brand-light-color)]')
+    expect(html).toMatch(
+      /<button[^>]*bg-\[var\(--mantine-primary-color-filled\)\][^>]*text-\[var\(--mantine-primary-color-contrast\)\][^>]*>新版本<\/button>/
+    )
   })
 })
