@@ -124,7 +124,7 @@ describe('setupDingtalkOfficialChannel', () => {
     expect(uninstallPluginMock).toHaveBeenNthCalledWith(1, 'dingtalk-connector')
     expect(uninstallPluginMock).toHaveBeenNthCalledWith(2, 'dingtalk')
     expect(installPluginMock).toHaveBeenCalledWith(
-      '@dingtalk-real-ai/dingtalk-connector',
+      '@dingtalk-real-ai/dingtalk-connector@0.8.13',
       ['dingtalk-connector'],
       {
         registryUrl: 'https://registry.npmmirror.com',

@@ -1458,6 +1458,13 @@ describe('executeAuthRoute', () => {
     expect(ensureGatewayRunning).toHaveBeenCalledTimes(1)
     expect(runCommand).toHaveBeenCalledTimes(2)
     expect(result.ok).toBe(true)
+    expect(result.postAuthRuntime).toEqual({
+      tokenRotated: false,
+      gatewayApplyAction: 'restart',
+      gatewayConfirmed: true,
+      recoveryReason: 'gateway-recovery',
+      recommendedVerificationProfile: 'post-auth-recovery',
+    })
     expect(result.attemptedCommands).toEqual([
       [
         'onboard',
@@ -2045,6 +2052,13 @@ describe('executeAuthRoute', () => {
     expect(runCommand).toHaveBeenNthCalledWith(2, ['secrets', 'reload'], expect.any(Number))
     expect(ensureGatewayRunning).toHaveBeenCalledTimes(1)
     expect(result.ok).toBe(true)
+    expect(result.postAuthRuntime).toEqual({
+      tokenRotated: true,
+      gatewayApplyAction: 'hot-reload',
+      gatewayConfirmed: true,
+      recoveryReason: 'gateway-token-rotated',
+      recommendedVerificationProfile: 'post-auth-recovery',
+    })
     expect(result.attemptedCommands).toEqual([
       [
         'onboard',

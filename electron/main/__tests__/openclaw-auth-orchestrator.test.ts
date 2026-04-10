@@ -7,14 +7,38 @@ import {
 } from '../openclaw-auth-orchestrator'
 import type { CliCommandResult, OpenClawCapabilities } from '../openclaw-capabilities'
 
-const { resolveMainAuthStorePathMock, upsertApiKeyAuthProfileMock } = vi.hoisted(() => ({
+const {
+  resolveMainAuthStorePathMock,
+  upsertApiKeyAuthProfileMock,
+  ensureGatewayRunningMock,
+  confirmRuntimeReconcileMock,
+  issueDesiredRuntimeRevisionMock,
+  markRuntimeRevisionInProgressMock,
+  resolveGatewayBlockingReasonFromStateMock,
+} = vi.hoisted(() => ({
   resolveMainAuthStorePathMock: vi.fn(),
   upsertApiKeyAuthProfileMock: vi.fn(),
+  ensureGatewayRunningMock: vi.fn(),
+  confirmRuntimeReconcileMock: vi.fn(),
+  issueDesiredRuntimeRevisionMock: vi.fn(),
+  markRuntimeRevisionInProgressMock: vi.fn(),
+  resolveGatewayBlockingReasonFromStateMock: vi.fn(() => 'none'),
 }))
 
 vi.mock('../local-model-probe', () => ({
   resolveMainAuthStorePath: resolveMainAuthStorePathMock,
   upsertApiKeyAuthProfile: upsertApiKeyAuthProfileMock,
+}))
+
+vi.mock('../openclaw-gateway-service', () => ({
+  ensureGatewayRunning: ensureGatewayRunningMock,
+}))
+
+vi.mock('../openclaw-runtime-reconcile', () => ({
+  confirmRuntimeReconcile: confirmRuntimeReconcileMock,
+  issueDesiredRuntimeRevision: issueDesiredRuntimeRevisionMock,
+  markRuntimeRevisionInProgress: markRuntimeRevisionInProgressMock,
+  resolveGatewayBlockingReasonFromState: resolveGatewayBlockingReasonFromStateMock,
 }))
 
 function ok(stdout = ''): CliCommandResult {
@@ -164,11 +188,36 @@ beforeEach(() => {
     profileId: 'openai:default',
     authStorePath: '/tmp/openclaw/profiles/team-a/agents/main/agent/auth-profiles.json',
   })
+  ensureGatewayRunningMock.mockResolvedValue({
+    ok: true,
+    running: true,
+    stdout: '{"ok":true}',
+    stderr: '',
+    code: 0,
+    stateCode: 'healthy',
+    summary: 'Gateway 已确认可用',
+    safeToRetry: true,
+    attemptedCommands: [['health', '--json']],
+  })
+  issueDesiredRuntimeRevisionMock.mockResolvedValue({
+    runtime: {
+      desiredRevision: 1,
+      lastActions: [],
+    },
+  })
+  markRuntimeRevisionInProgressMock.mockResolvedValue(undefined)
+  confirmRuntimeReconcileMock.mockResolvedValue(undefined)
+  resolveGatewayBlockingReasonFromStateMock.mockImplementation(() => 'none')
 })
 
 afterEach(() => {
   resolveMainAuthStorePathMock.mockReset()
   upsertApiKeyAuthProfileMock.mockReset()
+  ensureGatewayRunningMock.mockReset()
+  confirmRuntimeReconcileMock.mockReset()
+  issueDesiredRuntimeRevisionMock.mockReset()
+  markRuntimeRevisionInProgressMock.mockReset()
+  resolveGatewayBlockingReasonFromStateMock.mockReset()
   resetAuthLockForTests()
 })
 
@@ -407,6 +456,56 @@ describe('runAuthAction', () => {
       expect.any(Number)
     )
     expect(result.ok).toBe(true)
+  })
+
+  it('passes through optional postAuthRuntime fields from executeAuthRoute results', async () => {
+    const runCommand = vi.fn(async (...args: any[]) => {
+      const command = args[0] as string[]
+      if (command[0] === 'onboard') {
+        return ok('configured')
+      }
+      if (command[0] === 'secrets') {
+        return ok('Secrets reloaded')
+      }
+      return ok('')
+    })
+    const readConfig = vi
+      .fn()
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'old-token',
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'new-token',
+          },
+        },
+      })
+    const action: AuthAction = {
+      kind: 'login',
+      providerId: 'openai',
+      methodId: 'openai-api-key',
+      secret: 'sk-live-123',
+    }
+
+    const result = await runAuthAction(action, {
+      runCommand,
+      readConfig,
+      loadAuthRegistry: async () => createRegistry(),
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.postAuthRuntime).toEqual({
+      tokenRotated: true,
+      gatewayApplyAction: 'hot-reload',
+      gatewayConfirmed: true,
+      recoveryReason: 'gateway-token-rotated',
+      recommendedVerificationProfile: 'post-auth-recovery',
+    })
   })
 
   it('requires a selected extra option for multimethod provider descriptors', async () => {

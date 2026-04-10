@@ -803,7 +803,9 @@ export function registerIpcHandlers() {
   ipcMain.handle('models:capabilities:get', () => getModelCenterCapabilities())
   ipcMain.handle('models:catalog:list', (_e, query?: ModelCatalogQuery) => getModelCatalog({ query }))
   ipcMain.handle('models:status:get', (_e, options?: ModelStatusOptions) => getModelStatus(options || {}))
-  ipcMain.handle('models:upstream-state:get', () => getOpenClawUpstreamModelState())
+  ipcMain.handle('models:upstream-state:get', (_e, options?: { timeoutMs?: number; loadTimeoutMs?: number }) =>
+    getOpenClawUpstreamModelState(options || {})
+  )
   ipcMain.handle('models:verification:sync', (_e, input?: { statusData?: Record<string, any> | null }) =>
     syncModelVerificationState(input || {})
   )

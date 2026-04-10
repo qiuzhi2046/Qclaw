@@ -79,6 +79,11 @@ export interface OpenClawUpstreamModelStateResult {
   }
 }
 
+export interface OpenClawUpstreamModelStateOptions {
+  timeoutMs?: number
+  loadTimeoutMs?: number
+}
+
 function normalizeRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -633,13 +638,15 @@ function buildFallbackResult(
   }
 }
 
-export async function getOpenClawUpstreamModelState(): Promise<OpenClawUpstreamModelStateResult> {
+export async function getOpenClawUpstreamModelState(
+  options: OpenClawUpstreamModelStateOptions = {}
+): Promise<OpenClawUpstreamModelStateResult> {
   let inspection: ControlUiAppInspectionResult
   try {
     inspection = await inspectControlUiAppViaBrowser({
       readConfig,
       readEnvFile,
-    })
+    }, options)
   } catch (error) {
     return {
       ok: false,

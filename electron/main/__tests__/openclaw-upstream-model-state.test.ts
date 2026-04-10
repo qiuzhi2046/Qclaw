@@ -181,6 +181,32 @@ describe('getOpenClawUpstreamModelState', () => {
     expect(result.diagnostics.lastError).toBe('gateway control ui config unavailable')
   })
 
+  it('passes optional timeout overrides through to the control ui inspection helper', async () => {
+    inspectControlUiAppViaBrowserMock.mockResolvedValueOnce({
+      connected: true,
+      hasClient: true,
+      lastError: '',
+      appKeys: ['client'],
+      helloSnapshot: { models: { status: { allowed: ['openai/gpt-5.4-pro'] } } },
+      healthResult: null,
+      sessionsState: null,
+      modelCatalogState: null,
+    })
+
+    await getOpenClawUpstreamModelState({
+      timeoutMs: 35_000,
+      loadTimeoutMs: 30_000,
+    })
+
+    expect(inspectControlUiAppViaBrowserMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        timeoutMs: 35_000,
+        loadTimeoutMs: 30_000,
+      }
+    )
+  })
+
   it('records a fallback reason when control ui app is reachable but missing model state', async () => {
     inspectControlUiAppViaBrowserMock.mockResolvedValueOnce({
       connected: true,

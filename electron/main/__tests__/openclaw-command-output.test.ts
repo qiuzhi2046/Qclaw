@@ -49,6 +49,22 @@ describe('normalizeCliFailureMessage', () => {
     expect(normalizeCliFailureMessage('permission denied')).toBe('配置写入失败，请检查本机权限后重试。')
   })
 
+  it('maps api credential failures into the existing API-invalid wording', () => {
+    expect(normalizeCliFailureMessage('status code 403: invalid api key')).toBe(
+      'API Key 无效、已过期或权限不足，请检查后重试。'
+    )
+  })
+
+  it('maps raw token mismatch failures into the gateway recovery wording', () => {
+    expect(normalizeCliFailureMessage('token mismatch')).toBe('网关 token 已变更，请刷新后重新尝试')
+  })
+
+  it('maps generic network failures into the existing network wording', () => {
+    expect(normalizeCliFailureMessage('fetch failed: proxy timeout')).toBe(
+      '网络连接异常，请检查网络或代理配置后重试。'
+    )
+  })
+
   it('maps multi-model fallback failures into a concise recovery message', () => {
     expect(normalizeCliFailureMessage(RAW_ALL_MODELS_FAILED)).toBe(
       '当前模型暂时不可用，备用模型也未就绪。请稍后重试，或到模型设置中切换到已配置模型。'

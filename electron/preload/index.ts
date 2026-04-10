@@ -265,7 +265,10 @@ export const api = {
   getModelCapabilities: () => ipcRenderer.invoke('models:capabilities:get'),
   listModelCatalog: (query?: Record<string, any>) => ipcRenderer.invoke('models:catalog:list', query),
   getModelStatus: (options?: Record<string, any>) => ipcRenderer.invoke('models:status:get', options),
-  getModelUpstreamState: () => ipcRenderer.invoke('models:upstream-state:get'),
+  getModelUpstreamState: (options?: { timeoutMs?: number; loadTimeoutMs?: number }) =>
+    options
+      ? ipcRenderer.invoke('models:upstream-state:get', options)
+      : ipcRenderer.invoke('models:upstream-state:get'),
   syncModelVerificationState: (input?: { statusData?: Record<string, any> | null }) =>
     ipcRenderer.invoke('models:verification:sync', input),
   recordModelVerification: (input: {

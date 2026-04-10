@@ -70,6 +70,33 @@ describe('user-facing-cli-feedback', () => {
     expect(message).toBe('网关 token 已变更，请刷新后重新尝试')
   })
 
+  it('maps raw token mismatch failures into the unified gateway wording instead of api-invalid copy', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: 'token mismatch',
+      fallback: 'fallback',
+    })
+
+    expect(message).toBe('网关 token 已变更，请刷新后重新尝试')
+  })
+
+  it('keeps API-invalid wording for shared classifier hits', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: 'status code 401: invalid api key',
+      fallback: 'fallback',
+    })
+
+    expect(message).toBe('API Key 无效、已过期或权限不足，请检查后重试。')
+  })
+
+  it('keeps generic network wording for shared classifier network hits', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: 'fetch failed: proxy timeout',
+      fallback: 'fallback',
+    })
+
+    expect(message).toBe('网络连接异常，请检查网络或代理配置后重试。')
+  })
+
   it('surfaces the busy skill mutation hint emitted by the main process marker', () => {
     const message = toUserFacingCliFailureMessage({
       stderr: [

@@ -646,6 +646,14 @@ type ModelAuthAction =
 
 type AuthErrorCode = 'auth_busy' | 'invalid_input' | 'command_failed' | 'unsupported_capability'
 
+interface PostAuthRuntime {
+  tokenRotated: boolean
+  gatewayApplyAction: 'none' | 'hot-reload' | 'restart'
+  gatewayConfirmed: boolean
+  recoveryReason: 'none' | 'gateway-token-rotated' | 'gateway-recovery' | 'runtime-stale'
+  recommendedVerificationProfile: 'default' | 'post-auth-recovery' | 'slow-path'
+}
+
 interface RunModelAuthResult {
   ok: boolean
   action: ModelAuthAction['kind']
@@ -654,6 +662,7 @@ interface RunModelAuthResult {
   stderr: string
   code: number | null
   fallbackUsed: boolean
+  postAuthRuntime?: PostAuthRuntime
   errorCode?: AuthErrorCode
   message?: string
 }
@@ -1858,7 +1867,10 @@ interface ElectronApi {
   getModelCapabilities: () => Promise<OpenClawCapabilities>
   listModelCatalog: (query?: ModelCatalogQuery) => Promise<ModelCatalogResult>
   getModelStatus: (options?: ModelStatusOptions) => Promise<ModelConfigCommandResult<Record<string, any>>>
-  getModelUpstreamState: () => Promise<{
+  getModelUpstreamState: (options?: {
+    timeoutMs?: number
+    loadTimeoutMs?: number
+  }) => Promise<{
     ok: boolean
     source: 'control-ui-app'
     data?: {
@@ -1958,6 +1970,8 @@ interface ElectronApi {
     kind: 'default' | 'agent-primary'
     model: string
     agentId?: string
+    timeoutMs?: number
+    loadTimeoutMs?: number
   }) => Promise<{
     ok: boolean
     wrote: boolean

@@ -11,6 +11,18 @@ import {
   buildVerificationProviderCandidates,
   buildBusyStateDisplay,
   buildModelAuthRequest,
+  resolveControlUiTimeoutProfile,
+  resolveControlUiTimeoutOptions,
+  resolveAuthVerificationPollPolicy,
+  resolvePostAuthVerificationProfile,
+  shouldIgnorePostAuthAsyncResult,
+  shouldReleasePostAuthRecoveryLock,
+  resolveRefreshCapabilitiesGuard,
+  shouldGateRefreshDuringPostAuthRecovery,
+  buildSubmitAuthResultDiagnosticDetails,
+  classifyModelCenterBannerMessage,
+  resolvePostAuthRecoveryLockForConfiguredCallback,
+  shouldHoldPostAuthRecoveryLockUntilDeferredApply,
   executeRemoteModelAuthSubmission,
   buildProviderOptions,
   resolveNextProviderMethodSelection,
@@ -26,12 +38,14 @@ import {
   getPhaseAfterCancellation,
   getUnsupportedMethodReason,
   joinModelCenterNonBlockingMessages,
+  mergeModelCenterNonBlockingMessagesWithPriority,
   resolveBrowserOAuthVerificationSnapshot,
   resolveModelCenterMethodDisplayCopy,
   resolveModelCenterProviderDisplayCopy,
   resolveDefaultModelForProviderCandidates,
   findConfiguredCustomProviderId,
   resolveProviderVerificationSnapshot,
+  shouldSuppressModelCenterSecondaryNetworkBanner,
   shouldRenderProviderConfigContent,
   shouldShowCredentialProbeControl,
   shouldShowSkipButton,
@@ -265,6 +279,74 @@ describe('ModelCenter source copy cleanup', () => {
     expect(modelCenterSource).not.toMatch(/\{selectedProvider\?\.hint && <Text/)
     expect(modelCenterSource).not.toMatch(/\{selectedMethod\?\.hint && <Text/)
     expect(modelCenterSource).not.toMatch(/\.extraOptions\.find\(\(option\) => normalizeMethodId\(option\.id\) === normalizeMethodId\(selectedExtraOption\)\)\s*\?\.hint/)
+  })
+
+  it('wires the refresh action through the post-auth recovery guard before enabling the button again', () => {
+    expect(modelCenterSource).toContain('const refreshGuard = resolveRefreshCapabilitiesGuard({')
+    expect(modelCenterSource).toContain("setStatusText(refreshGuard.statusText || '正在同步认证结果，请稍候...')")
+    expect(modelCenterSource).toMatch(/disabled=\{refreshGuard\.disabled\}/)
+  })
+
+  it('guards long post-auth async branches with attempt checks before mutating current UI state', () => {
+    expect(modelCenterSource).toContain('const shouldDropAsyncResult = () =>')
+    expect(modelCenterSource).toContain('const shouldReleaseRecoveryLock = () =>')
+    expect(modelCenterSource).toContain('if (shouldDropAsyncResult()) return')
+  })
+
+  it('wires verification polling through a derived post-auth profile policy instead of the fixed default budget', () => {
+    expect(modelCenterSource).toContain('const verificationPollPolicy = resolveAuthVerificationPollPolicy(')
+    expect(modelCenterSource).toContain('verificationPollPolicy,')
+    expect(modelCenterSource).toContain('options?.pollPolicy || UI_RUNTIME_DEFAULTS.authVerification.poll')
+  })
+
+  it('wires post-auth upstream reads and writes through derived control-ui timeout overrides', () => {
+    expect(modelCenterSource).toContain('const controlUiTimeoutProfile = resolveControlUiTimeoutProfile(')
+    expect(modelCenterSource).toContain('const controlUiTimeoutOptions = resolveControlUiTimeoutOptions(controlUiTimeoutProfile)')
+    expect(modelCenterSource).toContain('window.api.getModelUpstreamState(controlUiTimeoutOptions)')
+    expect(modelCenterSource).toContain('window.api.applyModelConfigViaUpstream({')
+    expect(modelCenterSource).toContain('...controlUiTimeoutOptions,')
+  })
+
+  it('reuses the derived control-ui timeout budget when resolving a preferred model during post-auth recovery', () => {
+    expect(modelCenterSource).toContain(
+      'timeoutMs: controlUiTimeoutOptions?.timeoutMs || DEFAULT_MODEL_APPLY_TIMEOUT_MS'
+    )
+  })
+
+  it('lets default-model apply use the helper confirmation budget instead of wrapping it in a fixed 6 second timeout', () => {
+    expect(modelCenterSource).toContain('confirmationPolicy: verificationPollPolicy,')
+    expect(modelCenterSource).not.toMatch(/withTimeout\(\s*applyDefaultModelWithGatewayReload\(/)
+  })
+
+  it('wires secondary network suppress through the shared banner priority helper before mutating warnings and oauth errors', () => {
+    expect(modelCenterSource).toContain('shouldSuppressModelCenterSecondaryNetworkBanner({')
+    expect(modelCenterSource).toContain('mergeModelCenterNonBlockingMessagesWithPriority({')
+    expect(modelCenterSource).toContain("event: 'secondary-network-banner-suppressed'")
+  })
+
+  it('keeps deferred default-model apply responsible for recovery-lock release when stayOnConfigured is still on screen', () => {
+    expect(modelCenterSource).toContain(
+      'const holdPostAuthRecoveryLockUntilDeferredApply = shouldHoldPostAuthRecoveryLockUntilDeferredApply({'
+    )
+    expect(modelCenterSource).toMatch(
+      /if \(!holdPostAuthRecoveryLockUntilDeferredApply && shouldReleaseRecoveryLock\(\)\) \{\s*setPostAuthRecoveryRefreshLocked\(false\)/
+    )
+    expect(modelCenterSource).toMatch(
+      /finally \{\s*if \(holdPostAuthRecoveryLockUntilDeferredApply && shouldReleaseRecoveryLock\(\)\) \{\s*setPostAuthRecoveryRefreshLocked\(false\)/
+    )
+  })
+
+  it('derives the callback banner suppression lock inside the rejection path so deferred unlocks are observed', () => {
+    expect(modelCenterSource).toContain(
+      'const releasedBeforeCallback = !holdPostAuthRecoveryLockUntilDeferredApply && shouldReleaseRecoveryLock()'
+    )
+    expect(modelCenterSource).toContain(
+      'const callbackPostAuthRecoveryLocked = resolvePostAuthRecoveryLockForConfiguredCallback({'
+    )
+    expect(modelCenterSource).toMatch(/const callbackPostAuthRecoveryLocked = resolvePostAuthRecoveryLockForConfiguredCallback\(\{/)
+    expect(modelCenterSource).toMatch(/postAuthRecoveryLocked:\s*postAuthRecoveryRefreshLockedRef\.current,/)
+    expect(modelCenterSource).toContain('releasedBeforeCallback,')
+    expect(modelCenterSource).toMatch(/postAuthRecoveryLocked:\s*callbackPostAuthRecoveryLocked,/)
   })
 })
 
@@ -623,6 +705,40 @@ describe('executeRemoteModelAuthSubmission', () => {
     })
   })
 
+  it('passes through unknown auth result fields from runModelAuth unchanged', async () => {
+    const providers = buildProviderOptions(CAPABILITIES)
+    const apiKeyMethod = providers[0]?.methods[0]
+    const startModelOAuth = vi.fn()
+    const authResult = {
+      ok: true,
+      action: 'login',
+      stdout: '',
+      stderr: '',
+      code: 0,
+      fallbackUsed: false,
+      postAuthRuntime: {
+        tokenRotated: true,
+        gatewayApplyAction: 'restart',
+      },
+    }
+    const runModelAuth = vi.fn(async () => authResult)
+
+    const result = await executeRemoteModelAuthSubmission(
+      {
+        providerId: 'openai',
+        method: apiKeyMethod!,
+        secret: 'sk-live-123',
+      },
+      {
+        startModelOAuth,
+        runModelAuth,
+      }
+    )
+
+    expect(startModelOAuth).not.toHaveBeenCalled()
+    expect(result).toEqual(authResult)
+  })
+
   it('keeps browser oauth methods on the dedicated oauth launcher path', async () => {
     const providers = buildProviderOptions(CAPABILITIES)
     const oauthMethod = providers[1]?.methods[0]
@@ -647,6 +763,418 @@ describe('executeRemoteModelAuthSubmission', () => {
       methodId: 'minimax-portal',
       selectedExtraOption: 'oauth-cn',
       setDefault: true,
+    })
+  })
+
+  it('passes through unknown oauth launcher result fields unchanged', async () => {
+    const providers = buildProviderOptions(CAPABILITIES)
+    const oauthMethod = providers[1]?.methods[0]
+    const oauthResult = {
+      ok: true,
+      providerId: 'minimax',
+      methodId: 'minimax-portal',
+      loginProviderId: 'minimax-portal',
+      stdout: '',
+      stderr: '',
+      code: 0,
+      postAuthRuntime: {
+        tokenRotated: false,
+      },
+    }
+    const startModelOAuth = vi.fn(async () => oauthResult)
+    const runModelAuth = vi.fn()
+
+    const result = await executeRemoteModelAuthSubmission(
+      {
+        providerId: 'minimax',
+        method: oauthMethod!,
+        selectedExtraOption: 'oauth-cn',
+      },
+      {
+        startModelOAuth,
+        runModelAuth,
+      }
+    )
+
+    expect(runModelAuth).not.toHaveBeenCalled()
+    expect(result).toEqual(oauthResult)
+  })
+})
+
+describe('buildSubmitAuthResultDiagnosticDetails', () => {
+  it('keeps the legacy auth result diagnostic shape when post-auth runtime context is absent', () => {
+    expect(
+      buildSubmitAuthResultDiagnosticDetails({
+        ok: true,
+        fallbackUsed: false,
+        errorCode: 'none',
+        message: 'ok',
+      })
+    ).toEqual({
+      ok: true,
+      fallbackUsed: false,
+      errorCode: 'none',
+      message: 'ok',
+    })
+  })
+
+  it('records optional post-auth runtime context without changing the base auth result fields', () => {
+    expect(
+      buildSubmitAuthResultDiagnosticDetails({
+        ok: true,
+        fallbackUsed: false,
+        errorCode: undefined,
+        message: 'ok',
+        postAuthRuntime: {
+          tokenRotated: true,
+          gatewayApplyAction: 'restart',
+          gatewayConfirmed: true,
+          recoveryReason: 'gateway-token-rotated',
+          recommendedVerificationProfile: 'post-auth-recovery',
+        },
+      })
+    ).toEqual({
+      ok: true,
+      fallbackUsed: false,
+      errorCode: undefined,
+      message: 'ok',
+      postAuthRuntime: {
+        tokenRotated: true,
+        gatewayApplyAction: 'restart',
+        gatewayConfirmed: true,
+        recoveryReason: 'gateway-token-rotated',
+        recommendedVerificationProfile: 'post-auth-recovery',
+      },
+    })
+  })
+})
+
+describe('shouldGateRefreshDuringPostAuthRecovery', () => {
+  it('returns false when no post-auth runtime recovery signal is present', () => {
+    expect(shouldGateRefreshDuringPostAuthRecovery(undefined)).toBe(false)
+    expect(
+      shouldGateRefreshDuringPostAuthRecovery({
+        tokenRotated: false,
+        gatewayApplyAction: 'none',
+        gatewayConfirmed: true,
+        recoveryReason: 'none',
+        recommendedVerificationProfile: 'default',
+      })
+    ).toBe(false)
+  })
+
+  it('returns true when auth runtime signals a token rotation or gateway recovery apply action', () => {
+    expect(
+      shouldGateRefreshDuringPostAuthRecovery({
+        tokenRotated: true,
+        gatewayApplyAction: 'none',
+        gatewayConfirmed: true,
+        recoveryReason: 'none',
+        recommendedVerificationProfile: 'default',
+      })
+    ).toBe(true)
+
+    expect(
+      shouldGateRefreshDuringPostAuthRecovery({
+        tokenRotated: false,
+        gatewayApplyAction: 'restart',
+        gatewayConfirmed: true,
+        recoveryReason: 'gateway-recovery',
+        recommendedVerificationProfile: 'post-auth-recovery',
+      })
+    ).toBe(true)
+  })
+})
+
+describe('resolveRefreshCapabilitiesGuard', () => {
+  it('blocks refresh with the post-auth recovery copy when only the recovery lock is active', () => {
+    expect(
+      resolveRefreshCapabilitiesGuard({
+        interactionLocked: false,
+        refreshingCapabilities: false,
+        phase: 'ready',
+        postAuthRecoveryRefreshLocked: true,
+      })
+    ).toEqual({
+      blocked: true,
+      disabled: true,
+      statusText: '正在同步认证结果，请稍候...',
+    })
+  })
+
+  it('preserves existing refresh blocking reasons without forcing the post-auth recovery copy', () => {
+    expect(
+      resolveRefreshCapabilitiesGuard({
+        interactionLocked: true,
+        refreshingCapabilities: false,
+        phase: 'ready',
+        postAuthRecoveryRefreshLocked: false,
+      })
+    ).toEqual({
+      blocked: true,
+      disabled: true,
+      statusText: '',
+    })
+
+    expect(
+      resolveRefreshCapabilitiesGuard({
+        interactionLocked: false,
+        refreshingCapabilities: false,
+        phase: 'loading',
+        postAuthRecoveryRefreshLocked: false,
+      })
+    ).toEqual({
+      blocked: true,
+      disabled: true,
+      statusText: '',
+    })
+  })
+
+  it('leaves refresh available when neither the core lock nor the recovery lock is active', () => {
+    expect(
+      resolveRefreshCapabilitiesGuard({
+        interactionLocked: false,
+        refreshingCapabilities: false,
+        phase: 'ready',
+        postAuthRecoveryRefreshLocked: false,
+      })
+    ).toEqual({
+      blocked: false,
+      disabled: false,
+      statusText: '',
+    })
+  })
+})
+
+describe('shouldIgnorePostAuthAsyncResult', () => {
+  it('drops results from stale attempts, unmounted views, or canceled flows', () => {
+    expect(
+      shouldIgnorePostAuthAsyncResult({
+        attemptId: 2,
+        currentAttemptId: 3,
+        mounted: true,
+        cancelRequested: false,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldIgnorePostAuthAsyncResult({
+        attemptId: 2,
+        currentAttemptId: 2,
+        mounted: false,
+        cancelRequested: false,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldIgnorePostAuthAsyncResult({
+        attemptId: 2,
+        currentAttemptId: 2,
+        mounted: true,
+        cancelRequested: true,
+      })
+    ).toBe(true)
+  })
+
+  it('keeps results from the current mounted uncanceled attempt', () => {
+    expect(
+      shouldIgnorePostAuthAsyncResult({
+        attemptId: 4,
+        currentAttemptId: 4,
+        mounted: true,
+        cancelRequested: false,
+      })
+    ).toBe(false)
+  })
+})
+
+describe('shouldReleasePostAuthRecoveryLock', () => {
+  it('releases the recovery lock only for the current mounted attempt', () => {
+    expect(
+      shouldReleasePostAuthRecoveryLock({
+        attemptId: 5,
+        currentAttemptId: 5,
+        mounted: true,
+      })
+    ).toBe(true)
+  })
+
+  it('does not release the recovery lock for stale or unmounted attempts', () => {
+    expect(
+      shouldReleasePostAuthRecoveryLock({
+        attemptId: 5,
+        currentAttemptId: 6,
+        mounted: true,
+      })
+    ).toBe(false)
+
+    expect(
+      shouldReleasePostAuthRecoveryLock({
+        attemptId: 5,
+        currentAttemptId: 5,
+        mounted: false,
+      })
+    ).toBe(false)
+  })
+})
+
+describe('shouldHoldPostAuthRecoveryLockUntilDeferredApply', () => {
+  it('holds the recovery lock only while a visible configured view still has deferred post-auth work pending', () => {
+    expect(
+      shouldHoldPostAuthRecoveryLockUntilDeferredApply({
+        postAuthRecoveryLocked: true,
+        stayOnConfigured: true,
+        shouldQueueDeferredDefaultModelApply: true,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldHoldPostAuthRecoveryLockUntilDeferredApply({
+        postAuthRecoveryLocked: false,
+        stayOnConfigured: true,
+        shouldQueueDeferredDefaultModelApply: true,
+      })
+    ).toBe(false)
+  })
+
+  it('does not hold the recovery lock when the configured view is leaving or no deferred apply is scheduled', () => {
+    expect(
+      shouldHoldPostAuthRecoveryLockUntilDeferredApply({
+        postAuthRecoveryLocked: true,
+        stayOnConfigured: false,
+        shouldQueueDeferredDefaultModelApply: true,
+      })
+    ).toBe(false)
+
+    expect(
+      shouldHoldPostAuthRecoveryLockUntilDeferredApply({
+        postAuthRecoveryLocked: true,
+        stayOnConfigured: true,
+        shouldQueueDeferredDefaultModelApply: false,
+      })
+    ).toBe(false)
+  })
+})
+
+describe('resolvePostAuthRecoveryLockForConfiguredCallback', () => {
+  it('forces callback banner suppression to observe an unlocked state once the lock was released before the callback', () => {
+    expect(
+      resolvePostAuthRecoveryLockForConfiguredCallback({
+        postAuthRecoveryLocked: true,
+        releasedBeforeCallback: true,
+      })
+    ).toBe(false)
+  })
+
+  it('preserves the current recovery lock when deferred post-auth work still owns the lock', () => {
+    expect(
+      resolvePostAuthRecoveryLockForConfiguredCallback({
+        postAuthRecoveryLocked: true,
+        releasedBeforeCallback: false,
+      })
+    ).toBe(true)
+
+    expect(
+      resolvePostAuthRecoveryLockForConfiguredCallback({
+        postAuthRecoveryLocked: false,
+        releasedBeforeCallback: false,
+      })
+    ).toBe(false)
+  })
+})
+
+describe('resolvePostAuthVerificationProfile', () => {
+  it('defaults to the legacy profile when no post-auth runtime context exists', () => {
+    expect(resolvePostAuthVerificationProfile(undefined)).toBe('default')
+  })
+
+  it('reuses the structured post-auth runtime recommendation when provided', () => {
+    expect(
+      resolvePostAuthVerificationProfile({
+        tokenRotated: true,
+        gatewayApplyAction: 'restart',
+        gatewayConfirmed: true,
+        recoveryReason: 'gateway-token-rotated',
+        recommendedVerificationProfile: 'post-auth-recovery',
+      })
+    ).toBe('post-auth-recovery')
+
+    expect(
+      resolvePostAuthVerificationProfile({
+        tokenRotated: false,
+        gatewayApplyAction: 'none',
+        gatewayConfirmed: true,
+        recoveryReason: 'runtime-stale',
+        recommendedVerificationProfile: 'slow-path',
+      })
+    ).toBe('slow-path')
+  })
+})
+
+describe('resolveAuthVerificationPollPolicy', () => {
+  it('keeps the legacy polling budget for the default profile', () => {
+    expect(resolveAuthVerificationPollPolicy('default')).toEqual({
+      timeoutMs: 20_000,
+      initialIntervalMs: 2_000,
+      maxIntervalMs: 4_000,
+      backoffFactor: 1.5,
+    })
+  })
+
+  it('expands only the timeout budget for post-auth recovery and slow-path verification', () => {
+    expect(resolveAuthVerificationPollPolicy('post-auth-recovery')).toEqual({
+      timeoutMs: 45_000,
+      initialIntervalMs: 2_000,
+      maxIntervalMs: 4_000,
+      backoffFactor: 1.5,
+    })
+
+    expect(resolveAuthVerificationPollPolicy('slow-path')).toEqual({
+      timeoutMs: 60_000,
+      initialIntervalMs: 2_000,
+      maxIntervalMs: 4_000,
+      backoffFactor: 1.5,
+    })
+  })
+})
+
+describe('resolveControlUiTimeoutProfile', () => {
+  it('defaults to the legacy control-ui profile when no post-auth runtime context exists', () => {
+    expect(resolveControlUiTimeoutProfile(undefined)).toBe('default')
+  })
+
+  it('reuses the structured post-auth runtime recommendation when provided', () => {
+    expect(
+      resolveControlUiTimeoutProfile({
+        recommendedVerificationProfile: 'post-auth-recovery',
+      })
+    ).toBe('post-auth-recovery')
+
+    expect(
+      resolveControlUiTimeoutProfile({
+        recommendedVerificationProfile: 'slow-path',
+      })
+    ).toBe('slow-path')
+  })
+})
+
+describe('resolveControlUiTimeoutOptions', () => {
+  it('keeps the legacy control-ui load/request budgets for the default profile', () => {
+    expect(resolveControlUiTimeoutOptions('default')).toEqual({
+      loadTimeoutMs: 15_000,
+      timeoutMs: 20_000,
+    })
+  })
+
+  it('expands control-ui budgets for post-auth recovery and slow-path profiles', () => {
+    expect(resolveControlUiTimeoutOptions('post-auth-recovery')).toEqual({
+      loadTimeoutMs: 30_000,
+      timeoutMs: 35_000,
+    })
+
+    expect(resolveControlUiTimeoutOptions('slow-path')).toEqual({
+      loadTimeoutMs: 30_000,
+      timeoutMs: 40_000,
     })
   })
 })
@@ -1648,6 +2176,78 @@ describe('joinModelCenterNonBlockingMessages', () => {
 
   it('skips empty warning fragments', () => {
     expect(joinModelCenterNonBlockingMessages('', '模型信息已保存')).toBe('模型信息已保存')
+  })
+})
+
+describe('classifyModelCenterBannerMessage', () => {
+  it('classifies shared raw stderr/stdout failures before falling back to localized copy', () => {
+    expect(classifyModelCenterBannerMessage({ stderr: 'connection refused' })).toBe('gateway_unready')
+    expect(classifyModelCenterBannerMessage({ stderr: 'fetch failed via proxy timeout' })).toBe('network_blocked')
+  })
+
+  it('recognizes existing localized copy so legacy messages still participate in priority checks', () => {
+    expect(classifyModelCenterBannerMessage({ message: '网关 token 已变更，请刷新后重新尝试' })).toBe('gateway_unready')
+    expect(classifyModelCenterBannerMessage({ message: '网络连接异常，请检查网络或代理配置后重试。' })).toBe(
+      'network_blocked'
+    )
+  })
+})
+
+describe('shouldSuppressModelCenterSecondaryNetworkBanner', () => {
+  it('suppresses secondary generic network banners when a gateway recovery warning is already primary', () => {
+    expect(
+      shouldSuppressModelCenterSecondaryNetworkBanner({
+        postAuthRecoveryLocked: true,
+        primaryMessage: '网关 token 已变更，请刷新后重新尝试',
+        candidateStderr: 'fetch failed: proxy timeout',
+      })
+    ).toBe(true)
+  })
+
+  it('does not suppress outside the post-auth recovery window or for non-network candidates', () => {
+    expect(
+      shouldSuppressModelCenterSecondaryNetworkBanner({
+        postAuthRecoveryLocked: false,
+        primaryMessage: '网关 token 已变更，请刷新后重新尝试',
+        candidateStderr: 'fetch failed: proxy timeout',
+      })
+    ).toBe(false)
+
+    expect(
+      shouldSuppressModelCenterSecondaryNetworkBanner({
+        postAuthRecoveryLocked: true,
+        primaryMessage: '网关 token 已变更，请刷新后重新尝试',
+        candidateMessage: 'API Key 无效、已过期或权限不足，请检查后重试。',
+      })
+    ).toBe(false)
+  })
+})
+
+describe('mergeModelCenterNonBlockingMessagesWithPriority', () => {
+  it('keeps the primary gateway recovery warning when the candidate is only a secondary network failure', () => {
+    expect(
+      mergeModelCenterNonBlockingMessagesWithPriority({
+        currentMessage: '网关 token 已变更，请刷新后重新尝试',
+        candidateMessage: '网络连接异常，请检查网络或代理配置后重试。',
+        postAuthRecoveryLocked: true,
+      })
+    ).toEqual({
+      message: '网关 token 已变更，请刷新后重新尝试',
+      suppressed: true,
+    })
+  })
+
+  it('still joins warnings when no suppress rule applies', () => {
+    expect(
+      mergeModelCenterNonBlockingMessagesWithPriority({
+        currentMessage: '认证已完成，但默认模型尚未完全生效。',
+        candidateMessage: '模型信息已保存，但状态刷新失败：timeout',
+        postAuthRecoveryLocked: true,
+      })
+    ).toEqual({
+      message: '认证已完成，但默认模型尚未完全生效。；另外模型信息已保存，但状态刷新失败：timeout',
+      suppressed: false,
+    })
   })
 })
 

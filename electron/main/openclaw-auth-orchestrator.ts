@@ -15,6 +15,7 @@ import {
 import { getCliFailureMessage } from './openclaw-command-output'
 import {
   executeAuthRoute,
+  type PostAuthRuntimeContext,
   loadEffectiveAuthRegistry,
   resolveAuthMethodDescriptor,
 } from './openclaw-auth-executor'
@@ -110,6 +111,7 @@ export interface RunAuthActionResult {
   stderr: string
   code: number | null
   fallbackUsed: boolean
+  postAuthRuntime?: PostAuthRuntimeContext
   errorCode?: AuthErrorCode
   message?: string
 }
@@ -168,9 +170,11 @@ function failedFromCommand(
   attemptedCommands: string[][],
   result: CliResult,
   fallbackUsed = false,
-  messageOverride?: string
+  messageOverride?: string,
+  extras: Partial<RunAuthActionResult> = {}
 ): RunAuthActionResult {
   return {
+    ...extras,
     ok: false,
     action,
     attemptedCommands,
@@ -187,9 +191,11 @@ function successFromCommand(
   action: AuthAction['kind'],
   attemptedCommands: string[][],
   result: CliResult,
-  fallbackUsed = false
+  fallbackUsed = false,
+  extras: Partial<RunAuthActionResult> = {}
 ): RunAuthActionResult {
   return {
+    ...extras,
     ok: true,
     action,
     attemptedCommands,
@@ -347,7 +353,9 @@ export async function runAuthAction(
         },
       })
       if (result.ok) {
-        return successFromCommand(action.kind, attemptedCommands, result)
+        return successFromCommand(action.kind, attemptedCommands, result, false, {
+          ...(result.postAuthRuntime ? { postAuthRuntime: result.postAuthRuntime } : {}),
+        })
       }
       if (result.errorCode === 'invalid_input') {
         return invalidInput(action.kind, result.message || 'Invalid auth input', attemptedCommands)
@@ -365,7 +373,9 @@ export async function runAuthAction(
           message: result.message,
         }
       }
-      return failedFromCommand(action.kind, attemptedCommands, result, false, result.message)
+      return failedFromCommand(action.kind, attemptedCommands, result, false, result.message, {
+        ...(result.postAuthRuntime ? { postAuthRuntime: result.postAuthRuntime } : {}),
+      })
     }
 
     if (action.kind === 'paste-token') {

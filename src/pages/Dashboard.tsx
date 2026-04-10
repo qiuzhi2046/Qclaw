@@ -195,7 +195,7 @@ export const DASHBOARD_PLUGIN_ACTIONS: DashboardPluginActionDefinition[] = [
     channelName: '钉钉',
     buttonLabel: '修复钉钉插件',
     installKind: 'official-adapter',
-    installTarget: getManagedChannelPluginByChannelId('dingtalk')?.packageName || '@dingtalk-real-ai/dingtalk-connector',
+    installTarget: getManagedChannelPluginByChannelId('dingtalk')?.packageName || '@dingtalk-real-ai/dingtalk-connector@0.8.13',
     expectedPluginIds: [getManagedChannelPluginByChannelId('dingtalk')?.pluginId || 'dingtalk-connector'],
     repairMatchPluginIds: getManagedChannelPluginByChannelId('dingtalk')?.cleanupPluginIds || ['dingtalk-connector', 'dingtalk'],
   },

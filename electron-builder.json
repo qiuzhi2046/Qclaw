@@ -6,6 +6,7 @@
   "afterSign": "scripts/after-sign-notarize.cjs",
   "afterAllArtifactBuild": "scripts/after-all-artifact-build.cjs",
   "directories": {
+    "app": ".electron-builder/app",
     "output": "release/${env.QCLAW_DISPLAY_VERSION}"
   },
   "files": [

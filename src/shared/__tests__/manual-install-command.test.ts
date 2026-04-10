@@ -11,7 +11,7 @@ describe('resolveManualInstallCommand', () => {
   })
 
   it('returns the plugins install command for dingtalk', () => {
-    expect(resolveManualInstallCommand('dingtalk')).toBe('openclaw plugins install @dingtalk-real-ai/dingtalk-connector')
+    expect(resolveManualInstallCommand('dingtalk')).toBe('openclaw plugins install @dingtalk-real-ai/dingtalk-connector@0.8.13')
   })
 
   it('returns the plugins install command for qqbot', () => {

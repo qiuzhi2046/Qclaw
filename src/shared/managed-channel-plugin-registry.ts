@@ -39,7 +39,7 @@ const MANAGED_CHANNEL_PLUGIN_RECORDS: ManagedChannelPluginRecord[] = [
   {
     channelId: 'dingtalk',
     pluginId: 'dingtalk-connector',
-    packageName: '@dingtalk-real-ai/dingtalk-connector',
+    packageName: '@dingtalk-real-ai/dingtalk-connector@0.8.13',
     cleanupPluginIds: ['dingtalk-connector', 'dingtalk'],
     cleanupChannelIds: ['dingtalk-connector', 'dingtalk'],
     smokeTestPolicy: 'diagnostic-only',

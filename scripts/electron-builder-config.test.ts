@@ -14,6 +14,13 @@ function readElectronBuilderConfig(): Record<string, unknown> {
 }
 
 describe('package mac scripts', () => {
+  it('prepares a dedicated electron app directory as part of build:app', () => {
+    const packageJson = readPackageJson()
+    const scripts = (packageJson.scripts ?? {}) as Record<string, unknown>
+
+    expect(scripts['build:app']).toBe('tsc && vite build && node scripts/prepare-electron-app-dir.mjs')
+  })
+
   it('builds both arm64 and x64 mac artifacts from the default package:mac entrypoint', () => {
     const packageJson = readPackageJson()
     const scripts = (packageJson.scripts ?? {}) as Record<string, unknown>
@@ -25,6 +32,13 @@ describe('package mac scripts', () => {
 })
 
 describe('electron-builder mac dmg config', () => {
+  it('packages from a staged app directory instead of the project root', () => {
+    const config = readElectronBuilderConfig()
+    const directories = (config.directories ?? {}) as Record<string, unknown>
+
+    expect(directories.app).toBe('.electron-builder/app')
+  })
+
   it('does not pass an empty dmg title that would collapse the mounted volume path to /Volumes', () => {
     const config = readElectronBuilderConfig()
     const dmg = (config.dmg ?? {}) as Record<string, unknown>

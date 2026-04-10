@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Loader, PasswordInput, Select, Text, TextInput, Title } from '@mantine/core'
 import { pollWithBackoff } from '../shared/polling'
+import type { BackoffPollingPolicy } from '../shared/runtime-policies'
 import { MODEL_CATALOG_LIMITS, UI_RUNTIME_DEFAULTS } from '../shared/runtime-policies'
 import { applyDefaultModelWithGatewayReload, extractConfiguredDefaultModel } from '../shared/model-config-gateway'
 import { repairLegacyMiniMaxAliasConfigAfterOAuth } from '../shared/minimax-legacy-alias-repair'
@@ -20,6 +21,11 @@ import {
   getKnownProviderCatalog,
   resolveProviderDisplayName,
 } from '../lib/openclaw-provider-registry'
+import {
+  buildCliFailureClassificationCorpus,
+  classifySharedCliFailure,
+  type SharedCliFailureCode,
+} from '../shared/cli-failure-classification'
 import { summarizeModelAuthDiagnosticState } from '../shared/model-auth-diagnostic'
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
 
@@ -1024,6 +1030,190 @@ export async function executeRemoteModelAuthSubmission(
   )
 }
 
+export function buildSubmitAuthResultDiagnosticDetails(authResult: {
+  ok: boolean
+  fallbackUsed?: unknown
+  errorCode?: unknown
+  message?: unknown
+  postAuthRuntime?: {
+    tokenRotated?: unknown
+    gatewayApplyAction?: unknown
+    gatewayConfirmed?: unknown
+    recoveryReason?: unknown
+    recommendedVerificationProfile?: unknown
+  } | null
+}): Record<string, unknown> {
+  return {
+    ok: authResult.ok,
+    fallbackUsed: 'fallbackUsed' in authResult ? Boolean(authResult.fallbackUsed) : undefined,
+    errorCode: 'errorCode' in authResult ? authResult.errorCode : undefined,
+    message: 'message' in authResult ? authResult.message : undefined,
+    ...(authResult.postAuthRuntime && typeof authResult.postAuthRuntime === 'object'
+      ? {
+          postAuthRuntime: {
+            tokenRotated: authResult.postAuthRuntime.tokenRotated,
+            gatewayApplyAction: authResult.postAuthRuntime.gatewayApplyAction,
+            gatewayConfirmed: authResult.postAuthRuntime.gatewayConfirmed,
+            recoveryReason: authResult.postAuthRuntime.recoveryReason,
+            recommendedVerificationProfile: authResult.postAuthRuntime.recommendedVerificationProfile,
+          },
+        }
+      : {}),
+  }
+}
+
+export function shouldGateRefreshDuringPostAuthRecovery(postAuthRuntime?: {
+  tokenRotated?: unknown
+  gatewayApplyAction?: unknown
+  gatewayConfirmed?: unknown
+  recoveryReason?: unknown
+  recommendedVerificationProfile?: unknown
+} | null): boolean {
+  if (!postAuthRuntime || typeof postAuthRuntime !== 'object') return false
+  if (postAuthRuntime.tokenRotated === true) return true
+  if (typeof postAuthRuntime.gatewayApplyAction === 'string' && postAuthRuntime.gatewayApplyAction !== 'none') return true
+  if (
+    postAuthRuntime.recommendedVerificationProfile === 'post-auth-recovery'
+    || postAuthRuntime.recommendedVerificationProfile === 'slow-path'
+  ) {
+    return true
+  }
+  return false
+}
+
+export function resolveRefreshCapabilitiesGuard(params: {
+  interactionLocked: boolean
+  refreshingCapabilities: boolean
+  phase: ModelCenterPhase
+  postAuthRecoveryRefreshLocked: boolean
+}): { blocked: boolean; disabled: boolean; statusText: string } {
+  if (params.interactionLocked || params.refreshingCapabilities || params.phase === 'loading') {
+    return {
+      blocked: true,
+      disabled: true,
+      statusText: '',
+    }
+  }
+
+  if (params.postAuthRecoveryRefreshLocked) {
+    return {
+      blocked: true,
+      disabled: true,
+      statusText: '正在同步认证结果，请稍候...',
+    }
+  }
+
+  return {
+    blocked: false,
+    disabled: false,
+    statusText: '',
+  }
+}
+
+export function shouldIgnorePostAuthAsyncResult(params: {
+  attemptId: number
+  currentAttemptId: number
+  mounted: boolean
+  cancelRequested?: boolean
+}): boolean {
+  if (!params.mounted) return true
+  if (params.currentAttemptId !== params.attemptId) return true
+  if (params.cancelRequested) return true
+  return false
+}
+
+export function shouldReleasePostAuthRecoveryLock(params: {
+  attemptId: number
+  currentAttemptId: number
+  mounted: boolean
+}): boolean {
+  return params.mounted && params.currentAttemptId === params.attemptId
+}
+
+export function shouldHoldPostAuthRecoveryLockUntilDeferredApply(params: {
+  postAuthRecoveryLocked: boolean
+  stayOnConfigured: boolean
+  shouldQueueDeferredDefaultModelApply: boolean
+}): boolean {
+  return params.postAuthRecoveryLocked && params.stayOnConfigured && params.shouldQueueDeferredDefaultModelApply
+}
+
+export function resolvePostAuthRecoveryLockForConfiguredCallback(params: {
+  postAuthRecoveryLocked: boolean
+  releasedBeforeCallback: boolean
+}): boolean {
+  return params.releasedBeforeCallback ? false : params.postAuthRecoveryLocked
+}
+
+export type AuthVerificationProfile = 'default' | 'post-auth-recovery' | 'slow-path'
+
+export function resolvePostAuthVerificationProfile(postAuthRuntime?: {
+  tokenRotated?: unknown
+  gatewayApplyAction?: unknown
+  gatewayConfirmed?: unknown
+  recoveryReason?: unknown
+  recommendedVerificationProfile?: unknown
+} | null): AuthVerificationProfile {
+  if (postAuthRuntime?.recommendedVerificationProfile === 'post-auth-recovery') {
+    return 'post-auth-recovery'
+  }
+  if (postAuthRuntime?.recommendedVerificationProfile === 'slow-path') {
+    return 'slow-path'
+  }
+  return 'default'
+}
+
+export function resolveAuthVerificationPollPolicy(profile: AuthVerificationProfile): BackoffPollingPolicy {
+  const basePolicy = UI_RUNTIME_DEFAULTS.authVerification.poll
+  if (profile === 'post-auth-recovery') {
+    return {
+      ...basePolicy,
+      timeoutMs: 45_000,
+    }
+  }
+  if (profile === 'slow-path') {
+    return {
+      ...basePolicy,
+      timeoutMs: 60_000,
+    }
+  }
+  return basePolicy
+}
+
+export type ControlUiTimeoutProfile = AuthVerificationProfile
+
+export function resolveControlUiTimeoutProfile(postAuthRuntime?: {
+  tokenRotated?: unknown
+  gatewayApplyAction?: unknown
+  gatewayConfirmed?: unknown
+  recoveryReason?: unknown
+  recommendedVerificationProfile?: unknown
+} | null): ControlUiTimeoutProfile {
+  return resolvePostAuthVerificationProfile(postAuthRuntime)
+}
+
+export function resolveControlUiTimeoutOptions(profile: ControlUiTimeoutProfile): {
+  loadTimeoutMs: number
+  timeoutMs: number
+} {
+  if (profile === 'post-auth-recovery') {
+    return {
+      loadTimeoutMs: 30_000,
+      timeoutMs: 35_000,
+    }
+  }
+  if (profile === 'slow-path') {
+    return {
+      loadTimeoutMs: 30_000,
+      timeoutMs: 40_000,
+    }
+  }
+  return {
+    loadTimeoutMs: 15_000,
+    timeoutMs: 20_000,
+  }
+}
+
 export function buildProviderOptions(
   capabilities: OpenClawCapabilities | null,
   providerNames?: Record<string, string>
@@ -1360,13 +1550,105 @@ export function joinModelCenterNonBlockingMessages(...messages: Array<string | n
     .join('；另外')
 }
 
-async function tryResolveDefaultModelForProvider(providerCandidates: string[]): Promise<string> {
+export function classifyModelCenterBannerMessage(params: {
+  message?: string | null
+  stderr?: string
+  stdout?: string
+}): SharedCliFailureCode | 'unknown' {
+  const sharedCode = classifySharedCliFailure(
+    buildCliFailureClassificationCorpus(params.stderr, params.stdout)
+  )
+  if (sharedCode) return sharedCode
+
+  const message = String(params.message || '').trim()
+  if (!message) return 'unknown'
+  if (message.includes('网关 token 已变更')) return 'gateway_unready'
+  if (message.includes('网络连接异常')) return 'network_blocked'
+  if (message.includes('API Key 无效')) return 'api_invalid'
+  if (message.includes('配置写入失败')) return 'write_failure'
+  return 'unknown'
+}
+
+export function shouldSuppressModelCenterSecondaryNetworkBanner(params: {
+  postAuthRecoveryLocked: boolean
+  primaryMessage?: string | null
+  primaryStderr?: string
+  primaryStdout?: string
+  candidateMessage?: string | null
+  candidateStderr?: string
+  candidateStdout?: string
+}): boolean {
+  if (!params.postAuthRecoveryLocked) return false
+
+  const primaryCode = classifyModelCenterBannerMessage({
+    message: params.primaryMessage,
+    stderr: params.primaryStderr,
+    stdout: params.primaryStdout,
+  })
+  const candidateCode = classifyModelCenterBannerMessage({
+    message: params.candidateMessage,
+    stderr: params.candidateStderr,
+    stdout: params.candidateStdout,
+  })
+
+  return primaryCode === 'gateway_unready' && candidateCode === 'network_blocked'
+}
+
+export function mergeModelCenterNonBlockingMessagesWithPriority(params: {
+  currentMessage?: string | null
+  currentStderr?: string
+  currentStdout?: string
+  candidateMessage?: string | null
+  candidateStderr?: string
+  candidateStdout?: string
+  postAuthRecoveryLocked: boolean
+}): { message: string; suppressed: boolean } {
+  const currentMessage = String(params.currentMessage || '').trim()
+  const candidateMessage = String(params.candidateMessage || '').trim()
+
+  if (!candidateMessage) {
+    return {
+      message: currentMessage,
+      suppressed: false,
+    }
+  }
+
+  if (
+    shouldSuppressModelCenterSecondaryNetworkBanner({
+      postAuthRecoveryLocked: params.postAuthRecoveryLocked,
+      primaryMessage: currentMessage,
+      primaryStderr: params.currentStderr,
+      primaryStdout: params.currentStdout,
+      candidateMessage,
+      candidateStderr: params.candidateStderr,
+      candidateStdout: params.candidateStdout,
+    })
+  ) {
+    return {
+      message: currentMessage,
+      suppressed: true,
+    }
+  }
+
+  return {
+    message: joinModelCenterNonBlockingMessages(currentMessage, candidateMessage),
+    suppressed: false,
+  }
+}
+
+async function tryResolveDefaultModelForProvider(
+  providerCandidates: string[],
+  controlUiTimeoutOptions?: {
+    timeoutMs?: number
+    loadTimeoutMs?: number
+  }
+): Promise<string> {
   return resolveDefaultModelForProviderCandidates(providerCandidates, {
-    getModelUpstreamState: () => window.api.getModelUpstreamState(),
+    getModelUpstreamState: () => window.api.getModelUpstreamState(controlUiTimeoutOptions),
     getModelStatus: () => window.api.getModelStatus(),
     listCatalog: (query) => window.api.listModelCatalog(query),
     readConfig: () => window.api.readConfig(),
-    timeoutMs: DEFAULT_MODEL_APPLY_TIMEOUT_MS,
+    timeoutMs: controlUiTimeoutOptions?.timeoutMs || DEFAULT_MODEL_APPLY_TIMEOUT_MS,
     pageSize: MODEL_CATALOG_LIMITS.dashboardPageSize,
   })
 }
@@ -1624,23 +1906,28 @@ async function verifyProviderWithPolling(
   options?: {
     browserOAuthPersistenceFallback?: boolean
     preferRuntimeModelSignals?: boolean
+    pollPolicy?: BackoffPollingPolicy
+    controlUiTimeoutOptions?: {
+      timeoutMs?: number
+      loadTimeoutMs?: number
+    }
     shouldAbort?: () => boolean
     onAttempt?: (attempt: number, elapsedMs: number) => void
   }
 ): Promise<boolean> {
   if (!providerCandidates.length) return false
   const result = await pollWithBackoff({
-    policy: UI_RUNTIME_DEFAULTS.authVerification.poll,
+    policy: options?.pollPolicy || UI_RUNTIME_DEFAULTS.authVerification.poll,
     shouldAbort: options?.shouldAbort,
     onAttempt: ({ attempt, elapsedMs }) => options?.onAttempt?.(attempt, elapsedMs),
     execute: async () =>
       options?.browserOAuthPersistenceFallback
         ? resolveBrowserOAuthVerificationSnapshot(providerCandidates, {
-            getModelUpstreamState: () => window.api.getModelUpstreamState(),
+            getModelUpstreamState: () => window.api.getModelUpstreamState(options?.controlUiTimeoutOptions),
             checkOAuthComplete: (providerKey) => window.api.checkOAuthComplete(providerKey),
           })
         : resolveProviderVerificationSnapshot(providerCandidates, {
-            getModelUpstreamState: () => window.api.getModelUpstreamState(),
+            getModelUpstreamState: () => window.api.getModelUpstreamState(options?.controlUiTimeoutOptions),
             getModelStatus: () => window.api.getModelStatus(),
           }, {
             preferRuntimeModelSignals: options?.preferRuntimeModelSignals,
@@ -1653,12 +1940,13 @@ async function verifyProviderWithPolling(
 async function verifyCustomProviderWithPolling(
   customConfig: CustomProviderConfigInput,
   options?: {
+    pollPolicy?: BackoffPollingPolicy
     shouldAbort?: () => boolean
     onAttempt?: (attempt: number, elapsedMs: number) => void
   }
 ): Promise<CustomProviderConfigMatchResult> {
   const result = await pollWithBackoff({
-    policy: UI_RUNTIME_DEFAULTS.authVerification.poll,
+    policy: options?.pollPolicy || UI_RUNTIME_DEFAULTS.authVerification.poll,
     shouldAbort: options?.shouldAbort,
     onAttempt: ({ attempt, elapsedMs }) => options?.onAttempt?.(attempt, elapsedMs),
     execute: async () => resolveConfiguredCustomProviderMatchFromConfig(await window.api.readConfig(), customConfig),
@@ -1735,10 +2023,20 @@ export default function ModelCenter({
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState<LocalScanResult | null>(null)
   const [selectedLocalModel, setSelectedLocalModel] = useState('')
+  const [postAuthRecoveryRefreshLocked, setPostAuthRecoveryRefreshLockedState] = useState(false)
   const cancelRequestedRef = useRef(false)
   const busyStartedAtRef = useRef<number | null>(null)
   const mountedRef = useRef(true)
   const authAttemptIdRef = useRef(0)
+  const warningRef = useRef('')
+  const errorRef = useRef('')
+  const postAuthRecoveryRefreshLockedRef = useRef(false)
+  const selectedProviderIdRef = useRef('')
+  const selectedMethodIdRef = useRef('')
+  const setPostAuthRecoveryRefreshLocked = (next: boolean) => {
+    postAuthRecoveryRefreshLockedRef.current = next
+    setPostAuthRecoveryRefreshLockedState(next)
+  }
 
   useEffect(() => {
     mountedRef.current = true
@@ -1746,6 +2044,26 @@ export default function ModelCenter({
       mountedRef.current = false
     }
   }, [])
+
+  useEffect(() => {
+    warningRef.current = warning
+  }, [warning])
+
+  useEffect(() => {
+    errorRef.current = error
+  }, [error])
+
+  useEffect(() => {
+    postAuthRecoveryRefreshLockedRef.current = postAuthRecoveryRefreshLocked
+  }, [postAuthRecoveryRefreshLocked])
+
+  useEffect(() => {
+    selectedProviderIdRef.current = selectedProviderId
+  }, [selectedProviderId])
+
+  useEffect(() => {
+    selectedMethodIdRef.current = selectedMethodId
+  }, [selectedMethodId])
 
   const providers = useMemo(() => {
     const registryProviders = buildProviderOptions(capabilities, providerNames)
@@ -1782,6 +2100,12 @@ export default function ModelCenter({
   const localDefaults = isLocal ? LOCAL_PROVIDER_DEFAULTS[selectedProviderId] : null
   const busy = phase === 'authing' || phase === 'verifying'
   const interactionLocked = busy || installingOAuthDependency || scanning
+  const refreshGuard = resolveRefreshCapabilitiesGuard({
+    interactionLocked,
+    refreshingCapabilities,
+    phase,
+    postAuthRecoveryRefreshLocked,
+  })
   const showManualOAuthLink = shouldShowManualOAuthLink(phase, selectedMethod, manualOAuthUrl)
   const showOAuthFallbackPanel = shouldShowOAuthFallbackPanel(phase, selectedMethod)
   const canOpenManualLink = canOpenManualOAuthUrl(manualOAuthUrl, openingOAuthUrl)
@@ -2046,15 +2370,35 @@ export default function ModelCenter({
       setStatusText('浏览器授权登录已完成，正在保存配置...')
     })
     const offError = window.api.onOAuthError((payload: { stderr?: string; stdout?: string }) => {
-      setError(
-        appendRetryRefreshHint(
-          toUserFacingCliFailureMessage({
-            stderr: payload?.stderr,
-            stdout: payload?.stdout,
-            fallback: '浏览器授权登录失败，请重试。',
-          })
-        )
-      )
+      const candidateMessage = toUserFacingCliFailureMessage({
+        stderr: payload?.stderr,
+        stdout: payload?.stdout,
+        fallback: '浏览器授权登录失败，请重试。',
+      })
+
+      if (
+        shouldSuppressModelCenterSecondaryNetworkBanner({
+          postAuthRecoveryLocked: postAuthRecoveryRefreshLockedRef.current,
+          primaryMessage: errorRef.current || warningRef.current,
+          candidateMessage,
+          candidateStderr: payload?.stderr,
+          candidateStdout: payload?.stdout,
+        })
+      ) {
+        void appendModelCenterDiagnosticLog({
+          event: 'secondary-network-banner-suppressed',
+          providerId: selectedProviderIdRef.current,
+          methodId: selectedMethodIdRef.current || undefined,
+          details: {
+            source: 'oauth-error-listener',
+            primaryMessage: errorRef.current || warningRef.current || undefined,
+            candidateMessage,
+          },
+        })
+        return
+      }
+
+      setError(appendRetryRefreshHint(candidateMessage))
     })
 
     return () => {
@@ -2066,7 +2410,12 @@ export default function ModelCenter({
   }, [])
 
   const handleRefreshCapabilities = async () => {
-    if (interactionLocked || refreshingCapabilities) return
+    if (refreshGuard.blocked) {
+      if (refreshGuard.statusText) {
+        setStatusText(refreshGuard.statusText || '正在同步认证结果，请稍候...')
+      }
+      return
+    }
     const previousSelection = {
       providerId: selectedProviderId,
       methodId: selectedMethodId,
@@ -2281,7 +2630,22 @@ export default function ModelCenter({
   const handleSubmit = async () => {
     if (!canSubmit || !selectedMethod) return
     const authAttemptId = ++authAttemptIdRef.current
+    let releaseRecoveryLockInFinally = true
+    const shouldDropAsyncResult = () =>
+      shouldIgnorePostAuthAsyncResult({
+        attemptId: authAttemptId,
+        currentAttemptId: authAttemptIdRef.current,
+        mounted: mountedRef.current,
+        cancelRequested: cancelRequestedRef.current,
+      })
+    const shouldReleaseRecoveryLock = () =>
+      shouldReleasePostAuthRecoveryLock({
+        attemptId: authAttemptId,
+        currentAttemptId: authAttemptIdRef.current,
+        mounted: mountedRef.current,
+      })
     cancelRequestedRef.current = false
+    setPostAuthRecoveryRefreshLocked(false)
     setCanceling(false)
     setError('')
     setWarning('')
@@ -2339,6 +2703,7 @@ export default function ModelCenter({
       )
 
       if (cancelRequestedRef.current) {
+        setPostAuthRecoveryRefreshLocked(false)
         applyCanceledState()
         return
       }
@@ -2347,14 +2712,10 @@ export default function ModelCenter({
         providerId: selectedProviderId,
         methodId: selectedMethod.id,
         attemptId: authAttemptId,
-        details: {
-          ok: authResult.ok,
-          fallbackUsed: 'fallbackUsed' in authResult ? Boolean(authResult.fallbackUsed) : undefined,
-          errorCode: 'errorCode' in authResult ? authResult.errorCode : undefined,
-          message: 'message' in authResult ? authResult.message : undefined,
-        },
+        details: buildSubmitAuthResultDiagnosticDetails(authResult),
       })
       if (!authResult.ok) {
+        setPostAuthRecoveryRefreshLocked(false)
         await captureModelCenterDiagnosticSnapshot({
           event: 'submit-failed-state',
           providerId: selectedProviderId,
@@ -2381,6 +2742,20 @@ export default function ModelCenter({
         return
       }
 
+      const shouldGateRefresh = shouldGateRefreshDuringPostAuthRecovery(
+        'postAuthRuntime' in authResult ? authResult.postAuthRuntime : undefined
+      )
+      const verificationPollPolicy = resolveAuthVerificationPollPolicy(
+        resolvePostAuthVerificationProfile('postAuthRuntime' in authResult ? authResult.postAuthRuntime : undefined)
+      )
+      const controlUiTimeoutProfile = resolveControlUiTimeoutProfile(
+        'postAuthRuntime' in authResult ? authResult.postAuthRuntime : undefined
+      )
+      const controlUiTimeoutOptions = resolveControlUiTimeoutOptions(controlUiTimeoutProfile)
+      if (shouldGateRefresh) {
+        setPostAuthRecoveryRefreshLocked(true)
+      }
+
       let verified = false
       let verifiedProviderId = selectedProviderId
       let customVerificationResult: CustomProviderConfigMatchResult | null = null
@@ -2396,6 +2771,7 @@ export default function ModelCenter({
               compatibility: customCompatibility,
             },
             {
+              pollPolicy: verificationPollPolicy,
               shouldAbort: () => cancelRequestedRef.current,
               onAttempt: (attempt) => {
                 setStatusText(`正在验证自定义提供商配置（第 ${attempt} 次检查）...`)
@@ -2410,6 +2786,8 @@ export default function ModelCenter({
           verified = await verifyProviderWithPolling(buildVerificationProviderCandidates(selectedProviderId, selectedMethod), {
             browserOAuthPersistenceFallback: requiresBrowser,
             preferRuntimeModelSignals: shouldPreferRuntimeModelSignalsAfterAuth(selectedMethod),
+            pollPolicy: verificationPollPolicy,
+            controlUiTimeoutOptions,
             shouldAbort: () => cancelRequestedRef.current,
             onAttempt: (attempt) => {
               setStatusText(`正在验证认证结果（第 ${attempt} 次检查）...`)
@@ -2417,10 +2795,12 @@ export default function ModelCenter({
           })
         }
         if (cancelRequestedRef.current) {
+          setPostAuthRecoveryRefreshLocked(false)
           applyCanceledState()
           return
         }
         if (customVerificationResult?.status === 'ambiguous') {
+          setPostAuthRecoveryRefreshLocked(false)
           await captureModelCenterDiagnosticSnapshot({
             event: 'blocking-verification-ambiguous',
             providerId: selectedProviderId,
@@ -2432,6 +2812,7 @@ export default function ModelCenter({
           return
         }
         if (!verified) {
+          setPostAuthRecoveryRefreshLocked(false)
           await captureModelCenterDiagnosticSnapshot({
             event: 'blocking-verification-failed',
             providerId: selectedProviderId,
@@ -2458,9 +2839,17 @@ export default function ModelCenter({
       const shouldApplyPreferredModelAfterAuth = !requiresBrowser
       const shouldQueueDeferredDefaultModelApply =
         shouldApplyPreferredModelAfterAuth && shouldDeferPostAuthDefaultModelApply(selectedMethod)
+      const shouldScheduleDeferredDefaultModelApply =
+        shouldQueueDeferredDefaultModelApply && !cancelRequestedRef.current
+      const holdPostAuthRecoveryLockUntilDeferredApply = shouldHoldPostAuthRecoveryLockUntilDeferredApply({
+        postAuthRecoveryLocked: shouldGateRefresh,
+        stayOnConfigured,
+        shouldQueueDeferredDefaultModelApply: shouldScheduleDeferredDefaultModelApply,
+      })
       let preferredModelKey = ''
       if (shouldApplyPreferredModelAfterAuth && !shouldQueueDeferredDefaultModelApply) {
-        preferredModelKey = await tryResolveDefaultModelForProvider(providerCandidates)
+        preferredModelKey = await tryResolveDefaultModelForProvider(providerCandidates, controlUiTimeoutOptions)
+        if (shouldDropAsyncResult()) return
       }
       if (
         shouldApplyPreferredModelAfterAuth &&
@@ -2469,18 +2858,20 @@ export default function ModelCenter({
         !cancelRequestedRef.current
       ) {
         setStatusText('正在应用默认模型...')
-        const applyResult = await withTimeout(
-          applyDefaultModelWithGatewayReload({
-            model: preferredModelKey,
-            readConfig: () => window.api.readConfig(),
-            readUpstreamState: () => window.api.getModelUpstreamState(),
-            applyUpstreamModelWrite: (request) => window.api.applyModelConfigViaUpstream(request),
-            applyConfigPatchGuarded: (request) => window.api.applyConfigPatchGuarded(request),
-            getModelStatus: () => window.api.getModelStatus(),
-            reloadGatewayAfterModelChange: () => window.api.reloadGatewayAfterModelChange(),
+        const applyResult = await applyDefaultModelWithGatewayReload({
+          model: preferredModelKey,
+          readConfig: () => window.api.readConfig(),
+          readUpstreamState: () => window.api.getModelUpstreamState(controlUiTimeoutOptions),
+          applyUpstreamModelWrite: (request) => window.api.applyModelConfigViaUpstream({
+            ...request,
+            ...controlUiTimeoutOptions,
           }),
-          DEFAULT_MODEL_APPLY_TIMEOUT_MS
-        )
+          applyConfigPatchGuarded: (request) => window.api.applyConfigPatchGuarded(request),
+          getModelStatus: () => window.api.getModelStatus(),
+          reloadGatewayAfterModelChange: () => window.api.reloadGatewayAfterModelChange(),
+          confirmationPolicy: verificationPollPolicy,
+        })
+        if (shouldDropAsyncResult()) return
         if (!applyResult?.ok) {
           gatewayReloadWarning = toUserFacingCliFailureMessage({
             stderr: applyResult?.message,
@@ -2506,9 +2897,13 @@ export default function ModelCenter({
         setStatusText('正在同步历史 MiniMax 配置...')
         const repairResult = await repairLegacyMiniMaxAliasConfigAfterOAuth({
           readConfig: () => window.api.readConfig(),
-          readUpstreamState: () => window.api.getModelUpstreamState(),
-          applyUpstreamModelWrite: (request) => window.api.applyModelConfigViaUpstream(request),
+          readUpstreamState: () => window.api.getModelUpstreamState(controlUiTimeoutOptions),
+          applyUpstreamModelWrite: (request) => window.api.applyModelConfigViaUpstream({
+            ...request,
+            ...controlUiTimeoutOptions,
+          }),
         })
+        if (shouldDropAsyncResult()) return
         if (repairResult.reason === 'partial-failure') {
           gatewayReloadWarning = joinModelCenterNonBlockingMessages(
             gatewayReloadWarning,
@@ -2540,91 +2935,161 @@ export default function ModelCenter({
           context,
         },
       })
+      if (shouldDropAsyncResult()) return
       setStatusText('配置成功，正在进入下一步...')
-      if (shouldQueueDeferredDefaultModelApply && !cancelRequestedRef.current) {
+      if (shouldScheduleDeferredDefaultModelApply) {
         void (async () => {
-          const deferredPreferredModelKey = await tryResolveDefaultModelForProvider(providerCandidates).catch(() => '')
-          if (
-            !deferredPreferredModelKey
-            || cancelRequestedRef.current
-            || authAttemptIdRef.current !== authAttemptId
-          ) {
-            return
-          }
+          try {
+            const deferredPreferredModelKey = await tryResolveDefaultModelForProvider(
+              providerCandidates,
+              controlUiTimeoutOptions
+            ).catch(() => '')
+            if (
+              !deferredPreferredModelKey
+              || cancelRequestedRef.current
+              || authAttemptIdRef.current !== authAttemptId
+            ) {
+              return
+            }
 
-          const applyResult = await withTimeout(
-            applyDefaultModelWithGatewayReload({
+            const applyResult = await applyDefaultModelWithGatewayReload({
               model: deferredPreferredModelKey,
               readConfig: () => window.api.readConfig(),
-              readUpstreamState: () => window.api.getModelUpstreamState(),
-              applyUpstreamModelWrite: (request) => window.api.applyModelConfigViaUpstream(request),
+              readUpstreamState: () => window.api.getModelUpstreamState(controlUiTimeoutOptions),
+              applyUpstreamModelWrite: (request) => window.api.applyModelConfigViaUpstream({
+                ...request,
+                ...controlUiTimeoutOptions,
+              }),
               applyConfigPatchGuarded: (request) => window.api.applyConfigPatchGuarded(request),
               getModelStatus: () => window.api.getModelStatus(),
               reloadGatewayAfterModelChange: () => window.api.reloadGatewayAfterModelChange(),
-            }),
-            DEFAULT_MODEL_APPLY_TIMEOUT_MS
-          ).catch((error: any) => ({
-            ok: false,
-            message: toUserFacingUnknownErrorMessage(error, '认证已完成，但默认模型尚未完全生效。'),
-          }))
+              confirmationPolicy: verificationPollPolicy,
+            }).catch((error: any) => ({
+              ok: false,
+              message: toUserFacingUnknownErrorMessage(error, '认证已完成，但默认模型尚未完全生效。'),
+            }))
 
-          if (
-            applyResult?.ok
-            || !mountedRef.current
-            || !stayOnConfigured
-            || authAttemptIdRef.current !== authAttemptId
-          ) {
-            return
+            if (
+              applyResult?.ok
+              || !mountedRef.current
+              || !stayOnConfigured
+              || authAttemptIdRef.current !== authAttemptId
+            ) {
+              return
+            }
+
+            const deferredWarning = toUserFacingCliFailureMessage({
+              stderr: applyResult?.message,
+              fallback: '认证已完成，但默认模型尚未完全生效。',
+            })
+            if (!deferredWarning) return
+            const mergedWarning = mergeModelCenterNonBlockingMessagesWithPriority({
+              currentMessage: warningRef.current || gatewayReloadWarning,
+              candidateMessage: deferredWarning,
+              candidateStderr: applyResult?.message,
+              postAuthRecoveryLocked: postAuthRecoveryRefreshLockedRef.current,
+            })
+            if (mergedWarning.suppressed) {
+              await appendModelCenterDiagnosticLog({
+                event: 'secondary-network-banner-suppressed',
+                providerId: verifiedProviderId,
+                methodId: selectedMethod.id,
+                attemptId: authAttemptId,
+                details: {
+                  source: 'deferred-default-model-apply',
+                  primaryMessage: warningRef.current || gatewayReloadWarning || undefined,
+                  candidateMessage: deferredWarning,
+                },
+              })
+              return
+            }
+
+            setWarning(mergedWarning.message)
+            await captureModelCenterDiagnosticSnapshot({
+              event: 'deferred-default-model-apply',
+              providerId: verifiedProviderId,
+              methodId: selectedMethod.id,
+              attemptId: authAttemptId,
+              details: {
+                preferredModelKey: deferredPreferredModelKey,
+                ok: applyResult?.ok,
+                message: applyResult?.message,
+                warning: deferredWarning,
+              },
+            })
+          } finally {
+            if (holdPostAuthRecoveryLockUntilDeferredApply && shouldReleaseRecoveryLock()) {
+              setPostAuthRecoveryRefreshLocked(false)
+            }
           }
-
-          const deferredWarning = toUserFacingCliFailureMessage({
-            stderr: applyResult?.message,
-            fallback: '认证已完成，但默认模型尚未完全生效。',
-          })
-          if (!deferredWarning) return
-
-          setWarning((current) => joinModelCenterNonBlockingMessages(current, deferredWarning))
-          await captureModelCenterDiagnosticSnapshot({
-            event: 'deferred-default-model-apply',
-            providerId: verifiedProviderId,
-            methodId: selectedMethod.id,
-            attemptId: authAttemptId,
-            details: {
-              preferredModelKey: deferredPreferredModelKey,
-              ok: applyResult?.ok,
-              message: applyResult?.message,
-              warning: deferredWarning,
-            },
-          })
         })()
       }
       if (stayOnConfigured) {
+        if (shouldDropAsyncResult()) return
         setPhase('ready')
         setWarning(gatewayReloadWarning)
         setStatusText(configuredMessage || '配置成功')
+        releaseRecoveryLockInFinally = false
+        const releasedBeforeCallback = !holdPostAuthRecoveryLockUntilDeferredApply && shouldReleaseRecoveryLock()
+        if (releasedBeforeCallback) {
+          setPostAuthRecoveryRefreshLocked(false)
+        }
         Promise.resolve(onConfigured(context)).catch((callbackError: any) => {
           const message = toUserFacingCliFailureMessage({
             stderr: String(callbackError?.message || '').trim(),
             fallback: '',
           })
           if (message) {
-            setWarning(
-              joinModelCenterNonBlockingMessages(
-                gatewayReloadWarning,
-                `模型信息已保存，但状态刷新失败：${message}`
-              )
-            )
+            if (shouldDropAsyncResult()) return
+            const callbackPostAuthRecoveryLocked = resolvePostAuthRecoveryLockForConfiguredCallback({
+              postAuthRecoveryLocked: postAuthRecoveryRefreshLockedRef.current,
+              releasedBeforeCallback,
+            })
+            const callbackWarning = `模型信息已保存，但状态刷新失败：${message}`
+            const mergedWarning = mergeModelCenterNonBlockingMessagesWithPriority({
+              currentMessage: warningRef.current || gatewayReloadWarning,
+              candidateMessage: callbackWarning,
+              candidateStderr: String(callbackError?.message || '').trim(),
+              postAuthRecoveryLocked: callbackPostAuthRecoveryLocked,
+            })
+            if (mergedWarning.suppressed) {
+              void appendModelCenterDiagnosticLog({
+                event: 'secondary-network-banner-suppressed',
+                providerId: verifiedProviderId,
+                methodId: selectedMethod.id,
+                attemptId: authAttemptId,
+                details: {
+                  source: 'on-configured-callback',
+                  primaryMessage: warningRef.current || gatewayReloadWarning || undefined,
+                  candidateMessage: callbackWarning,
+                },
+              })
+              return
+            }
+            setWarning(mergedWarning.message)
           }
         })
         return
       }
+      if (shouldDropAsyncResult()) return
+      releaseRecoveryLockInFinally = false
+      if (!holdPostAuthRecoveryLockUntilDeferredApply && shouldReleaseRecoveryLock()) {
+        setPostAuthRecoveryRefreshLocked(false)
+      }
       void Promise.resolve(onConfigured(context))
     } catch (e: any) {
       if (cancelRequestedRef.current) {
+        if (shouldReleaseRecoveryLock()) {
+          setPostAuthRecoveryRefreshLocked(false)
+        }
         applyCanceledState()
         return
       }
       applyAuthFailureState(toUserFacingUnknownErrorMessage(e, '认证失败，请稍后重试。'))
+    } finally {
+      if (releaseRecoveryLockInFinally && shouldReleaseRecoveryLock()) {
+        setPostAuthRecoveryRefreshLocked(false)
+      }
     }
   }
 
@@ -2745,7 +3210,7 @@ export default function ModelCenter({
             aria-label="刷新模型能力"
             title="刷新模型能力"
             onClick={handleRefreshCapabilities}
-            disabled={interactionLocked || refreshingCapabilities || phase === 'loading'}
+            disabled={refreshGuard.disabled}
           >
             {refreshingCapabilities ? '刷新中...' : '刷新'}
           </Button>

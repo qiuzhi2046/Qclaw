@@ -1,32 +1,22 @@
 import type { CliCommandResult } from './openclaw-capabilities'
 import { buildGeminiCliMissingMessage } from './openclaw-oauth-dependencies'
 import { isConfigWarningLine } from './openclaw-config-warnings'
+import {
+  classifySharedCliFailure,
+  normalizeCliFailureClassificationInput,
+} from '../../src/shared/cli-failure-classification'
 
-const ANSI_ESCAPE_SEQUENCE_REGEX =
-  /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\)|[@-_])/g
-const NON_PRINTABLE_EXCEPT_NEWLINES_REGEX = /[\u0000-\u0008\u000B-\u001F\u007F]/g
 const BOX_DECORATION_LINE_REGEX = /^[\s│┃┌┐└┘├┤┬┴─╭╮╯╰═◇◆]+$/
 const BOX_HEADER_LINE_REGEX = /^[◇◆].*[─╮╯╰]+$/
 const OPENCLAW_BANNER_LINE_REGEX = /^🦞\s*OpenClaw\b/i
 const SINGLE_CHAR_ARTIFACT_REGEX = /^[A-Za-z0-9.,:;!?-]$/
 const GEMINI_CLI_MISSING_REGEX = /gemini cli not found/i
-const API_INVALID_REGEX =
-  /\b(invalid api key|api[_ -]?key.+(?:invalid|incorrect|expired)|invalid credentials?|authentication failed|unauthorized|forbidden|status code 401|status code 403|token.+invalid|token mismatch|key.+无效|密钥.+无效)\b/i
-const WRITE_FAILURE_REGEX =
-  /\b(failed to write|write failed|cannot write|permission denied|operation not permitted|eacces|erofs|read-only file system|no space left on device|disk full|写入失败|保存失败|权限不足)\b/i
-const GATEWAY_UNREADY_REGEX =
-  /\b(gateway did not become reachable|not become reachable|gateway.+(?:offline|unreachable|not running)|connection refused|econnrefused|websocket.+(?:1006|1008)|gateway closed)\b/i
-const NETWORK_BLOCKED_REGEX =
-  /\b(timeout|timed out|network|dns|proxy|certificate|tls|ssl|socket hang up|econnreset|enotfound|fetch failed)\b/i
 const MULTI_MODEL_FALLBACK_FAILURE_REGEX =
   /\b(all models failed|embedded agent failed before reply|followup agent failed before reply)\b/i
 const NOISY_LOG_BLOB_REGEX = /\b(config overwrite|workspace ok|sessions ok|sha256|gateway did not become reachable at ws:)\b/i
 
 function stripCliControlSequences(text: string): string {
-  return String(text || '')
-    .replace(/\r\n?/g, '\n')
-    .replace(ANSI_ESCAPE_SEQUENCE_REGEX, '')
-    .replace(NON_PRINTABLE_EXCEPT_NEWLINES_REGEX, '')
+  return normalizeCliFailureClassificationInput(text)
 }
 
 function unwrapBoxLine(line: string): string {
@@ -68,33 +58,16 @@ function classifyCliFailureOutput(output: string): { message: string; warningOnl
     }
   }
 
-  if (API_INVALID_REGEX.test(combined)) {
+  const sharedFailureCode = classifySharedCliFailure(combined)
+  if (sharedFailureCode) {
+    const messageByCode = {
+      api_invalid: 'API Key 无效、已过期或权限不足，请检查后重试。',
+      write_failure: '配置写入失败，请检查本机权限后重试。',
+      gateway_unready: '网关 token 已变更，请刷新后重新尝试',
+      network_blocked: '网络连接异常，请检查网络或代理配置后重试。',
+    } as const
     return {
-      message: 'API Key 无效、已过期或权限不足，请检查后重试。',
-      warningOnly: false,
-      priority: 3,
-    }
-  }
-
-  if (WRITE_FAILURE_REGEX.test(combined)) {
-    return {
-      message: '配置写入失败，请检查本机权限后重试。',
-      warningOnly: false,
-      priority: 3,
-    }
-  }
-
-  if (GATEWAY_UNREADY_REGEX.test(combined)) {
-    return {
-      message: '网关 token 已变更，请刷新后重新尝试',
-      warningOnly: false,
-      priority: 3,
-    }
-  }
-
-  if (NETWORK_BLOCKED_REGEX.test(combined)) {
-    return {
-      message: '网络连接异常，请检查网络或代理配置后重试。',
+      message: messageByCode[sharedFailureCode],
       warningOnly: false,
       priority: 3,
     }

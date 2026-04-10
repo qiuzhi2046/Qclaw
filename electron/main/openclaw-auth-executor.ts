@@ -56,6 +56,14 @@ type OnboardRouteKind = Extract<OpenClawAuthRouteDescriptor['kind'], 'onboard' |
 
 export type ExecuteAuthRouteErrorCode = 'invalid_input' | 'command_failed' | 'unsupported_capability'
 
+export interface PostAuthRuntimeContext {
+  tokenRotated: boolean
+  gatewayApplyAction: 'none' | 'hot-reload' | 'restart'
+  gatewayConfirmed: boolean
+  recoveryReason: 'none' | 'gateway-token-rotated' | 'gateway-recovery' | 'runtime-stale'
+  recommendedVerificationProfile: 'default' | 'post-auth-recovery' | 'slow-path'
+}
+
 type OAuthEventChannel = 'oauth:state' | 'oauth:code'
 
 interface OAuthStatePayload {
@@ -139,6 +147,7 @@ export interface ExecuteAuthRouteResult extends CliResult {
   loginProviderId?: string
   routeMethodId?: string
   pluginId?: string
+  postAuthRuntime?: PostAuthRuntimeContext
   errorCode?: ExecuteAuthRouteErrorCode
   message?: string
 }
@@ -1064,7 +1073,7 @@ async function executeOnboardCommandWithGatewayRecovery(params: {
   ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
   extras: Partial<ExecuteAuthRouteResult>
 }): Promise<
-  | { status: 'result'; result: CliResult }
+  | { status: 'result'; result: CliResult; postAuthRuntime?: PostAuthRuntimeContext }
   | { status: 'failure'; failure: ExecuteAuthRouteResult }
 > {
   params.attemptedCommands.push(params.command)
@@ -1100,7 +1109,17 @@ async function executeOnboardCommandWithGatewayRecovery(params: {
 
   params.attemptedCommands.push(params.command)
   result = await params.runCommand(params.command, ONBOARD_TIMEOUT_MS)
-  return { status: 'result', result }
+  return {
+    status: 'result',
+    result,
+    postAuthRuntime: {
+      tokenRotated: false,
+      gatewayApplyAction: 'restart',
+      gatewayConfirmed: true,
+      recoveryReason: 'gateway-recovery',
+      recommendedVerificationProfile: 'post-auth-recovery',
+    },
+  }
 }
 
 export function resolveAuthMethodDescriptor(
@@ -1766,6 +1785,7 @@ export async function executeAuthRoute(
       return onboardResult.failure
     }
     const result = onboardResult.result
+    let postAuthRuntime = onboardResult.postAuthRuntime
     await appendAuthExecutorDiagnostic({
       event: 'onboard-cli-result',
       providerId: input.providerId,
@@ -1963,12 +1983,20 @@ export async function executeAuthRoute(
             }
           )
         }
+        postAuthRuntime = {
+          tokenRotated: true,
+          gatewayApplyAction: gatewayApply.appliedAction,
+          gatewayConfirmed: true,
+          recoveryReason: 'gateway-token-rotated',
+          recommendedVerificationProfile: 'post-auth-recovery',
+        }
       }
     }
     return fromCommand(route.kind, attemptedCommands, result, {
       loginProviderId: route.providerId,
       routeMethodId: resolvedRouteMethodId.value,
       pluginId,
+      ...(postAuthRuntime ? { postAuthRuntime } : {}),
     })
   }
 
@@ -2030,6 +2058,7 @@ export async function executeAuthRoute(
       return onboardResult.failure
     }
     const result = onboardResult.result
+    let postAuthRuntime = onboardResult.postAuthRuntime
     if (result.ok) {
       const stalePluginIds = extractStalePluginIdsFromResult(result)
       if (stalePluginIds.length > 0) {
@@ -2205,12 +2234,20 @@ export async function executeAuthRoute(
             }
           )
         }
+        postAuthRuntime = {
+          tokenRotated: true,
+          gatewayApplyAction: gatewayApply.appliedAction,
+          gatewayConfirmed: true,
+          recoveryReason: 'gateway-token-rotated',
+          recommendedVerificationProfile: 'post-auth-recovery',
+        }
       }
     }
     return fromCommand(route.kind, attemptedCommands, result, {
       loginProviderId: route.providerId,
       routeMethodId: resolvedRouteMethodId.value,
       pluginId,
+      ...(postAuthRuntime ? { postAuthRuntime } : {}),
     })
   }
 

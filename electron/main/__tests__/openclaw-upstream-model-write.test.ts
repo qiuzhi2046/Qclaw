@@ -142,4 +142,52 @@ describe('openclaw upstream model write', () => {
     })
     expect(callGatewayRpcViaControlUiBrowserMock).toHaveBeenCalledTimes(1)
   })
+
+  it('passes optional timeout overrides through to both control ui config.get and config.apply calls', async () => {
+    callGatewayRpcViaControlUiBrowserMock
+      .mockResolvedValueOnce({
+        valid: true,
+        hash: 'hash-456',
+        config: {
+          agents: {
+            defaults: {
+              model: {
+                primary: 'openai/gpt-5',
+              },
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+      })
+
+    await applyModelConfigViaUpstreamControlUi({
+      kind: 'default',
+      model: 'openai/gpt-5.4-pro',
+      timeoutMs: 35_000,
+      loadTimeoutMs: 30_000,
+    })
+
+    expect(callGatewayRpcViaControlUiBrowserMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Object),
+      'config.get',
+      {},
+      {
+        timeoutMs: 35_000,
+        loadTimeoutMs: 30_000,
+      }
+    )
+    expect(callGatewayRpcViaControlUiBrowserMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      'config.apply',
+      expect.any(Object),
+      {
+        timeoutMs: 35_000,
+        loadTimeoutMs: 30_000,
+      }
+    )
+  })
 })

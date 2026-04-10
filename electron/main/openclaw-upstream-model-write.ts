@@ -11,6 +11,8 @@ export interface UpstreamModelConfigWriteRequest {
   kind: 'default' | 'agent-primary'
   model: string
   agentId?: string
+  timeoutMs?: number
+  loadTimeoutMs?: number
 }
 
 export interface UpstreamModelConfigWriteResult {
@@ -55,15 +57,33 @@ function extractProviderIdFromModelKey(model: string): string {
   return String(model || '').trim().split('/')[0] || ''
 }
 
-async function getUpstreamConfigSnapshot(): Promise<UpstreamConfigSnapshotLike> {
-  return await callGatewayRpcViaControlUiBrowser(
-    {
-      readConfig,
-      readEnvFile,
-    },
-    'config.get',
-    {},
-  ) as UpstreamConfigSnapshotLike
+async function getUpstreamConfigSnapshot(options?: {
+  timeoutMs?: number
+  loadTimeoutMs?: number
+}): Promise<UpstreamConfigSnapshotLike> {
+  const controlUiOptions =
+    options?.timeoutMs || options?.loadTimeoutMs
+      ? {
+          timeoutMs: options?.timeoutMs,
+          loadTimeoutMs: options?.loadTimeoutMs,
+        }
+      : undefined
+  const deps = {
+    readConfig,
+    readEnvFile,
+  }
+  return await (controlUiOptions
+    ? callGatewayRpcViaControlUiBrowser(
+        deps,
+        'config.get',
+        {},
+        controlUiOptions,
+      )
+    : callGatewayRpcViaControlUiBrowser(
+        deps,
+        'config.get',
+        {},
+      )) as UpstreamConfigSnapshotLike
 }
 
 export async function applyModelConfigViaUpstreamControlUi(
@@ -107,7 +127,10 @@ export async function applyModelConfigViaUpstreamControlUi(
 
   let snapshot: UpstreamConfigSnapshotLike | null = null
   try {
-    snapshot = await getUpstreamConfigSnapshot()
+    snapshot = await getUpstreamConfigSnapshot({
+      timeoutMs: request.timeoutMs,
+      loadTimeoutMs: request.loadTimeoutMs,
+    })
   } catch (error) {
     await appendModelAuthDiagnosticLog({
       source: 'main:upstream-model-write',
@@ -188,17 +211,37 @@ export async function applyModelConfigViaUpstreamControlUi(
   }
 
   try {
-    await callGatewayRpcViaControlUiBrowser(
-      {
-        readConfig,
-        readEnvFile,
-      },
-      'config.apply',
-      {
-        raw: `${JSON.stringify(nextConfig, null, 2)}\n`,
-        baseHash,
-      },
-    )
+    const controlUiOptions =
+      request.timeoutMs || request.loadTimeoutMs
+        ? {
+            timeoutMs: request.timeoutMs,
+            loadTimeoutMs: request.loadTimeoutMs,
+          }
+        : undefined
+    const deps = {
+      readConfig,
+      readEnvFile,
+    }
+    if (controlUiOptions) {
+      await callGatewayRpcViaControlUiBrowser(
+        deps,
+        'config.apply',
+        {
+          raw: `${JSON.stringify(nextConfig, null, 2)}\n`,
+          baseHash,
+        },
+        controlUiOptions,
+      )
+    } else {
+      await callGatewayRpcViaControlUiBrowser(
+        deps,
+        'config.apply',
+        {
+          raw: `${JSON.stringify(nextConfig, null, 2)}\n`,
+          baseHash,
+        },
+      )
+    }
     await appendModelAuthDiagnosticLog({
       source: 'main:upstream-model-write',
       event: 'upstream-model-write-success',

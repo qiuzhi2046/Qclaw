@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:app": "tsc && vite build",
+    "build:app": "tsc && vite build && node scripts/prepare-electron-app-dir.mjs",
     "build": "npm run build:app && node scripts/run-electron-builder.mjs",
     "check:mac:release-env": "node scripts/check-mac-release-env.mjs",
     "package:mac:dir": "npm run check:mac:release-env -- --allow-placeholder-publish --skip-notarize && npm run build:app && QCLAW_SKIP_NOTARIZE=1 node scripts/run-electron-builder.mjs --mac --arm64 --x64 dir --publish never",
