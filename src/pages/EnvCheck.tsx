@@ -23,6 +23,7 @@ import {
   type OpenClawDiscoveryResult,
   type OpenClawInstallCandidate,
   type OpenClawLatestVersionCheckResult,
+  type WindowsGatewayOwnerState,
   type EnvCheckReadyPayload,
 } from '../shared/openclaw-phase1'
 import type { OpenClawUpgradeCheckResult } from '../shared/openclaw-phase4'
@@ -185,6 +186,34 @@ export async function retryOpenClawLatestVersionCheck(
 
 type StepStatus = 'pending' | 'checking' | 'ok' | 'installing' | 'pending-install' | 'error' | 'canceled'
 
+type NodeInstallStrategy = 'nvm' | 'installer'
+
+export function shouldDownloadNodeInstallerBeforeInstall(options: {
+  needNode: boolean
+  installStrategy: NodeInstallStrategy
+  platform: string
+  nodeInstallPlan?: { artifactKind?: 'pkg' | 'zip' } | null
+}): boolean {
+  if (!options.needNode) return false
+  if (options.installStrategy === 'nvm') return false
+  if (options.platform === 'win32' && options.nodeInstallPlan?.artifactKind === 'zip') return false
+  return true
+}
+
+export function shouldBootstrapNodeBeforeOpenClawCheck(options: {
+  needNode: boolean
+  installStrategy: NodeInstallStrategy
+  platform: string
+  nodeInstallPlan?: { artifactKind?: 'pkg' | 'zip' } | null
+}): boolean {
+  return (
+    options.needNode &&
+    options.installStrategy === 'installer' &&
+    options.platform === 'win32' &&
+    options.nodeInstallPlan?.artifactKind === 'zip'
+  )
+}
+
 interface Step {
   id: string
   label: string
@@ -229,6 +258,23 @@ export interface OpenClawTakeoverSummary {
 }
 
 type PluginRepairResult = Awaited<ReturnType<typeof window.api.repairIncompatiblePlugins>>
+
+export function formatPluginRepairErrorSummaryForEnvCheck(options: {
+  pluginRepairResult?: { ok?: boolean; summary?: string } | null
+  nodeStepStatus?: StepStatus
+}): string {
+  if (
+    options.nodeStepStatus === 'checking' ||
+    options.nodeStepStatus === 'installing' ||
+    options.nodeStepStatus === 'pending-install'
+  ) {
+    return ''
+  }
+
+  return options.pluginRepairResult && !options.pluginRepairResult.ok
+    ? String(options.pluginRepairResult.summary || '').trim()
+    : ''
+}
 
 export function kickoffStartupPluginRepair(
   startRepair?: () => Promise<PluginRepairResult | null>
@@ -487,11 +533,28 @@ function createInitialSteps(): Step[] {
   return INITIAL_STEPS.map((step) => ({ ...step }))
 }
 
-function buildDeferredGatewayStepState(): Pick<Step, 'status' | 'version' | 'description' | 'progress'> {
+function resolveDeferredGatewayOwnerWarning(ownerState?: WindowsGatewayOwnerState | null): string | null {
+  switch (ownerState) {
+    case 'service-missing':
+      return '已发现 Windows 网关后台启动器缺失，当前阶段不会自动安装。'
+    case 'launcher-missing':
+      return '已发现 Windows 网关后台启动器损坏或丢失，当前阶段不会自动安装。'
+    default:
+      return null
+  }
+}
+
+export function buildDeferredGatewayStepState(
+  ownerState?: WindowsGatewayOwnerState | null
+): Pick<Step, 'status' | 'version' | 'description' | 'progress'> {
+  const ownerWarning = resolveDeferredGatewayOwnerWarning(ownerState)
   return {
     status: 'ok',
     version: '后续确认',
-    description: '认证和渠道配置完成后再确认网关可用性',
+    description:
+      ownerWarning
+        ? `${ownerWarning} 后续在真正需要网关时会由生命周期统一修复。`
+        : '认证和渠道配置完成后再确认网关可用性',
     progress: 100,
   }
 }
@@ -692,7 +755,7 @@ export default function EnvCheck({
   const [startupIssuePrompt, setStartupIssuePrompt] = useState<NodeInstallerIssue | null>(null)
   const [latestNodeVersion, setLatestNodeVersion] = useState('')
   const [nodeRequiredVersion, setNodeRequiredVersion] = useState(MIN_NODE_VERSION)
-  const [nodeInstallStrategy, setNodeInstallStrategy] = useState<'nvm' | 'installer'>('installer')
+  const [nodeInstallStrategy, setNodeInstallStrategy] = useState<NodeInstallStrategy>('installer')
   const [openClawGateState, setOpenClawGateState] = useState<OpenClawVersionGateState | null>(null)
   const [isRefreshingOpenClawVersion, setIsRefreshingOpenClawVersion] = useState(false)
   const [isUpgradingOpenClaw, setIsUpgradingOpenClaw] = useState(false)
@@ -715,10 +778,11 @@ export default function EnvCheck({
     activeTakeoverFailureCandidateId
   )
   const activeTakeoverBackupBlocked = Boolean(activeTakeoverFailure)
-  const pluginRepairErrorSummary =
-    pluginRepairResult && !pluginRepairResult.ok
-      ? String(pluginRepairResult.summary || '').trim()
-      : ''
+  const nodeStepStatus = steps.find((step) => step.id === 'node')?.status
+  const pluginRepairErrorSummary = formatPluginRepairErrorSummaryForEnvCheck({
+    pluginRepairResult,
+    nodeStepStatus,
+  })
   const [pluginRepairNoticeVisible, setPluginRepairNoticeVisible] = useState(Boolean(pluginRepairResult?.repaired))
   const [pluginRepairErrorVisible, setPluginRepairErrorVisible] = useState(Boolean(pluginRepairErrorSummary))
 
@@ -772,11 +836,59 @@ export default function EnvCheck({
   useEffect(() => {
     // 使用 setTimeout(..., 0) 延迟启动，防止 StrictMode 双重执行
     // 第一次假挂载会在卸载前被清理掉，只有真实挂载会执行
-    const timeoutId = setTimeout(() => runChecks(), envCheckTiming.startupDelayMs)
+    const timeoutId = setTimeout(() => {
+      void appendEnvCheckDiag('renderer-run-checks-scheduled', {
+        startupDelayMs: envCheckTiming.startupDelayMs,
+        runAttempt,
+      })
+      void runChecks()
+    }, envCheckTiming.startupDelayMs)
     return () => clearTimeout(timeoutId)
   }, [envCheckTiming.startupDelayMs, runAttempt])
 
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+  const discoverOpenClawDuringEnvCheck = async () => {
+    return window.api.discoverOpenClawForEnvCheck().catch(() => null)
+  }
+
+  const appendEnvCheckDiag = async (
+    event: string,
+    fields: Record<string, unknown> = {}
+  ) => {
+    await window.api.appendEnvCheckDiagnostic(event, fields).catch(() => undefined)
+  }
+
+  const markInstalledOpenClawAsManagedDuringEnvCheck = async (
+    discovery: OpenClawDiscoveryResult | null | undefined
+  ) => {
+    if (window.api.platform !== 'win32') return
+    const activeCandidate = resolveActiveOpenClawCandidate(discovery)
+    if (!activeCandidate?.installFingerprint) {
+      await window.api.appendEnvCheckDiagnostic('renderer-managed-mark-skipped', {
+        reason: 'missing-active-candidate',
+      }).catch(() => undefined)
+      return
+    }
+    await window.api.appendEnvCheckDiagnostic('renderer-managed-mark-requested', {
+      candidateId: activeCandidate.candidateId,
+      installFingerprint: activeCandidate.installFingerprint,
+      ownershipState: activeCandidate.ownershipState,
+    }).catch(() => undefined)
+    const marked = await window.api.markManagedOpenClawInstall(activeCandidate.installFingerprint).catch((error) => {
+      void window.api.appendEnvCheckDiagnostic('renderer-managed-mark-failed', {
+        candidateId: activeCandidate.candidateId,
+        installFingerprint: activeCandidate.installFingerprint,
+        error: error instanceof Error ? error.message : String(error || 'unknown'),
+      }).catch(() => undefined)
+      return false
+    })
+    await window.api.appendEnvCheckDiagnostic('renderer-managed-mark-result', {
+      candidateId: activeCandidate.candidateId,
+      installFingerprint: activeCandidate.installFingerprint,
+      marked,
+    }).catch(() => undefined)
+  }
 
   const showStartupIssue = (issue: NodeInstallerIssue) => {
     setStartupIssuePrompt(issue)
@@ -803,6 +915,10 @@ export default function EnvCheck({
     progress: number,
     options: { manualRefresh?: boolean } = {}
   ): Promise<OpenClawVersionGateState | null> => {
+    await appendEnvCheckDiag('renderer-inspect-existing-openclaw-start', {
+      progress,
+      manualRefresh: Boolean(options.manualRefresh),
+    })
     setIsRefreshingOpenClawVersion(true)
     setOpenClawUpgradeError('')
     updateStep('openclaw', {
@@ -811,16 +927,46 @@ export default function EnvCheck({
       progress,
     })
 
-    const discovery = await window.api.discoverOpenClaw().catch(() => null)
+    await appendEnvCheckDiag('renderer-inspect-existing-openclaw-discover-requested', {
+      progress,
+      manualRefresh: Boolean(options.manualRefresh),
+    })
+    const discovery = await discoverOpenClawDuringEnvCheck()
+    await appendEnvCheckDiag('renderer-inspect-existing-openclaw-discover-result', {
+      status: discovery?.status ?? null,
+      activeCandidateId: discovery?.activeCandidateId ?? null,
+      candidateCount: discovery?.candidates?.length ?? 0,
+    })
     const activeCandidate = resolveActiveOpenClawCandidate(discovery)
     if (!activeCandidate) {
+      await appendEnvCheckDiag('renderer-inspect-existing-openclaw-no-active-candidate', {
+        status: discovery?.status ?? null,
+        candidateCount: discovery?.candidates?.length ?? 0,
+      })
       setIsRefreshingOpenClawVersion(false)
       setOpenClawGateState(null)
       setTakeoverSummary(null)
       return null
     }
 
-    const upgradeCheck = await window.api.checkOpenClawUpgrade()
+    await appendEnvCheckDiag('renderer-inspect-existing-openclaw-upgrade-check-requested', {
+      candidateId: activeCandidate.candidateId,
+      candidateVersion: activeCandidate.version,
+      platform: window.api.platform,
+    })
+    const upgradeCheck =
+      window.api.platform === 'win32'
+        ? await window.api.checkOpenClawUpgradeForEnvCheck(discovery)
+        : await window.api.checkOpenClawUpgrade()
+    await appendEnvCheckDiag('renderer-inspect-existing-openclaw-upgrade-check', {
+      candidateId: activeCandidate.candidateId,
+      candidateVersion: activeCandidate.version,
+      ok: upgradeCheck.ok,
+      currentVersion: upgradeCheck.currentVersion ?? null,
+      targetVersion: upgradeCheck.targetVersion ?? null,
+      blocksContinue: upgradeCheck.blocksContinue,
+      canAutoUpgrade: upgradeCheck.canAutoUpgrade,
+    })
     const gateState = buildOpenClawGateState(discovery, upgradeCheck)
     let nextDiscovery = gateState.discovery
     const takeoverNoticeCandidates = (gateState.discovery?.candidates || []).filter((candidate) =>
@@ -832,6 +978,9 @@ export default function EnvCheck({
     const takeoverFailures: OpenClawTakeoverFailure[] = []
 
     if (takeoverCandidates.length > 0 && nextDiscovery) {
+      await appendEnvCheckDiag('renderer-inspect-existing-openclaw-backup-start', {
+        takeoverCandidateCount: takeoverCandidates.length,
+      })
       updateStep('openclaw', {
         status: 'checking',
         description: `正在为 ${takeoverCandidates.length} 个 OpenClaw 安装执行接管备份...`,
@@ -929,6 +1078,13 @@ export default function EnvCheck({
 
     setOpenClawGateState(nextGateState)
     setIsRefreshingOpenClawVersion(false)
+    await appendEnvCheckDiag('renderer-inspect-existing-openclaw-result', {
+      candidateId: nextGateState.activeCandidate?.candidateId ?? null,
+      version: nextGateState.activeCandidate?.version ?? null,
+      blocksContinue: nextGateState.blocksContinue,
+      canAutoCorrect: nextGateState.canAutoCorrect,
+      message: nextGateState.message,
+    })
     updateStep('openclaw', {
       status: nextGateState.blocksContinue ? 'pending-install' : 'ok',
       version: nextGateState.activeCandidate?.version || activeCandidate.version,
@@ -1146,7 +1302,24 @@ export default function EnvCheck({
     }
 
     setHistoryOnlyRecoveryFailure(null)
-    await window.api.markManagedOpenClawInstall(recoveredCandidate.installFingerprint)
+    await window.api.appendEnvCheckDiagnostic('renderer-history-recovery-managed-mark-requested', {
+      candidateId: recoveredCandidate.candidateId,
+      installFingerprint: recoveredCandidate.installFingerprint,
+      ownershipState: recoveredCandidate.ownershipState,
+    }).catch(() => undefined)
+    const recoveryMarked = await window.api.markManagedOpenClawInstall(recoveredCandidate.installFingerprint).catch((error) => {
+      void window.api.appendEnvCheckDiagnostic('renderer-history-recovery-managed-mark-failed', {
+        candidateId: recoveredCandidate.candidateId,
+        installFingerprint: recoveredCandidate.installFingerprint,
+        error: error instanceof Error ? error.message : String(error || 'unknown'),
+      }).catch(() => undefined)
+      throw error
+    })
+    await window.api.appendEnvCheckDiagnostic('renderer-history-recovery-managed-mark-result', {
+      candidateId: recoveredCandidate.candidateId,
+      installFingerprint: recoveredCandidate.installFingerprint,
+      marked: recoveryMarked,
+    }).catch(() => undefined)
     const managedDiscovery = await window.api.discoverOpenClaw().catch(() => recoveredDiscovery)
     const managedCandidate = resolveActiveOpenClawCandidate(managedDiscovery) || recoveredCandidate
 
@@ -1216,9 +1389,15 @@ export default function EnvCheck({
       setLatestNodeVersion(plan.version)
 
       let installerPath: string | undefined
+      const shouldDownloadInstaller = shouldDownloadNodeInstallerBeforeInstall({
+        needNode: true,
+        installStrategy: nodeInstallStrategy,
+        platform: window.api.platform,
+        nodeInstallPlan: plan,
+      })
       if (shouldUseNvmInstall) {
         updateStep('node', { description: `正在通过 nvm 准备 Node.js ${plan.version}...`, progress: 15 })
-      } else {
+      } else if (shouldDownloadInstaller) {
         // 2. 下载安装包
         updateStep('node', { description: `正在下载 Node.js ${plan.version}...`, progress: 10 })
         const downloadResult = await window.api.downloadNodeInstaller(plan)
@@ -1237,6 +1416,8 @@ export default function EnvCheck({
             throw new Error(inspection.issue.message || '安装包校验失败')
           }
         }
+      } else {
+        updateStep('node', { description: `正在准备 Node.js ${plan.version}...`, progress: 15 })
       }
 
       // 4. 执行安装
@@ -1292,12 +1473,18 @@ export default function EnvCheck({
   const runChecks = async () => {
     // 双重检查：防止并发执行
     if (isRunning) {
+      await appendEnvCheckDiag('renderer-run-checks-skipped', { reason: 'already-running' })
       return
     }
     if (!window.api) {
+      await appendEnvCheckDiag('renderer-run-checks-skipped', { reason: 'missing-window-api' })
       setFatalIssue({ message: '桌面运行环境初始化失败，请重启应用后重试。' })
       return
     }
+    await appendEnvCheckDiag('renderer-run-checks-start', {
+      platform: window.api.platform,
+      runAttempt,
+    })
     setIsRunning(true)
     setFatalIssue(null)
     setStartupIssuePrompt(null)
@@ -1347,12 +1534,19 @@ export default function EnvCheck({
     // 第一步：检测 Node.js
     updateStep('node', { status: 'checking', description: '正在检查 Node.js...', progress: 10 })
     await delay(envCheckTiming.transitionStandardMs)
-    const nodeResult = await window.api.checkNode()
+    await appendEnvCheckDiag('renderer-check-node-requested', { runAttempt })
+    let nodeResult = await window.api.checkNode()
+    await appendEnvCheckDiag('renderer-check-node-result', {
+      installed: nodeResult.installed,
+      needsUpgrade: nodeResult.needsUpgrade,
+      version: nodeResult.version ?? null,
+      installStrategy: nodeResult.installStrategy ?? null,
+    })
     const requiredNodeVersion = nodeResult.requiredVersion || MIN_NODE_VERSION
     setNodeRequiredVersion(requiredNodeVersion)
     setNodeInstallStrategy(nodeResult.installStrategy)
     const nodeNeedsUpgrade = nodeResult.installed && nodeResult.needsUpgrade
-    const needNode = !nodeResult.installed
+    let needNode = !nodeResult.installed
     let nodeInstallPlan = null
     if (needNode) {
       try {
@@ -1397,13 +1591,85 @@ export default function EnvCheck({
     }
 
     // 第二步：检测 OpenClaw 命令行工具
+    if (
+      shouldBootstrapNodeBeforeOpenClawCheck({
+        needNode,
+        installStrategy: nodeResult.installStrategy,
+        platform: window.api.platform,
+        nodeInstallPlan,
+      })
+    ) {
+      updateStep('node', {
+        status: 'installing',
+        description: `正在安装 Node.js ${targetNodeVersion}...`,
+        progress: 45,
+      })
+
+      const nodeBootstrapResult = await window.api.installEnv({
+        needNode: true,
+        needOpenClaw: false,
+        nodeInstallPlan: nodeInstallPlan || undefined,
+      })
+
+      if (!nodeBootstrapResult.ok) {
+        const errDetail = nodeBootstrapResult.stderr || nodeBootstrapResult.stdout || '未知错误'
+        const issue = createNodeInstallerIssue('installer-failed', errDetail)
+        updateStep('node', { status: 'error', error: '安装失败' })
+        showFatalIssue(issue)
+        showStartupIssue(issue)
+        setIsRunning(false)
+        return
+      }
+
+      updateStep('node', { status: 'checking', description: '重新检测 Node.js...', progress: 85 })
+      await window.api.refreshEnvironment()
+      await delay(envCheckTiming.transitionShortMs)
+      const bootstrappedNodeResult = await window.api.checkNode()
+      if (!bootstrappedNodeResult.installed) {
+        updateStep('node', {
+          status: 'error',
+          error: '安装后仍无法检测到',
+        })
+        showFatalMessage(
+          'Node.js 安装后仍无法检测到。请重启应用或手动安装。',
+          'installer-failed'
+        )
+        setIsRunning(false)
+        return
+      }
+
+      nodeResult = bootstrappedNodeResult
+      needNode = false
+      nodeInstallPlan = null
+      setLatestNodeVersion('')
+      setNodeInstallStrategy(nodeResult.installStrategy)
+      updateStep('node', { status: 'ok', version: nodeResult.version, description: '已安装', progress: 100 })
+      setCurrentStep(1)
+    }
+
     updateStep('openclaw', { status: 'checking', description: '正在检查 OpenClaw 命令行工具...', progress: needNode ? 25 : 20 })
     await delay(envCheckTiming.transitionShortMs)
+    await appendEnvCheckDiag('renderer-check-openclaw-requested', { runAttempt })
     const openclawResult = await window.api.checkOpenClaw()
-    const initialDiscovery = await window.api.discoverOpenClaw().catch(() => null)
+    await appendEnvCheckDiag('renderer-check-openclaw-result', {
+      installed: openclawResult.installed,
+      version: openclawResult.version ?? null,
+    })
+    await appendEnvCheckDiag('renderer-discover-openclaw-requested', { runAttempt })
+    const initialDiscovery = await discoverOpenClawDuringEnvCheck()
+    await appendEnvCheckDiag('renderer-discover-openclaw-result', {
+      activeCandidateId: initialDiscovery?.activeCandidateId ?? null,
+      installationCount: initialDiscovery?.candidates?.length ?? 0,
+      status: initialDiscovery?.status ?? null,
+    })
     const installDecision = resolveOpenClawInstallDecision({
       discovery: initialDiscovery,
       cliInstalled: openclawResult.installed,
+    })
+    await appendEnvCheckDiag('renderer-openclaw-install-decision', {
+      hadOpenClawInstalled: installDecision.hadOpenClawInstalled,
+      shouldFreshInstall: installDecision.shouldFreshInstall,
+      requiresRecovery: installDecision.requiresRecovery,
     })
     const hadOpenClawInstalled = installDecision.hadOpenClawInstalled
     const needOpenClawInstall = installDecision.shouldFreshInstall
@@ -1413,11 +1679,25 @@ export default function EnvCheck({
       needNode,
       shouldInstallOpenClawRuntime,
     })
-    const readSharedConfigInitialized = async () => {
+    const readSharedConfigInitialized = async (configPath?: string | null) => {
       try {
-        const config = await window.api.readConfig()
-        return hasInitializedOpenClawConfig(config)
+        await appendEnvCheckDiag('renderer-shared-config-read-requested', {
+          configPath: configPath || null,
+        })
+        const config = await window.api.readConfig({ configPath: configPath || undefined })
+        const initialized = hasInitializedOpenClawConfig(config)
+        await appendEnvCheckDiag('renderer-shared-config-read-result', {
+          configPath: configPath || null,
+          initialized,
+          topLevelKeys: config && typeof config === 'object' ? Object.keys(config).length : 0,
+        })
+        return initialized
       } catch {
+        await appendEnvCheckDiag('renderer-shared-config-read-result', {
+          configPath: configPath || null,
+          initialized: false,
+          errored: true,
+        })
         return false
       }
     }
@@ -1442,6 +1722,10 @@ export default function EnvCheck({
 
     // 如果都已安装，直接记录网关会在后续配置完成后再确认
     if (!needNode && !shouldInstallOpenClawRuntime) {
+      await appendEnvCheckDiag('renderer-openclaw-enter-existing-install-branch', {
+        needNode,
+        shouldInstallOpenClawRuntime,
+      })
       const gateState = await inspectExistingOpenClaw(55)
       await delay(envCheckTiming.transitionStandardMs)
       updateStep('gateway', {
@@ -1450,11 +1734,24 @@ export default function EnvCheck({
         progress: 0,
       })
       await delay(envCheckTiming.transitionStandardMs)
-      const sharedConfigInitialized = await readSharedConfigInitialized()
-      updateStep('gateway', buildDeferredGatewayStepState())
+      const sharedConfigInitialized = await readSharedConfigInitialized(
+        resolveActiveOpenClawCandidate(gateState?.discovery || initialDiscovery || null)?.configPath
+      )
+      updateStep(
+        'gateway',
+        buildDeferredGatewayStepState(
+          (gateState?.discovery || initialDiscovery || null)?.windowsGatewayOwnerState || null
+        )
+      )
       setProgress(100)
       await delay(envCheckTiming.transitionSettleMs)
       setIsRunning(false)
+      await appendEnvCheckDiag('renderer-openclaw-ready-payload', {
+        installedOpenClawDuringCheck: false,
+        gatewayRunning: false,
+        sharedConfigInitialized,
+        discoveryStatus: (gateState?.discovery || initialDiscovery || null)?.status ?? null,
+      })
       setReadyPayload({
         hadOpenClawInstalled,
         installedOpenClawDuringCheck: false,
@@ -1467,7 +1764,12 @@ export default function EnvCheck({
 
     // 需要安装，准备安装参数
     let nodeInstallerPath: string | undefined
-    const shouldDownloadNodeInstaller = needNode && nodeResult.installStrategy !== 'nvm'
+    const shouldDownloadNodeInstaller = shouldDownloadNodeInstallerBeforeInstall({
+      needNode,
+      installStrategy: nodeResult.installStrategy,
+      platform: window.api.platform,
+      nodeInstallPlan,
+    })
 
     if (needNode) {
       if (shouldDownloadNodeInstaller) {
@@ -1607,7 +1909,12 @@ export default function EnvCheck({
     }
 
     let finalDiscoveryResult: OpenClawDiscoveryResult | null =
-      shouldInstallOpenClawRuntime ? await window.api.discoverOpenClaw().catch(() => null) : initialDiscovery
+      shouldInstallOpenClawRuntime ? await discoverOpenClawDuringEnvCheck() : initialDiscovery
+
+    if (shouldInstallOpenClawRuntime) {
+      await markInstalledOpenClawAsManagedDuringEnvCheck(finalDiscoveryResult)
+      finalDiscoveryResult = await discoverOpenClawDuringEnvCheck()
+    }
 
     if (needOpenClawRuntimeRecovery) {
       const recoveryResult = await recoverHistoryOnlyOpenClaw(95)
@@ -1631,8 +1938,13 @@ export default function EnvCheck({
     })
     await delay(envCheckTiming.transitionStandardMs)
 
-    const sharedConfigInitialized = await readSharedConfigInitialized()
-    updateStep('gateway', buildDeferredGatewayStepState())
+    const sharedConfigInitialized = await readSharedConfigInitialized(
+      resolveActiveOpenClawCandidate(finalGateState?.discovery || finalDiscoveryResult || null)?.configPath
+    )
+    updateStep(
+      'gateway',
+      buildDeferredGatewayStepState(finalDiscoveryResult?.windowsGatewayOwnerState || null)
+    )
 
     setProgress(100)
     await delay(envCheckTiming.transitionSettleMs)

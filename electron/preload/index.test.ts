@@ -182,6 +182,17 @@ describe('preload api model channels', () => {
     await api.getModelUpstreamState()
     expect(invokeMock).toHaveBeenLastCalledWith('models:upstream-state:get')
 
+    await api.getModelSnapshot({
+      includeEnv: true,
+      includeCatalog: true,
+      statusOptions: { agentId: 'feishu-default' },
+    })
+    expect(invokeMock).toHaveBeenLastCalledWith('models:snapshot:get', {
+      includeEnv: true,
+      includeCatalog: true,
+      statusOptions: { agentId: 'feishu-default' },
+    })
+
     await api.syncModelVerificationState({
       statusData: {
         allowed: ['openai/gpt-5.4-pro'],

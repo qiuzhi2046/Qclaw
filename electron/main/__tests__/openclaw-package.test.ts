@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as openClawPackage from '../openclaw-package'
 import {
   getCommandPathLookupInvocation,
@@ -6,6 +6,7 @@ import {
   resolveOpenClawBinaryPath,
   resolveOpenClawPackageRoot,
 } from '../openclaw-package'
+import { buildWindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-runtime-policy'
 import { buildTestEnv } from './test-env'
 
 const fs = process.getBuiltinModule('fs') as typeof import('node:fs')
@@ -13,6 +14,7 @@ const os = process.getBuiltinModule('os') as typeof import('node:os')
 const path = process.getBuiltinModule('path') as typeof import('node:path')
 
 const tempDirs: string[] = []
+const itOnWindows = process.platform === 'win32' ? it : it.skip
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qclaw-openclaw-package-'))
@@ -23,6 +25,7 @@ function makeTempDir(): string {
 function createFakeOpenClawInstall(): {
   tempDir: string
   commandPath: string
+  npmShimPath: string
   packageRoot: string
   packageJsonPath: string
 } {
@@ -47,10 +50,15 @@ function createFakeOpenClawInstall(): {
   )
   fs.writeFileSync(path.join(packageRoot, 'openclaw.mjs'), '#!/usr/bin/env node\nconsole.log("openclaw")\n')
 
-  const commandPath = path.join(binDir, 'openclaw')
-  fs.symlinkSync(path.join(packageRoot, 'openclaw.mjs'), commandPath)
+  const npmShimPath = path.join(binDir, 'openclaw')
+  const commandPath =
+    process.platform === 'win32' ? path.join(packageRoot, 'openclaw.mjs') : npmShimPath
 
-  return { tempDir, commandPath, packageRoot, packageJsonPath }
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(path.join(packageRoot, 'openclaw.mjs'), commandPath)
+  }
+
+  return { tempDir, commandPath, npmShimPath, packageRoot, packageJsonPath }
 }
 
 function createNestedBinaryOpenClawInstall(): {
@@ -82,10 +90,61 @@ function createNestedBinaryOpenClawInstall(): {
   )
   fs.writeFileSync(path.join(nestedBinDir, 'openclaw.mjs'), '#!/usr/bin/env node\nconsole.log("openclaw")\n')
 
-  const commandPath = path.join(shimDir, 'openclaw')
-  fs.symlinkSync(path.join(nestedBinDir, 'openclaw.mjs'), commandPath)
+  const commandPath =
+    process.platform === 'win32' ? path.join(nestedBinDir, 'openclaw.mjs') : path.join(shimDir, 'openclaw')
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(path.join(nestedBinDir, 'openclaw.mjs'), commandPath)
+  }
 
   return { tempDir, commandPath, packageRoot, packageJsonPath }
+}
+
+function createPluginPollutionLayout(): {
+  pollutedPackageRoot: string
+  pluginEntryPath: string
+  selectedHostPackageRoot: string
+} {
+  const tempDir = makeTempDir()
+  const pluginDir = path.join(tempDir, 'extensions', 'openclaw-lark')
+  const pollutedPackageRoot = path.join(pluginDir, 'node_modules', 'openclaw')
+  const selectedHostPackageRoot = path.join(tempDir, 'selected-runtime', 'node_modules', 'openclaw')
+  const pluginEntryPath = path.join(pluginDir, 'index.js')
+
+  fs.mkdirSync(path.join(pollutedPackageRoot, 'dist'), { recursive: true })
+  fs.mkdirSync(path.join(selectedHostPackageRoot, 'dist'), { recursive: true })
+  fs.writeFileSync(pluginEntryPath, 'module.exports = {}\n')
+  fs.writeFileSync(
+    path.join(pollutedPackageRoot, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'openclaw',
+        version: '2026.4.5',
+        bin: { openclaw: 'dist/openclaw.mjs' },
+      },
+      null,
+      2
+    )
+  )
+  fs.writeFileSync(path.join(pollutedPackageRoot, 'dist', 'openclaw.mjs'), '#!/usr/bin/env node\n')
+  fs.writeFileSync(
+    path.join(selectedHostPackageRoot, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'openclaw',
+        version: '2026.3.24',
+        bin: { openclaw: 'dist/openclaw.mjs' },
+      },
+      null,
+      2
+    )
+  )
+  fs.writeFileSync(path.join(selectedHostPackageRoot, 'dist', 'openclaw.mjs'), '#!/usr/bin/env node\n')
+
+  return {
+    pollutedPackageRoot,
+    pluginEntryPath,
+    selectedHostPackageRoot,
+  }
 }
 
 afterEach(() => {
@@ -126,6 +185,55 @@ describe('resolveOpenClawBinaryPath', () => {
     expect(resolved).toBe(fallbackBinary)
   })
 
+  it('prefers the Windows private runtime openclaw shim before the roaming npm shim when command lookup fails', async () => {
+    const privateRuntimeBinary =
+      'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd'
+    const roamingBinary = 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd'
+
+    const resolved = await resolveOpenClawBinaryPath({
+      commandPathResolver: async () => {
+        throw new Error('INFO: Could not find files for the given pattern(s).')
+      },
+      platform: 'win32',
+      env: buildTestEnv({
+        LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        PATH: '',
+      }),
+      fileExists: (candidate: string) => candidate === privateRuntimeBinary || candidate === roamingBinary,
+    })
+
+    expect(resolved).toBe(privateRuntimeBinary)
+  })
+
+  it('falls back when command path lookup does not resolve in time', async () => {
+    const npmPrefix = makeTempDir()
+    const fallbackBinary = path.join(npmPrefix, 'openclaw.cmd')
+    fs.writeFileSync(fallbackBinary, '@echo off\n')
+
+    const resolved = resolveOpenClawBinaryPath({
+      commandPathResolver: async () =>
+        new Promise<string>(() => {
+          // Simulate a stuck command lookup caused by a broken Node/npm shim.
+        }),
+      commandLookupTimeoutMs: 10,
+      npmPrefixResolver: async () => npmPrefix,
+      platform: 'win32',
+      env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        PATH: '',
+      }),
+      fileExists: (candidate: string) => candidate === fallbackBinary,
+    })
+
+    await expect(Promise.race([
+      resolved,
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve('timed-out'), 100)
+      }),
+    ])).resolves.toBe(fallbackBinary)
+  })
+
   it('returns an actionable message when command lookup cannot find openclaw', async () => {
     await expect(
       resolveOpenClawBinaryPath({
@@ -155,19 +263,51 @@ describe('resolveOpenClawBinaryPath', () => {
     expect(resolved).toBe('/Users/alice/.volta/tools/image/bin/openclaw')
   })
 
+  it('prefers the active Windows runtime snapshot binary path before command lookup', async () => {
+    const snapshot = buildWindowsActiveRuntimeSnapshot({
+      openclawExecutable: 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd',
+      nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+      npmPrefix: 'C:\\Users\\alice\\AppData\\Roaming\\npm',
+      configPath: 'C:\\Users\\alice\\.openclaw\\config.json',
+      stateDir: 'C:\\Users\\alice\\.openclaw',
+      extensionsDir: 'C:\\Users\\alice\\.openclaw\\extensions',
+    })
+    const commandPathResolver = vi.fn(async () => {
+      throw new Error('unexpected command lookup')
+    })
+
+    const resolved = await resolveOpenClawBinaryPath({
+      activeRuntimeSnapshot: snapshot,
+      commandPathResolver,
+      platform: 'win32',
+      env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        USERPROFILE: 'C:\\Users\\alice',
+      }),
+      fileExists: (candidate: string) => candidate === snapshot.openclawPath,
+    })
+
+    expect(resolved).toBe(snapshot.openclawPath)
+    expect(commandPathResolver).not.toHaveBeenCalled()
+  })
+
   it('derives a deterministic openclaw binary path directly from an npm global prefix', async () => {
     const install = createFakeOpenClawInstall()
+    const targetPlatform = process.platform === 'win32' ? 'win32' : 'darwin'
+    const expectedBinaryPath =
+      targetPlatform === 'win32' ? path.join(install.tempDir, 'openclaw.cmd') : install.commandPath
 
     const resolved = await (openClawPackage as any).resolveOpenClawBinaryPathFromNpmPrefix({
       npmPrefix: install.tempDir,
-      platform: 'darwin',
+      platform: targetPlatform,
       env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
         HOME: '/Users/alice',
       }),
-      fileExists: (candidate: string) => candidate === install.commandPath,
+      fileExists: (candidate: string) => candidate === expectedBinaryPath,
     })
 
-    expect(resolved).toBe(install.commandPath)
+    expect(resolved).toBe(expectedBinaryPath)
   })
 })
 
@@ -224,6 +364,27 @@ describe('resolveOpenClawPackageRoot', () => {
         binaryPath: fakeBinary,
       })
     ).rejects.toThrow(/package\.json/i)
+  })
+
+  itOnWindows('prefers the selected Windows runtime snapshot host package root over plugin-local node_modules/openclaw', async () => {
+    const install = createPluginPollutionLayout()
+    const snapshot = buildWindowsActiveRuntimeSnapshot({
+      configPath: 'C:\\Users\\alice\\.openclaw\\config.json',
+      extensionsDir: 'C:\\Users\\alice\\.openclaw\\extensions',
+      hostPackageRoot: install.selectedHostPackageRoot,
+      nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+      npmPrefix: 'C:\\Users\\alice\\AppData\\Roaming\\npm',
+      openclawExecutable: 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd',
+      stateDir: 'C:\\Users\\alice\\.openclaw',
+    })
+
+    const packageRoot = await resolveOpenClawPackageRoot({
+      activeRuntimeSnapshot: snapshot,
+      binaryPath: install.pluginEntryPath,
+    })
+
+    expect(packageRoot).toBe(fs.realpathSync(install.selectedHostPackageRoot))
+    expect(packageRoot).not.toBe(fs.realpathSync(install.pollutedPackageRoot))
   })
 })
 

@@ -15,13 +15,14 @@ import {
   setActiveProcess,
 } from './command-control'
 import { buildFeishuInstallerPromptHookScript } from './feishu-installer-prompt-hook'
-import { getOpenClawPaths, readConfig } from './cli'
+import { readConfig } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import {
   FEISHU_OFFICIAL_PLUGIN_ID,
   prepareFeishuInstallerConfig,
 } from './feishu-installer-config'
+import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
@@ -73,7 +74,7 @@ function resolveFeishuInstallerPromptHookPath(): string {
 }
 
 async function resolveFeishuInstallerDiagLogPath(): Promise<string> {
-  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const openClawPaths = await resolveOpenClawPathsForRead().catch(() => null)
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   if (homeDir) {
     return path.join(homeDir, 'logs', 'qclaw-feishu-installer-diag.jsonl')
@@ -156,7 +157,7 @@ function normalizePendingPrompt(input: Partial<FeishuInstallerPendingPrompt> & {
 }
 
 export async function isFeishuOfficialPluginInstalledOnDisk(): Promise<boolean> {
-  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const openClawPaths = await resolveOpenClawPathsForRead().catch(() => null)
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   if (!homeDir) return false
 
@@ -170,7 +171,7 @@ export async function isFeishuOfficialPluginInstalledOnDisk(): Promise<boolean> 
 
 async function prepareConfigForFeishuInstaller(): Promise<void> {
   const config = await readConfig().catch(() => null)
-  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const openClawPaths = await resolveOpenClawPathsForRead().catch(() => null)
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   const pluginInstallPath = homeDir ? path.join(homeDir, 'extensions', FEISHU_OFFICIAL_PLUGIN_ID) : ''
   const pluginInstalledOnDisk = homeDir

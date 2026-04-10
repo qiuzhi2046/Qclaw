@@ -7,6 +7,8 @@ import type {
 } from '../../src/shared/openclaw-phase1'
 import { atomicWriteJson } from './atomic-write'
 import { formatDisplayPath, resolveOpenClawPaths } from './openclaw-paths'
+import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
+import { buildWindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
 import { readOpenClawPackageInfo, resolveOpenClawBinaryPath } from './openclaw-package'
 import { resolveRuntimeOpenClawPaths } from './openclaw-runtime-paths'
 import { listExecutablePathCandidates } from './runtime-path-discovery'
@@ -26,6 +28,14 @@ const { access, readFile, realpath } = fs.promises
 const { homedir } = os
 const { spawn } = childProcess
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000
+
+interface WindowsInstallSnapshotCandidate extends OpenClawInstallCandidate {
+  activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+}
+
+interface WindowsOpenClawDiscoveryResult extends OpenClawDiscoveryResult {
+  candidates: WindowsInstallSnapshotCandidate[]
+}
 
 function resolveVersionProbeTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = String(env.QCLAW_RUNTIME_LIGHTWEIGHT_PROBE_TIMEOUT_MS || '').trim()
@@ -239,7 +249,7 @@ async function runBinaryVersion(binaryPath: string): Promise<string> {
 async function buildCandidateFromBinary(
   binaryPath: string,
   activeBinaryPath: string | null
-): Promise<OpenClawInstallCandidate | null> {
+): Promise<WindowsInstallSnapshotCandidate | null> {
   const openClawPaths = await resolveRuntimeOpenClawPaths({ binaryPath })
   try {
     const packageInfo = await readOpenClawPackageInfo({ binaryPath })
@@ -253,8 +263,15 @@ async function buildCandidateFromBinary(
     const baselineBackup = await getBaselineBackupStatus(installFingerprint)
     const baselineBackupBypass = await getBaselineBackupBypassStatus(installFingerprint)
     const managedInstall = await isManagedInstallFingerprint(installFingerprint)
+    const activeRuntimeSnapshot = buildWindowsInstallSnapshot({
+      binaryPath: packageInfo.binaryPath,
+      configPath: openClawPaths.configFile,
+      hostPackageRoot: packageInfo.packageRoot,
+      stateRoot: openClawPaths.homeDir,
+    })
 
     return {
+      activeRuntimeSnapshot,
       candidateId: installFingerprint.slice(0, 16),
       binaryPath: packageInfo.binaryPath,
       resolvedBinaryPath: packageInfo.resolvedBinaryPath,
@@ -289,8 +306,15 @@ async function buildCandidateFromBinary(
     const baselineBackup = await getBaselineBackupStatus(installFingerprint)
     const baselineBackupBypass = await getBaselineBackupBypassStatus(installFingerprint)
     const managedInstall = await isManagedInstallFingerprint(installFingerprint)
+    const activeRuntimeSnapshot = buildWindowsInstallSnapshot({
+      binaryPath,
+      configPath: openClawPaths.configFile,
+      hostPackageRoot: packageRoot,
+      stateRoot: openClawPaths.homeDir,
+    })
 
     return {
+      activeRuntimeSnapshot,
       candidateId: installFingerprint.slice(0, 16),
       binaryPath,
       resolvedBinaryPath,
@@ -312,8 +336,91 @@ async function buildCandidateFromBinary(
   }
 }
 
+function resolveClosestWindowsNodeBinary(
+  openclawExecutable: string,
+  env: NodeJS.ProcessEnv = process.env,
+  fileExists: (candidatePath: string) => boolean = fs.existsSync
+): string {
+  const normalizedOpenclawExecutable = String(openclawExecutable || '').trim().toLowerCase()
+  const candidates = listExecutablePathCandidates('node', {
+    platform: 'win32',
+    env,
+    currentPath: env.PATH || '',
+  })
+  const prefersGlobalNpmShim =
+    normalizedOpenclawExecutable.includes('\\appdata\\roaming\\npm\\openclaw.') ||
+    normalizedOpenclawExecutable.includes('\\appdata\\local\\npm\\openclaw.')
+
+  const preferredSignatures = [
+    '.volta\\',
+    '.nvm\\',
+    '\\fnm\\',
+    'fnm_multishell',
+    '\\asdf\\',
+    '\\mise\\',
+    '\\rtx\\',
+    '\\program files\\nodejs',
+    '\\program files (x86)\\nodejs',
+  ].filter((signature) => normalizedOpenclawExecutable.includes(signature))
+
+  let fallbackCandidate = ''
+  for (const candidate of candidates) {
+    try {
+      if (!fileExists(candidate)) continue
+      const normalizedCandidate = String(candidate || '').trim().toLowerCase()
+      const isProgramFilesNode =
+        normalizedCandidate.includes('\\program files\\nodejs') ||
+        normalizedCandidate.includes('\\program files (x86)\\nodejs')
+
+      if (prefersGlobalNpmShim && isProgramFilesNode) {
+        return candidate
+      }
+      if (preferredSignatures.some((signature) => normalizedCandidate.includes(signature))) {
+        return candidate
+      }
+      if (!fallbackCandidate && path.dirname(normalizedCandidate) === path.dirname(normalizedOpenclawExecutable)) {
+        fallbackCandidate = candidate
+      }
+    } catch {
+      // Ignore invalid candidate checks and continue probing.
+    }
+  }
+
+  return fallbackCandidate
+}
+
+function buildWindowsInstallSnapshot(input: {
+  binaryPath: string
+  configPath: string
+  hostPackageRoot?: string
+  stateRoot: string
+}): WindowsActiveRuntimeSnapshot | null {
+  if (process.platform !== 'win32') return null
+
+  const openclawExecutable = String(input.binaryPath || '').trim()
+  const stateRoot = String(input.stateRoot || '').trim()
+  const configPath = String(input.configPath || '').trim()
+  if (!openclawExecutable || !stateRoot || !configPath) return null
+
+  return buildWindowsActiveRuntimeSnapshot({
+    openclawExecutable,
+    hostPackageRoot: input.hostPackageRoot,
+    nodeExecutable: resolveClosestWindowsNodeBinary(openclawExecutable),
+    // This is intentionally a lightweight bin-root hint, not a guaranteed
+    // `npm config get prefix` result. Some Windows managers such as Volta
+    // expose command shims from a bin directory that does not equal the real
+    // package prefix, but the current snapshot only uses this field to add
+    // extra executable search candidates.
+    npmPrefix: path.dirname(openclawExecutable),
+    configPath,
+    stateDir: stateRoot,
+    extensionsDir: path.join(stateRoot, 'extensions'),
+    userDataDir: String(process.env.QCLAW_USER_DATA_DIR || '').trim() || undefined,
+  })
+}
+
 async function resolveHistoryDataCandidates(
-  candidates: OpenClawInstallCandidate[]
+  candidates: WindowsInstallSnapshotCandidate[]
 ): Promise<OpenClawHistoryDataCandidate[]> {
   // Treat a state root as historical only when one of its runtime-resolved data files exists.
   // This keeps the empty default ~/.openclaw directory out of history-only flows while still
@@ -375,18 +482,14 @@ async function resolveHistoryDataCandidates(
   ]
 }
 
-export async function discoverOpenClawInstallations(): Promise<OpenClawDiscoveryResult> {
+export async function discoverOpenClawInstallationsFromKnownPaths(input: {
+  activeBinaryPath?: string | null
+  knownPaths?: Array<string | null | undefined>
+} = {}): Promise<WindowsOpenClawDiscoveryResult> {
   const errors: string[] = []
   const warnings: string[] = []
-  const activeBinaryPath = await resolveOpenClawBinaryPath().catch(() => null)
-  const knownPaths = [
-    activeBinaryPath,
-    ...listExecutablePathCandidates('openclaw', {
-      platform: process.platform,
-      env: process.env,
-      currentPath: process.env.PATH || '',
-    }),
-  ]
+  const activeBinaryPath = String(input.activeBinaryPath || '').trim() || null
+  const knownPaths = (input.knownPaths || [])
     .map((candidate) => String(candidate || '').trim())
     .filter(Boolean)
 
@@ -399,7 +502,7 @@ export async function discoverOpenClawInstallations(): Promise<OpenClawDiscovery
     uniquePaths.push(candidatePath)
   }
 
-  const candidates: OpenClawInstallCandidate[] = []
+  const candidates: WindowsInstallSnapshotCandidate[] = []
   const seenFingerprints = new Set<string>()
   for (const candidatePath of uniquePaths) {
     if (!(await pathExists(candidatePath))) continue
@@ -441,4 +544,19 @@ export async function discoverOpenClawInstallations(): Promise<OpenClawDiscovery
     warnings,
     defaultBackupDirectory: formatDisplayPath(resolveDefaultBackupDirectory(), homedir()),
   }
+}
+
+export async function discoverOpenClawInstallations(): Promise<WindowsOpenClawDiscoveryResult> {
+  const activeBinaryPath = await resolveOpenClawBinaryPath().catch(() => null)
+  return discoverOpenClawInstallationsFromKnownPaths({
+    activeBinaryPath,
+    knownPaths: [
+      activeBinaryPath,
+      ...listExecutablePathCandidates('openclaw', {
+        platform: process.platform,
+        env: process.env,
+        currentPath: process.env.PATH || '',
+      }),
+    ],
+  })
 }

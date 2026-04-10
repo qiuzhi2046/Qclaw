@@ -1,4 +1,5 @@
 import { readConfig, runCli, runShell, type CliResult } from './cli'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
 import { classifyGatewayRuntimeState } from '../../src/shared/gateway-runtime-diagnostics'
 import {
   DEFAULT_GATEWAY_PORT,
@@ -7,6 +8,7 @@ import {
   type GatewayRuntimeStateCode,
   resolveGatewayConfiguredPort,
 } from '../../src/shared/gateway-runtime-state'
+import { probeWindowsPortOwner } from './platforms/windows/windows-platform-ops'
 
 const { createServer } = process.getBuiltinModule('node:net') as typeof import('node:net')
 
@@ -66,7 +68,11 @@ export async function probeGatewayServiceInstalled(): Promise<boolean> {
 }
 
 export async function probeGatewayHealthRaw(): Promise<GatewayHealthProbeResult> {
-  const result = await runCli(['health', '--json'], undefined, 'gateway')
+  const result = await runCli(['health', '--json'], undefined, 'gateway', {
+    activeRuntimeSnapshot: getSelectedWindowsActiveRuntimeSnapshot() || undefined,
+    skipConfigRepairPreflight: true,
+    skipPermissionAutoRepair: true,
+  })
   const classification = classifyGatewayRuntimeState(result)
   return {
     ...result,
@@ -85,11 +91,7 @@ export async function probeGatewayPortOwner(port = DEFAULT_GATEWAY_PORT): Promis
   }
 
   if (process.platform === 'win32') {
-    return {
-      kind: 'unknown',
-      port,
-      source: 'powershell',
-    }
+    return probeWindowsPortOwner(port)
   }
 
   const result = await runShell('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], undefined, 'gateway')

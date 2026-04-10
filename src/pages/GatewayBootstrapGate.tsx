@@ -27,6 +27,13 @@ interface FeishuRuntimeStatusSummary {
 }
 
 export interface DashboardEntryBootstrapApi {
+  ensureGatewayRunning: (options?: { skipRuntimePrecheck?: boolean }) => Promise<{
+    ok?: boolean
+    running?: boolean
+    summary?: string
+    stderr?: string
+    stdout?: string
+  }>
   gatewayHealth: () => Promise<GatewayHealthCheckResult>
   readConfig: () => Promise<Record<string, any> | null>
   getModelUpstreamState: () => Promise<Awaited<ReturnType<typeof window.api.getModelUpstreamState>>>
@@ -47,7 +54,21 @@ export interface DashboardEntryBootstrapFlowResult {
 
 type TaskDetailState = Record<DashboardEntryBootstrapTaskKey, string>
 
+interface DashboardEntryBootstrapFlowOptions {
+  onTaskUpdate?: (
+    key: DashboardEntryBootstrapTaskKey,
+    status: DashboardEntryBootstrapTaskStatus,
+    detail: string
+  ) => void
+  gatewayEnsureTimeoutMs?: number
+  modelBootstrapTimeoutMs?: number
+  pairingBootstrapTimeoutMs?: number
+}
+
 const INITIAL_TASK_STATE = createDashboardEntryBootstrapState()
+const DASHBOARD_BOOTSTRAP_GATEWAY_ENSURE_TIMEOUT_MS = 3_000
+const DASHBOARD_BOOTSTRAP_MODEL_TIMEOUT_MS = 750
+const DASHBOARD_BOOTSTRAP_PAIRING_TIMEOUT_MS = 750
 
 const INITIAL_TASK_DETAILS: TaskDetailState = {
   gateway: '读取当前网关状态，运行状态问题会在控制面板内继续处理。',
@@ -57,6 +78,25 @@ const INITIAL_TASK_DETAILS: TaskDetailState = {
 
 function createTaskDetailState(): TaskDetailState {
   return { ...INITIAL_TASK_DETAILS }
+}
+
+async function withTimeoutFallback<T>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise.then((value) => ({ timedOut: false as const, value })),
+      new Promise<{ timedOut: true }>((resolve) => {
+        timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
 }
 
 function createGenericFailureView(
@@ -80,6 +120,101 @@ function summarizeConfig(config: Record<string, any> | null): string {
 function logAndReturnUiWarning(logLabel: string, uiMessage: string, error: unknown): string {
   console.warn(logLabel, error)
   return uiMessage
+}
+
+function resolveGatewayBootstrapSummary(input: {
+  ensureResult?: {
+    ok?: boolean
+    running?: boolean
+    summary?: string
+    stderr?: string
+    stdout?: string
+  } | null
+  health?: GatewayHealthCheckResult | null
+}): string {
+  return String(
+    input.ensureResult?.summary
+      || input.ensureResult?.stderr
+      || input.ensureResult?.stdout
+      || input.health?.summary
+      || ''
+  ).trim()
+}
+
+async function resolveBootstrapModelStatus(
+  api: DashboardEntryBootstrapApi,
+  timeoutMs: number,
+  softWarnings: string[]
+): Promise<Record<string, any> | null> {
+  const deadlineAt = Date.now() + timeoutMs
+  const readWithinBudget = async <T,>(promise: Promise<T>) => {
+    const remainingMs = Math.max(1, deadlineAt - Date.now())
+    return withTimeoutFallback(promise, remainingMs)
+  }
+
+  const upstreamStateResult = await readWithinBudget(
+    readOpenClawUpstreamModelState(api.getModelUpstreamState)
+  )
+  if (upstreamStateResult.timedOut) {
+    softWarnings.push('模型状态整理仍在后台继续，控制面板先按当前已知配置打开。')
+    return null
+  }
+
+  const upstreamModelState = upstreamStateResult.value
+  const upstreamModelStatus = getUpstreamModelStatusLike(upstreamModelState)
+  if (upstreamModelState.fallbackUsed && upstreamModelState.fallbackReason) {
+    softWarnings.push(logAndReturnUiWarning(
+      'model upstream state fallback used',
+      '暂时无法读取最新模型状态，当前先按已有配置显示模型信息。',
+      upstreamModelState.fallbackReason
+    ))
+  }
+  if (upstreamModelStatus) {
+    return upstreamModelStatus
+  }
+
+  const modelStatusResult = await readWithinBudget(api.getModelStatus().catch(() => null))
+  if (modelStatusResult.timedOut) {
+    softWarnings.push('模型状态整理仍在后台继续，控制面板先按当前已知配置打开。')
+    return null
+  }
+
+  const resolvedModelStatus = modelStatusResult.value?.ok
+    ? ((modelStatusResult.value.data as Record<string, any>) || null)
+    : null
+  if (!resolvedModelStatus) {
+    softWarnings.push('模型状态暂时不可用，稍后可在控制面板中刷新。')
+  }
+  return resolvedModelStatus
+}
+
+async function resolveBootstrapPairingSummary(
+  api: DashboardEntryBootstrapApi,
+  config: Record<string, any> | null,
+  timeoutMs: number,
+  notify: (
+    key: DashboardEntryBootstrapTaskKey,
+    status: DashboardEntryBootstrapTaskStatus,
+    detail: string
+  ) => void,
+  softWarnings: string[]
+): Promise<DashboardEntryPairingSummary | null> {
+  notify('pairing', 'active', '正在整理配对状态...')
+  const pairingSummaryResult = await withTimeoutFallback(summarizePairing(api, config), timeoutMs)
+  if (pairingSummaryResult.timedOut) {
+    notify('pairing', 'warning', '连接状态整理仍在后台继续，进入控制面板后可刷新。')
+    softWarnings.push('连接状态整理仍在后台继续，控制面板先按当前已知状态打开。')
+    return null
+  }
+
+  const pairingSummary = pairingSummaryResult.value
+  if (pairingSummary.warnings.length > 0) {
+    notify('pairing', 'warning', pairingSummary.summary)
+    softWarnings.push(...pairingSummary.warnings)
+  } else {
+    notify('pairing', 'done', pairingSummary.summary)
+  }
+  return pairingSummary.data
 }
 
 async function summarizePairing(
@@ -151,19 +286,25 @@ async function summarizePairing(
 
 export async function runDashboardEntryBootstrapFlow(
   api: DashboardEntryBootstrapApi,
-  options: {
-    onTaskUpdate?: (
-      key: DashboardEntryBootstrapTaskKey,
-      status: DashboardEntryBootstrapTaskStatus,
-      detail: string
-    ) => void
-  } = {}
+  options: DashboardEntryBootstrapFlowOptions = {}
 ): Promise<DashboardEntryBootstrapFlowResult> {
   const notify = (
     key: DashboardEntryBootstrapTaskKey,
     status: DashboardEntryBootstrapTaskStatus,
     detail: string
   ) => options.onTaskUpdate?.(key, status, detail)
+  const gatewayEnsureTimeoutMs = Math.max(
+    1,
+    Number(options.gatewayEnsureTimeoutMs || DASHBOARD_BOOTSTRAP_GATEWAY_ENSURE_TIMEOUT_MS)
+  )
+  const modelBootstrapTimeoutMs = Math.max(
+    1,
+    Number(options.modelBootstrapTimeoutMs || DASHBOARD_BOOTSTRAP_MODEL_TIMEOUT_MS)
+  )
+  const pairingBootstrapTimeoutMs = Math.max(
+    1,
+    Number(options.pairingBootstrapTimeoutMs || DASHBOARD_BOOTSTRAP_PAIRING_TIMEOUT_MS)
+  )
 
   notify('config', 'active', '正在读取当前配置...')
   const config = await api.readConfig().catch((error) => {
@@ -183,16 +324,74 @@ export async function runDashboardEntryBootstrapFlow(
     softWarnings.push(logAndReturnUiWarning('gateway health read failed during bootstrap', '暂时无法读取网关状态，控制面板会先按当前已知状态打开。', error))
     return null
   })
-  const gatewayRunning = health?.running === true
+  let gatewayRunning = health?.running === true
+  let gatewayEnsureResult: Awaited<ReturnType<DashboardEntryBootstrapApi['ensureGatewayRunning']>> | null = null
+
+  if (!gatewayRunning) {
+    const gatewayEnsureOutcome = await withTimeoutFallback(
+      api.ensureGatewayRunning({ skipRuntimePrecheck: true }).catch((error) => {
+        console.warn('gateway ensure failed during bootstrap', error)
+        return null
+      }),
+      gatewayEnsureTimeoutMs
+    )
+    if (gatewayEnsureOutcome.timedOut) {
+      console.warn(`gateway ensure timed out during bootstrap after ${gatewayEnsureTimeoutMs}ms`)
+      softWarnings.push('网关仍在后台继续恢复，控制面板先按当前状态打开。')
+    } else {
+      gatewayEnsureResult = gatewayEnsureOutcome.value
+      gatewayRunning = gatewayEnsureResult?.ok === true && gatewayEnsureResult?.running === true
+    }
+  }
+
   if (gatewayRunning) {
-    notify('gateway', 'done', String(health?.summary || '').trim() || '网关状态已读取完成。')
+    notify(
+      'gateway',
+      'done',
+      resolveGatewayBootstrapSummary({
+        ensureResult: gatewayEnsureResult,
+        health,
+      }) || '网关已自动确认可用。'
+    )
   } else {
     const gatewayWarning =
-      String(health?.summary || '').trim() || '网关暂未就绪，进入控制面板后可继续处理。'
-    if (health) {
+      resolveGatewayBootstrapSummary({
+        ensureResult: gatewayEnsureResult,
+        health,
+      }) || '网关暂未就绪，进入控制面板后可继续处理。'
+    if (health || gatewayEnsureResult) {
       softWarnings.push(`网关当前未就绪：${gatewayWarning}`)
     }
     notify('gateway', 'warning', '网关暂未就绪')
+  }
+
+  const [bootstrapModelStatus, bootstrapPairingSummaryData] = await Promise.all([
+    resolveBootstrapModelStatus(api, modelBootstrapTimeoutMs, softWarnings).catch((error) => {
+      softWarnings.push(logAndReturnUiWarning('bootstrap model status assembly failed', '模型状态整理失败。', error))
+      return null
+    }),
+    resolveBootstrapPairingSummary(
+      api,
+      config,
+      pairingBootstrapTimeoutMs,
+      notify,
+      softWarnings
+    ).catch((error) => {
+      notify('pairing', 'warning', '连接状态暂时读取失败，进入控制面板后可重新刷新。')
+      softWarnings.push(logAndReturnUiWarning('pairing summary assembly failed during bootstrap', '连接状态整理失败。', error))
+      return null
+    }),
+  ])
+
+  return {
+    snapshot: {
+      gatewayRunning,
+      config,
+      pairingSummary: bootstrapPairingSummaryData,
+      modelStatus: bootstrapModelStatus,
+      loadedAt: new Date().toISOString(),
+    },
+    softWarnings,
   }
 
   const upstreamModelState = await readOpenClawUpstreamModelState(api.getModelUpstreamState)
@@ -283,6 +482,10 @@ export default function GatewayBootstrapGate({
 
   const runBootstrap = async () => {
     if (bootstrappingRef.current) return
+    void window.api.appendEnvCheckDiagnostic('gateway-bootstrap-run-start', {
+      alreadyBootstrapping: bootstrappingRef.current,
+      activeAttempt: activeAttemptRef.current,
+    }).catch(() => undefined)
     bootstrappingRef.current = true
     setBootstrapping(true)
     activeAttemptRef.current += 1
@@ -296,14 +499,28 @@ export default function GatewayBootstrapGate({
       const result = await runDashboardEntryBootstrapFlow(window.api, {
         onTaskUpdate: updateTask,
       })
+      void window.api.appendEnvCheckDiagnostic('gateway-bootstrap-flow-result', {
+        attemptId,
+        gatewayRunning: result.snapshot.gatewayRunning,
+        softWarningCount: result.softWarnings.length,
+      }).catch(() => undefined)
       if (attemptId !== activeAttemptRef.current) return
       setSoftWarnings(result.softWarnings)
       window.setTimeout(() => {
         if (attemptId === activeAttemptRef.current) {
+          void window.api.appendEnvCheckDiagnostic('gateway-bootstrap-ready', {
+            attemptId,
+            gatewayRunning: result.snapshot.gatewayRunning,
+            softWarningCount: result.softWarnings.length,
+          }).catch(() => undefined)
           onReady(result.snapshot)
         }
       }, 240)
     } catch (cause) {
+      void window.api.appendEnvCheckDiagnostic('gateway-bootstrap-flow-failed', {
+        attemptId,
+        message: cause instanceof Error ? cause.message : String(cause || ''),
+      }).catch(() => undefined)
       if (attemptId !== activeAttemptRef.current) return
       const fallbackView =
         cause && typeof cause === 'object' && 'title' in cause

@@ -62,6 +62,7 @@ describe('getModelCenterCapabilities', () => {
 
     expect(result).toBe(CAPABILITIES)
     expect(loadCapabilities).toHaveBeenCalledTimes(1)
+    expect(loadCapabilities).toHaveBeenCalledWith({ profile: 'bootstrap' })
     expect(discoverCapabilities).not.toHaveBeenCalled()
   })
 
@@ -79,8 +80,37 @@ describe('getModelCenterCapabilities', () => {
 
     expect(result).toBe(CAPABILITIES)
     expect(discoverCapabilities).toHaveBeenCalledTimes(1)
-    expect(discoverCapabilities).toHaveBeenCalledWith({ refreshAuthRegistry: true })
+    expect(discoverCapabilities).toHaveBeenCalledWith({ refreshAuthRegistry: true, profile: 'bootstrap' })
     expect(loadCapabilities).not.toHaveBeenCalled()
+  })
+
+  it('times out and clears the shared capabilities cache when a load never settles', async () => {
+    vi.useFakeTimers()
+
+    const loadCapabilities = vi.fn(
+      () =>
+        new Promise<OpenClawCapabilities>(() => {
+          // Intentionally never settles so the timeout path can be verified.
+        })
+    )
+    const resetCapabilitiesCache = vi.fn()
+
+    const pendingResult = getModelCenterCapabilities(
+      { timeoutMs: 50 } as any,
+      {
+        loadCapabilities,
+        resetCapabilitiesCache,
+      } as any
+    )
+    const rejection = expect(pendingResult).rejects.toThrow('timed out after 50ms')
+
+    await vi.advanceTimersByTimeAsync(50)
+
+    await rejection
+    expect(loadCapabilities).toHaveBeenCalledTimes(1)
+    expect(resetCapabilitiesCache).toHaveBeenCalledTimes(1)
+
+    vi.useRealTimers()
   })
 })
 

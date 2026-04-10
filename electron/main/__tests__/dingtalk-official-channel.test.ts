@@ -143,7 +143,6 @@ describe('setupDingtalkOfficialChannel', () => {
               enabled: true,
               clientId: 'cli_ding',
               clientSecret: 'ding-secret',
-              gatewayToken: 'gw-token',
             }),
           },
         }),
@@ -183,7 +182,7 @@ describe('setupDingtalkOfficialChannel', () => {
     )
   })
 
-  it('reuses an on-disk official plugin and still reloads gateway when config is already up to date', async () => {
+  it('reuses an on-disk official plugin, removes legacy gatewayToken, and reloads gateway', async () => {
     readConfigMock.mockResolvedValue({
       gateway: {
         auth: {
@@ -231,6 +230,21 @@ describe('setupDingtalkOfficialChannel', () => {
     })
     expect(installPluginMock).not.toHaveBeenCalled()
     expect(uninstallPluginMock).not.toHaveBeenCalled()
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        afterConfig: expect.objectContaining({
+          channels: {
+            'dingtalk-connector': expect.not.objectContaining({
+              gatewayToken: expect.anything(),
+            }),
+          },
+        }),
+      }),
+      undefined,
+      {
+        applyGatewayPolicy: false,
+      }
+    )
     expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledTimes(1)
     expect(result.ok).toBe(true)
     expect(result.installedThisRun).toBe(false)

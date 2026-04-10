@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_BUNDLED_NODE_REQUIREMENT,
   DEFAULT_NODE_DIST_BASE_URL,
@@ -114,13 +114,41 @@ describe('resolveNodeInstallPlan', () => {
       version: 'v22.22.1',
       requiredVersion: '22.16.0',
       source: 'official-dist-index',
+      artifactKind: 'pkg',
       installerArch: 'universal',
       filename: 'node-v22.22.1.pkg',
       url: `${DEFAULT_NODE_DIST_BASE_URL}/v22.22.1/node-v22.22.1.pkg`,
     })
   })
 
-  it('falls back to x64 MSI on Windows arm64 hardware when the dist index has no arm64 MSI', async () => {
+  it('uses the Windows x64 zip artifact for private Node runtime installs', async () => {
+    const plan = await resolveNodeInstallPlan({
+      platform: 'win32',
+      processArch: 'x64',
+      env: buildTestEnv({
+        PROCESSOR_ARCHITECTURE: 'AMD64',
+      }),
+      readInstalledOpenClawPackageJson: async () => ({
+        engines: {
+          node: '>=22.16.0',
+        },
+      }),
+    })
+
+    expect(plan).toMatchObject({
+      version: 'v24.14.1',
+      requiredVersion: '22.16.0',
+      source: 'bundled-fallback',
+      artifactKind: 'zip',
+      platform: 'win32',
+      detectedArch: 'x64',
+      installerArch: 'x64',
+      filename: 'node-v24.14.1-win-x64.zip',
+      url: `${DEFAULT_NODE_DIST_BASE_URL}/v24.14.1/node-v24.14.1-win-x64.zip`,
+    })
+  })
+
+  it('uses the Windows arm64 zip artifact for private Node runtime installs', async () => {
     const plan = await resolveNodeInstallPlan({
       platform: 'win32',
       processArch: 'x64',
@@ -133,20 +161,49 @@ describe('resolveNodeInstallPlan', () => {
           node: '>=22.16.0',
         },
       }),
-      fetchNodeDistIndex: async () => [
-        {
-          version: 'v24.14.0',
-          lts: 'Krypton',
-          files: ['win-x64-msi', 'win-x64-exe', 'win-arm64-zip'],
-        },
-      ],
     })
 
     expect(plan).toMatchObject({
-      version: 'v24.14.0',
+      version: 'v24.14.1',
+      requiredVersion: '22.16.0',
+      source: 'bundled-fallback',
+      artifactKind: 'zip',
+      platform: 'win32',
       detectedArch: 'arm64',
-      installerArch: 'x64',
-      filename: 'node-v24.14.0-x64.msi',
+      installerArch: 'arm64',
+      filename: 'node-v24.14.1-win-arm64.zip',
+      url: `${DEFAULT_NODE_DIST_BASE_URL}/v24.14.1/node-v24.14.1-win-arm64.zip`,
+    })
+  })
+
+  it('skips dynamic OpenClaw requirement probing for Windows bootstrap install plans', async () => {
+    const readInstalledOpenClawPackageJson = vi.fn(async () => {
+      throw new Error('openclaw command lookup should not run')
+    })
+    const fetchOpenClawMetadata = vi.fn(async () => {
+      throw new Error('openclaw registry lookup should not run')
+    })
+
+    const plan = await resolveNodeInstallPlan({
+      platform: 'win32',
+      processArch: 'x64',
+      env: buildTestEnv({
+        PROCESSOR_ARCHITECTURE: 'AMD64',
+      }),
+      readInstalledOpenClawPackageJson,
+      fetchOpenClawMetadata,
+      skipDynamicOpenClawRequirementProbe: true,
+    })
+
+    expect(readInstalledOpenClawPackageJson).not.toHaveBeenCalled()
+    expect(fetchOpenClawMetadata).not.toHaveBeenCalled()
+    expect(plan).toMatchObject({
+      version: 'v24.14.1',
+      requiredVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
+      requirementSource: 'bundled-fallback',
+      platform: 'win32',
+      artifactKind: 'zip',
+      filename: 'node-v24.14.1-win-x64.zip',
     })
   })
 
@@ -166,9 +223,27 @@ describe('resolveNodeInstallPlan', () => {
       version: 'v20.20.1',
       requiredVersion: '20.0.0',
       source: 'env-override',
-      filename: 'node-v20.20.1-x64.msi',
-      url: 'https://mirror.example.com/node/v20.20.1/node-v20.20.1-x64.msi',
+      artifactKind: 'zip',
+      filename: 'node-v20.20.1-win-x64.zip',
+      url: 'https://mirror.example.com/node/v20.20.1/node-v20.20.1-win-x64.zip',
     })
+  })
+
+  it('rejects Windows x86 private Node zip plans', async () => {
+    await expect(
+      resolveNodeInstallPlan({
+        platform: 'win32',
+        processArch: 'ia32',
+        env: buildTestEnv({
+          PROCESSOR_ARCHITECTURE: 'x86',
+        }),
+        readInstalledOpenClawPackageJson: async () => ({
+          engines: {
+            node: '>=24.14.1',
+          },
+        }),
+      })
+    ).rejects.toThrow('Unsupported Windows Node zip architecture: x86')
   })
 
   it('falls back to a bundled LTS release when the remote dist index is unavailable', async () => {
@@ -189,6 +264,7 @@ describe('resolveNodeInstallPlan', () => {
       version: 'v22.22.1',
       requiredVersion: '22.16.0',
       source: 'bundled-fallback',
+      artifactKind: 'pkg',
       installerArch: 'universal',
       filename: 'node-v22.22.1.pkg',
       url: `${DEFAULT_NODE_DIST_BASE_URL}/v22.22.1/node-v22.22.1.pkg`,
@@ -210,11 +286,21 @@ describe('resolveNodeInstallPlan', () => {
     try {
       const fallbackPlan = await resolveNodeInstallPlan()
 
-      expect(fallbackPlan).toMatchObject({
-        version: 'v22.22.1',
-        source: 'bundled-fallback',
-        requiredVersion: '22.16.0',
-      })
+      if (process.platform === 'win32') {
+        expect(fallbackPlan).toMatchObject({
+          version: 'v24.14.1',
+          source: 'bundled-fallback',
+          requiredVersion: '22.16.0',
+          artifactKind: 'zip',
+        })
+      } else {
+        expect(fallbackPlan).toMatchObject({
+          version: 'v22.22.1',
+          source: 'bundled-fallback',
+          requiredVersion: '22.16.0',
+          artifactKind: 'pkg',
+        })
+      }
 
       process.env.QCLAW_NODE_INSTALL_VERSION = '24.14.0'
       const plan = await resolveNodeInstallPlan()
@@ -223,6 +309,7 @@ describe('resolveNodeInstallPlan', () => {
         version: 'v24.14.0',
         source: 'env-override',
         requiredVersion: '22.16.0',
+        artifactKind: process.platform === 'win32' ? 'zip' : 'pkg',
       })
     } finally {
       resetNodeInstallationPolicyCache()

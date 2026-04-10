@@ -35,7 +35,6 @@ import { runManagedChannelRepairFlow } from '../shared/managed-channel-repair'
 import ChannelCard from '../components/ChannelCard'
 import { resolveManagedChannelIdentity } from '../shared/managed-channel-identity'
 import { getManagedChannelPluginByChannelId } from '../shared/managed-channel-plugin-registry'
-import { readOpenClawUpstreamModelState } from '../shared/upstream-model-state'
 
 interface ChannelInfo {
   id: string
@@ -179,6 +178,7 @@ export default function ChannelsPage() {
     configData?: Record<string, any> | null
     statusData?: Record<string, any> | null
     preferredModelKey?: string
+    catalogItems?: Awaited<ReturnType<typeof window.api.listModelCatalog>>['items'] | null
   }): Promise<ModelSelectOption[]> => {
     if (shouldReuseModelOptionsCache(options) && modelOptionsCacheRef.current.length > 0) {
       return modelOptionsCacheRef.current
@@ -186,7 +186,6 @@ export default function ChannelsPage() {
 
     const nextOptions = await loadReadyModelSelectOptions(window.api.listModelCatalog, {
       ...options,
-      readUpstreamState: () => readOpenClawUpstreamModelState(),
     })
     modelOptionsCacheRef.current = nextOptions
     return nextOptions
@@ -421,19 +420,34 @@ export default function ChannelsPage() {
     setSelectedModelValue(null)
 
     try {
-      const [statusResult, envVars, configData] = await Promise.all([
-        window.api.getModelStatus({ agentId: channel.agentId }),
-        window.api.readEnvFile().catch(() => null),
-        window.api.readConfig().catch(() => null),
-      ])
+      const snapshot = await window.api.getModelSnapshot({
+        includeEnv: true,
+        includeCatalog: true,
+        statusOptions: {
+          agentId: channel.agentId,
+        },
+      })
       let nextOptions = modelOptionsCacheRef.current
       let nextRuntimeModel = ''
-      const errors: string[] = []
-      const statusData = statusResult.ok
-        ? ((statusResult.data || null) as Record<string, any> | null)
-        : null
+      const errors: string[] = [...snapshot.warnings]
+      const envVars = snapshot.envVars
+      const configData = snapshot.config
+      const statusData = snapshot.modelStatus
+      const statusResult = statusData
+        ? {
+            ok: true,
+            data: statusData,
+            message: '',
+            stderr: '',
+          }
+        : {
+            ok: false,
+            data: null,
+            message: '',
+            stderr: '',
+          }
 
-      if (statusResult.ok) {
+      if (statusData) {
         nextRuntimeModel = extractPrimaryModelFromModelStatusPayload(statusData)
       } else {
         errors.push(statusResult.message || statusResult.stderr || '读取当前机器人模型失败')
@@ -446,6 +460,7 @@ export default function ChannelsPage() {
           configData,
           statusData,
           preferredModelKey: nextRuntimeModel,
+          catalogItems: snapshot.catalog?.items || [],
         })
       } catch (reason) {
         errors.push(`读取模型目录失败: ${reason instanceof Error ? reason.message : 'unknown error'}`)

@@ -1,6 +1,7 @@
 import { pruneStalePluginConfigEntries } from './openclaw-config-warnings'
 import { runNodeEvalWithQualifiedRuntime } from './node-subprocess-runtime'
 import { formatDisplayPath } from './openclaw-paths'
+import { ensureWindowsPluginHostRuntimeBridge } from './platforms/windows/windows-plugin-runtime-bridge'
 import {
   getManagedChannelPluginByPluginId,
   isOfficialManagedPluginId,
@@ -38,7 +39,10 @@ export interface RepairIncompatibleExtensionsResult extends ReconcileIncompatibl
 
 interface PluginInstallSafetyOptions {
   homeDir: string
+  hostOpenClawPackageRoot?: string
+  platform?: NodeJS.Platform
   readConfig?: () => Promise<Record<string, any> | null>
+  resolveHostOpenClawPackageRoot?: () => Promise<string | null>
   writeConfig?: (config: Record<string, any>) => Promise<void>
   now?: () => number
   runNodeEval?: typeof runNodeEvalWithQualifiedRuntime
@@ -89,6 +93,22 @@ function hasOwnRecord(value: unknown): value is Record<string, any> {
 
 function normalizeComparablePath(value: string): string {
   return value ? path.resolve(value) : ''
+}
+
+function isHiddenInstallStagePath(homeDir: string, candidatePath: string): boolean {
+  const normalizedCandidatePath = normalizeComparablePath(candidatePath)
+  if (!normalizedCandidatePath) return false
+
+  const extensionsRoot = normalizeComparablePath(path.join(homeDir, 'extensions'))
+  if (!extensionsRoot) return false
+
+  const relativePath = path.relative(extensionsRoot, normalizedCandidatePath)
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return false
+  }
+
+  const firstSegment = relativePath.split(path.sep)[0] || ''
+  return firstSegment.startsWith('.openclaw-install-stage-')
 }
 
 function looksLikePluginSdkResolutionFailure(error: unknown): boolean {
@@ -216,10 +236,17 @@ async function smokeTestPluginEntry(
 async function findIncompatibleExtensionPlugins(
   options: Pick<
     PluginInstallSafetyOptions,
-    'homeDir' | 'runNodeEval' | 'scopePluginIds' | 'quarantineOfficialManagedPlugins'
+    | 'homeDir'
+    | 'hostOpenClawPackageRoot'
+    | 'platform'
+    | 'quarantineOfficialManagedPlugins'
+    | 'resolveHostOpenClawPackageRoot'
+    | 'runNodeEval'
+    | 'scopePluginIds'
   >
 ): Promise<IncompatibleExtensionPlugin[]> {
   const homeDir = options.homeDir
+  const platform = options.platform || process.platform
   const scopedPluginIds = normalizePluginIds(options.scopePluginIds)
   const extensionsDir = path.join(homeDir, 'extensions')
   let entries: Array<import('node:fs').Dirent<string>>
@@ -231,6 +258,14 @@ async function findIncompatibleExtensionPlugins(
   }
 
   const incompatible: IncompatibleExtensionPlugin[] = []
+  if (platform === 'win32') {
+    await ensureWindowsPluginHostRuntimeBridge({
+      homeDir,
+      hostOpenClawPackageRoot: options.hostOpenClawPackageRoot,
+      platform,
+      resolveHostOpenClawPackageRoot: options.resolveHostOpenClawPackageRoot,
+    }).catch(() => null)
+  }
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
@@ -310,7 +345,8 @@ async function pathExists(targetPath: string): Promise<boolean> {
 async function findOrphanedManagedPluginConfigIds(
   homeDir: string,
   config: Record<string, any> | null | undefined,
-  scopePluginIds: string[] = []
+  scopePluginIds: string[] = [],
+  platform: NodeJS.Platform = process.platform
 ): Promise<string[]> {
   if (!config || typeof config !== 'object') return []
 
@@ -348,6 +384,16 @@ async function findOrphanedManagedPluginConfigIds(
     )
 
     if (hasNonCanonicalInstallPath) {
+      if (platform === 'win32') {
+        if (await pathExists(canonicalInstallPath)) continue
+        const hasExistingConfiguredInstallPath = await Promise.all(
+          configuredInstallPaths.map(async (configuredInstallPath) =>
+            !isHiddenInstallStagePath(homeDir, configuredInstallPath)
+            && await pathExists(configuredInstallPath)
+          )
+        ).then((results) => results.some(Boolean))
+        if (hasExistingConfiguredInstallPath) continue
+      }
       orphanedPluginIds.push(pluginId)
       continue
     }
@@ -450,10 +496,11 @@ export async function reconcileIncompatibleExtensionPlugins(
     }
   }
   const orphanedPluginIds = normalizedScopePluginIds.length > 0
-    ? await findOrphanedManagedPluginConfigIds(
+      ? await findOrphanedManagedPluginConfigIds(
         options.homeDir,
         currentConfig,
-        normalizedScopePluginIds
+        normalizedScopePluginIds,
+        options.platform
       )
     : []
   const stalePluginIds = normalizePluginIds([...quarantinedPluginIds, ...orphanedPluginIds])

@@ -54,6 +54,28 @@ function ok(stdout: string): CliCommandResult {
 }
 
 describe('getModelCatalog', () => {
+  it('loads bootstrap capabilities for live catalog reads by default', async () => {
+    const loadCapabilities = vi.fn(async () => ({
+      supports: {
+        modelsListAllJson: true,
+      },
+      commandFlags: {
+        'models list': ['--all', '--json'],
+      },
+    }) as any)
+    const runCommand = vi.fn(async () => ok(JSON.stringify({ models: SAMPLE_MODELS })))
+
+    const result = await getModelCatalog({
+      loadCapabilities,
+      runCommand,
+      now: () => new Date('2026-03-12T00:00:00.000Z'),
+      query: { bypassCache: true },
+    })
+
+    expect(loadCapabilities).toHaveBeenCalledWith({ profile: 'bootstrap' })
+    expect(result.source).toBe('live')
+  })
+
   it('returns live catalog with provider/search filter and pagination', async () => {
     const writeCache = vi.fn(async () => {})
     const runCommand = vi.fn(async () => ok(JSON.stringify({ count: SAMPLE_MODELS.length, models: SAMPLE_MODELS })))

@@ -118,7 +118,7 @@ describe('official channel adapters', () => {
     expect(result.stages.find((stage) => stage.id === 'ready')?.state).toBe('unknown')
   })
 
-  it('retries plugins list once after stale plugin repair so registration evidence can recover', async () => {
+  it('does not auto-repair stale plugin warnings during registration evidence reads', async () => {
     getFeishuOfficialPluginStateMock.mockResolvedValue({
       pluginId: 'openclaw-lark',
       installedOnDisk: true,
@@ -128,24 +128,13 @@ describe('official channel adapters', () => {
       configChanged: false,
       normalizedConfig: {},
     })
-    runCliMock
-      .mockResolvedValueOnce({
-        ok: true,
-        stdout:
-          'Config warnings:\n- plugins.allow: plugin not found: fake-stale-plugin (stale config entry ignored; remove it from plugins config)',
-        stderr: '',
-        code: 0,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        stdout: JSON.stringify({
-          plugins: [
-            { id: 'openclaw-lark' },
-          ],
-        }),
-        stderr: '',
-        code: 0,
-      })
+    runCliMock.mockResolvedValueOnce({
+      ok: true,
+      stdout:
+        'Config warnings:\n- plugins.allow: plugin not found: fake-stale-plugin (stale config entry ignored; remove it from plugins config)',
+      stderr: '',
+      code: 0,
+    })
     repairStalePluginConfigFromCommandResultMock.mockResolvedValue({
       stalePluginIds: ['fake-stale-plugin'],
       changed: true,
@@ -155,10 +144,9 @@ describe('official channel adapters', () => {
     const { getOfficialChannelStatus } = await import('../official-channel-adapters')
     const result = await getOfficialChannelStatus('feishu')
 
-    expect(runCliMock).toHaveBeenCalledTimes(2)
-    expect(repairStalePluginConfigFromCommandResultMock).toHaveBeenCalledTimes(1)
-    expect(result.summary).toContain('已安装并已注册')
-    expect(result.stages.find((stage) => stage.id === 'registered')?.state).toBe('verified')
+    expect(runCliMock).toHaveBeenCalledTimes(1)
+    expect(repairStalePluginConfigFromCommandResultMock).not.toHaveBeenCalled()
+    expect(result.stages.find((stage) => stage.id === 'registered')?.state).toBe('unknown')
   })
 
   it('maps Feishu repair to the shared official adapter result shape', async () => {

@@ -2,15 +2,15 @@
  * OpenClaw CLI wrapper — all interactions via spawn
  */
 import type { ChildProcess } from 'node:child_process'
-import { homedir, tmpdir, userInfo } from 'os'
-import { dirname, join, resolve as resolvePath } from 'path'
-import { access, readFile, writeFile, mkdir, stat, lstat, unlink } from 'fs/promises'
-import { createWriteStream, existsSync } from 'fs'
-import https from 'https'
+import { access, lstat, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { createWriteStream, existsSync } from 'node:fs'
+import https from 'node:https'
+import { homedir, tmpdir, userInfo } from 'node:os'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import { atomicWriteJson } from './atomic-write'
 import { applyEnvFileUpdates } from './env-file'
 import { createOAuthOutputScanner, shouldAutoOpenBrowserForArgs } from './oauth-browser'
-import { normalizeAuthChoice, resolveOpenClawCommand } from './openclaw-spawn'
+import { normalizeAuthChoice } from './openclaw-spawn'
 import { resolveStdioForCommand } from './cli-process'
 import { buildMacDeveloperToolsProbeEnv } from './mac-developer-tools'
 import {
@@ -58,6 +58,7 @@ import {
   shouldAllowMacOpenClawAdminFallbackByProbe,
 } from './openclaw-admin-fallback-policy'
 import { sanitizeManagedPluginConfig } from './openclaw-plugin-config'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import { restoreConfiguredManagedChannelPlugins } from './managed-channel-plugin-restore'
 import {
   buildIncompatiblePluginRepairSummary,
@@ -66,14 +67,43 @@ import {
   reconcileIncompatibleExtensionPlugins,
   type RepairIncompatibleExtensionsResult,
 } from './plugin-install-safety'
-import { isOfficialManagedPluginId } from '../../src/shared/managed-channel-plugin-registry'
+import {
+  getManagedChannelPluginByChannelId,
+  isOfficialManagedPluginId,
+} from '../../src/shared/managed-channel-plugin-registry'
 import { repairKnownProviderConfigGaps, repairKnownProviderConfigGapsOnDisk } from './openclaw-provider-config-repair'
 import {
   mutatePairingAllowFromInConfig,
   normalizePairingAllowFromList,
   resolvePairingConfigTarget,
 } from './pairing-allowfrom-config'
-import { buildCliPathWithCandidates } from './runtime-path-discovery'
+import type { OpenClawDiscoveryResult } from '../../src/shared/openclaw-phase1'
+import { buildCliPathWithCandidates, listExecutablePathCandidates } from './runtime-path-discovery'
+import { resolveBoundOpenClawCommand } from './openclaw-runtime-invocation'
+import { ensureWindowsPrivateNodeRuntime } from './platforms/windows/windows-private-node-runtime'
+import {
+  buildWindowsActiveRuntimeSnapshot,
+  buildWindowsSelectedRuntimeSnapshotFields,
+  resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable,
+  reuseWindowsSelectedRuntimeSnapshotFields,
+  resolveWindowsPrivateOpenClawRuntimePaths,
+  resolveWindowsPrivateNodeRuntimePaths,
+  selectAuthoritativeWindowsActiveRuntimeSnapshot,
+  type WindowsActiveRuntimeSnapshot,
+} from './platforms/windows/windows-runtime-policy'
+import { rankWindowsActiveRuntimeDiscoveryCandidates } from './platforms/windows/windows-runtime-selection'
+import {
+  normalizeWindowsChannelRuntimeSnapshot,
+  type WindowsChannelRuntimeSnapshot,
+  type WindowsManagedPluginSnapshot,
+  type WindowsResolvedChannelBinding,
+} from './platforms/windows/windows-channel-runtime-snapshot'
+import {
+  clearCachedWindowsChannelRuntimeSnapshot,
+  readCachedWindowsChannelRuntimeSnapshot,
+  replaceCachedWindowsChannelRuntimeSnapshot,
+  reconcileWindowsChannelRuntimeSelection,
+} from './platforms/windows/windows-channel-runtime-reconcile'
 import { inspectMacNodeInstaller, type NodeInstallerReadinessResult } from './node-installer-checks'
 import { isSkipConfigUnsupportedError, shouldTryLegacySkipConfig } from './plugin-install-npx'
 import {
@@ -102,11 +132,18 @@ import {
   runCliLikeWithPermissionAutoRepair,
   runFsWithPermissionAutoRepair,
 } from './openclaw-permission-auto-repair'
-import { resolveOpenClawBinaryPath, resolveOpenClawBinaryPathFromNpmPrefix } from './openclaw-package'
+import {
+  resolveOpenClawBinaryPath,
+  resolveOpenClawBinaryPathFromNpmPrefix,
+  resolveOpenClawPackageRoot,
+} from './openclaw-package'
 import { buildOnboardCommand, collectOnboardValueFlags } from './openclaw-command-builder'
+import { parseJsonFromCommandResult } from './openclaw-command-output'
 import type { RepairStalePluginConfigFromCommandResult } from './openclaw-config-warnings'
 import type { OpenClawPaths } from './openclaw-paths'
+import { resolveOpenClawPaths } from './openclaw-paths'
 import { rerunReadOnlyCommandAfterStalePluginRepair } from './openclaw-readonly-stale-plugin-repair'
+import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
 import { resetRuntimeOpenClawPathsCache, resolveRuntimeOpenClawPaths } from './openclaw-runtime-paths'
 import { isProviderConfiguredInStatus } from './openclaw-status'
 import {
@@ -143,10 +180,566 @@ import {
 import { resolvePairingApproveErrorCode, type PairingApproveErrorCode } from '../../src/shared/pairing-protocol'
 import { classifyGatewayRuntimeState } from '../../src/shared/gateway-runtime-diagnostics'
 import type { GatewayRuntimeStateCode } from '../../src/shared/gateway-runtime-state'
+import {
+  clearSelectedWindowsActiveRuntimeSnapshot,
+  getSelectedWindowsActiveRuntimeSnapshot,
+  setSelectedWindowsActiveRuntimeSnapshot,
+} from './windows-active-runtime'
+import {
+  discoverOpenClawInstallations,
+  discoverOpenClawInstallationsFromKnownPaths,
+} from './openclaw-install-discovery'
 
 // 记录检测到的 Node.js bin 目录，用于后续找 npm
 let detectedNodeBinDir: string | null = null
 let openClawConfigRepairPreflightPromise: Promise<void> | null = null
+let selectedWindowsActiveRuntimeSnapshotPromise: Promise<WindowsActiveRuntimeSnapshot | null> | null = null
+
+function normalizeRuntimePathForCompare(value: string | null | undefined): string {
+  const trimmed = String(value || '').trim()
+  return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed
+}
+
+function clearSelectedWindowsRuntimeSnapshot(): void {
+  if (process.platform !== 'win32') return
+  selectedWindowsActiveRuntimeSnapshotPromise = null
+  clearSelectedWindowsActiveRuntimeSnapshot()
+  clearCachedWindowsChannelRuntimeSnapshot()
+}
+
+function rememberDetectedNodeBinDir(nextBinDir: string | null | undefined): string | null {
+  const normalizedNext = String(nextBinDir || '').trim() || null
+  if (normalizeRuntimePathForCompare(detectedNodeBinDir) !== normalizeRuntimePathForCompare(normalizedNext)) {
+    clearSelectedWindowsRuntimeSnapshot()
+  }
+  detectedNodeBinDir = normalizedNext
+  return detectedNodeBinDir
+}
+
+function getCurrentWindowsActiveRuntimeSnapshot(): WindowsActiveRuntimeSnapshot | null {
+  if (process.platform !== 'win32') return null
+  return getSelectedWindowsActiveRuntimeSnapshot()
+}
+
+async function resolveWindowsActiveRuntimeSnapshotForRead(
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
+): Promise<WindowsActiveRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+  if (activeRuntimeSnapshot) return activeRuntimeSnapshot
+
+  const cachedRuntimeSnapshot = getCurrentWindowsActiveRuntimeSnapshot()
+  if (cachedRuntimeSnapshot) return cachedRuntimeSnapshot
+
+  // Read-only paths can still derive the selected private runtime directly
+  // without committing or reconciling runtime state.
+  return resolveSelectedWindowsOpenClawRuntimeSnapshot()
+}
+
+async function canAccessPath(targetPath: string): Promise<boolean> {
+  const trimmed = String(targetPath || '').trim()
+  if (!trimmed) return false
+  try {
+    await access(trimmed)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function inspectSelectedWindowsOpenClawRuntimeCompleteness(): Promise<boolean> {
+  if (process.platform !== 'win32') return true
+
+  await appendEnvCheckDiagnostic('main-openclaw-completeness-check-start', {})
+  const activeRuntimeSnapshot = await resolveSelectedWindowsOpenClawRuntimeSnapshot()
+  if (!activeRuntimeSnapshot) {
+    const nodeExecutable = await resolveSelectedWindowsNodeExecutablePath()
+    const requiredRuntimePaths = resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable(
+      nodeExecutable,
+      {
+        env: process.env,
+      }
+    )
+    const completeWithoutSnapshot = requiredRuntimePaths ? false : true
+    await appendEnvCheckDiagnostic('main-openclaw-completeness-check-result', {
+      hasActiveRuntimeSnapshot: false,
+      nodeExecutable: nodeExecutable || null,
+      complete: completeWithoutSnapshot,
+      requiredRuntimePathsDetected: Boolean(requiredRuntimePaths),
+    })
+    return completeWithoutSnapshot
+  }
+
+  const completeWithSnapshot = await canAccessWindowsActiveRuntimeSnapshot(activeRuntimeSnapshot)
+  await appendEnvCheckDiagnostic('main-openclaw-completeness-check-result', {
+    hasActiveRuntimeSnapshot: true,
+    nodeExecutable: activeRuntimeSnapshot.nodePath || null,
+    openclawPath: activeRuntimeSnapshot.openclawPath || null,
+    complete: completeWithSnapshot,
+  })
+  return completeWithSnapshot
+}
+
+async function resolveSelectedWindowsNodeExecutablePath(): Promise<string> {
+  if (process.platform !== 'win32') return ''
+
+  const candidates = listExecutablePathCandidates('node', {
+    platform: 'win32',
+    currentPath: process.env.PATH || '',
+    detectedNodeBinDir,
+    env: process.env,
+  })
+
+  for (const candidate of candidates) {
+    if (await canAccessPath(candidate)) {
+      return candidate
+    }
+  }
+
+  return ''
+}
+
+async function resolveSelectedWindowsOpenClawRuntimeSnapshot(): Promise<WindowsActiveRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+
+  const nodeExecutable = await resolveSelectedWindowsNodeExecutablePath()
+  if (!nodeExecutable) return null
+
+  const requiredRuntimePaths = resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable(
+    nodeExecutable,
+    {
+      env: process.env,
+    }
+  )
+  if (!requiredRuntimePaths) return null
+
+  const openClawPaths = await resolveRuntimeOpenClawPaths({
+    binaryPath: requiredRuntimePaths.openclawExecutable,
+    platform: 'win32',
+    env: process.env,
+  }).catch(() => null)
+  if (!openClawPaths?.homeDir || !openClawPaths.configFile) return null
+
+  const privateRuntimeSnapshot = buildWindowsActiveRuntimeSnapshot({
+    openclawExecutable: requiredRuntimePaths.openclawExecutable,
+    hostPackageRoot: requiredRuntimePaths.hostPackageRoot,
+    nodeExecutable,
+    npmPrefix: resolveWindowsPrivateOpenClawRuntimePaths({
+      env: process.env,
+    }).npmPrefix,
+    configPath: openClawPaths.configFile,
+    stateDir: openClawPaths.homeDir,
+    extensionsDir: join(openClawPaths.homeDir, 'extensions'),
+    userDataDir: String(process.env.QCLAW_USER_DATA_DIR || '').trim() || undefined,
+  })
+  if (await canAccessWindowsActiveRuntimeSnapshot(privateRuntimeSnapshot)) {
+    return privateRuntimeSnapshot
+  }
+
+  return null
+}
+
+async function canAccessWindowsActiveRuntimeSnapshot(
+  snapshot: WindowsActiveRuntimeSnapshot | null | undefined
+): Promise<boolean> {
+  const candidate = snapshot || null
+  if (!candidate) return false
+
+  const nodePath = String(candidate.nodePath || '').trim()
+  const openclawPath = String(candidate.openclawPath || '').trim()
+  const hostPackageRoot = String(candidate.hostPackageRoot || '').trim()
+  if (!nodePath || !openclawPath || !hostPackageRoot) return false
+
+  const [nodeExists, openclawExists, hostPackageRootExists] = await Promise.all([
+    canAccessPath(nodePath),
+    canAccessPath(openclawPath),
+    canAccessPath(hostPackageRoot),
+  ])
+  return nodeExists && openclawExists && hostPackageRootExists
+}
+
+async function discoverWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+
+  const selectedRuntimeSnapshot = await resolveSelectedWindowsOpenClawRuntimeSnapshot()
+  if (selectedRuntimeSnapshot) {
+    return selectedRuntimeSnapshot
+  }
+
+  const nodeExecutable = await resolveSelectedWindowsNodeExecutablePath()
+  if (!nodeExecutable) return null
+
+  const discovery = await discoverOpenClawInstallations().catch(() => null)
+  const rankedCandidates = rankWindowsActiveRuntimeDiscoveryCandidates(
+    (discovery?.candidates || []).flatMap((candidate) =>
+      candidate.activeRuntimeSnapshot
+        ? [
+            {
+              snapshot: candidate.activeRuntimeSnapshot,
+              isPathActive: candidate.isPathActive,
+            },
+          ]
+        : []
+    ),
+    {
+      env: process.env,
+    }
+  )
+
+  const selectedCandidate = await selectAuthoritativeWindowsActiveRuntimeSnapshot(rankedCandidates, {
+    env: process.env,
+    isSnapshotComplete: canAccessWindowsActiveRuntimeSnapshot,
+  })
+  if (selectedCandidate) {
+    return selectedCandidate
+  }
+
+  const openclawExecutable = await resolveOpenClawBinaryPath({
+    platform: 'win32',
+    env: process.env,
+  }).catch(() => '')
+  if (!openclawExecutable) return null
+  const hostPackageRoot = await resolveOpenClawPackageRoot({
+    binaryPath: openclawExecutable,
+    env: process.env,
+    platform: 'win32',
+  }).catch(() => '')
+
+  const openClawPaths = await resolveRuntimeOpenClawPaths({
+    binaryPath: openclawExecutable,
+    platform: 'win32',
+    env: process.env,
+  }).catch(() => null)
+  if (!openClawPaths?.homeDir || !openClawPaths.configFile) return null
+
+  return buildWindowsActiveRuntimeSnapshot({
+    openclawExecutable,
+    hostPackageRoot,
+    nodeExecutable,
+    npmPrefix: dirname(openclawExecutable),
+    configPath: openClawPaths.configFile,
+    stateDir: openClawPaths.homeDir,
+    extensionsDir: join(openClawPaths.homeDir, 'extensions'),
+    userDataDir: String(process.env.QCLAW_USER_DATA_DIR || '').trim() || undefined,
+  })
+}
+
+async function ensureSelectedWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+
+  const existingSnapshot = getSelectedWindowsActiveRuntimeSnapshot()
+  if (existingSnapshot) return existingSnapshot
+  if (selectedWindowsActiveRuntimeSnapshotPromise) {
+    return selectedWindowsActiveRuntimeSnapshotPromise
+  }
+
+  const discoveryPromise = (async () => {
+    const discoveredSnapshot = await discoverWindowsActiveRuntimeSnapshot()
+    if (!discoveredSnapshot) return null
+    return commitSelectedWindowsActiveRuntimeSnapshot(discoveredSnapshot)
+  })()
+  selectedWindowsActiveRuntimeSnapshotPromise = discoveryPromise
+
+  try {
+    return await discoveryPromise
+  } finally {
+    if (selectedWindowsActiveRuntimeSnapshotPromise === discoveryPromise) {
+      selectedWindowsActiveRuntimeSnapshotPromise = null
+    }
+  }
+}
+
+function hasOwnRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isFeishuSnapshotConfigured(config: Record<string, any> | null | undefined): boolean {
+  const feishuConfig = config?.channels?.feishu
+  if (hasOwnRecord(feishuConfig)) {
+    if (normalizeText(feishuConfig.appId) || normalizeText(feishuConfig.appSecret)) return true
+    if (hasOwnRecord(feishuConfig.accounts) && Object.keys(feishuConfig.accounts).length > 0) return true
+  }
+
+  const bindings = Array.isArray(config?.bindings) ? config.bindings : []
+  return bindings.some((binding) => normalizeText(binding?.match?.channel) === 'feishu')
+}
+
+function resolveWindowsManagedPluginSnapshot(
+  config: Record<string, any> | null,
+  installedOnDisk: boolean,
+  registeredPlugins: string[] | null
+): WindowsManagedPluginSnapshot {
+  const feishuPlugin = getManagedChannelPluginByChannelId('feishu')
+  const allowedPlugins = Array.isArray(config?.plugins?.allow)
+    ? config.plugins.allow.map((item: unknown) => normalizeText(item).toLowerCase()).filter(Boolean)
+    : []
+  const registeredPluginIds = Array.isArray(registeredPlugins)
+    ? registeredPlugins.map((item) => normalizeText(item).toLowerCase()).filter(Boolean)
+    : []
+  const pluginId = normalizeText(feishuPlugin?.pluginId).toLowerCase()
+
+  return {
+    configured: isFeishuSnapshotConfigured(config),
+    installedOnDisk,
+    allowedInConfig: Boolean(pluginId && allowedPlugins.includes(pluginId)),
+    registered: Boolean(pluginId && registeredPluginIds.includes(pluginId)),
+    loaded: false,
+    ready: false,
+  }
+}
+
+function resolveWindowsResolvedChannelBinding(
+  config: Record<string, any> | null
+): WindowsResolvedChannelBinding {
+  const bindings = Array.isArray(config?.bindings) ? config.bindings : []
+  const feishuBinding = bindings.find((binding) => normalizeText(binding?.match?.channel) === 'feishu')
+  if (feishuBinding) {
+    return {
+      channelId: 'feishu',
+      accountId: normalizeText(feishuBinding?.match?.accountId) || 'default',
+      agentId:
+        normalizeText(feishuBinding?.agentId)
+        || getManagedFeishuAgentId(normalizeText(feishuBinding?.match?.accountId) || 'default'),
+      source: 'config-binding',
+    }
+  }
+
+  if (isFeishuSnapshotConfigured(config)) {
+    return {
+      channelId: 'feishu',
+      accountId: 'default',
+      agentId: getManagedFeishuAgentId('default'),
+      source: 'managed-plugin-registry',
+    }
+  }
+
+  return {
+    channelId: '',
+    accountId: '',
+    agentId: '',
+    source: '',
+  }
+}
+
+async function listRegisteredPluginsForWindowsSnapshot(input: {
+  activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+}): Promise<string[] | null> {
+  const result = await runCliStreaming(['plugins', 'list', '--json'], {
+    activeRuntimeSnapshot: input.activeRuntimeSnapshot || undefined,
+    controlDomain: 'plugin-install',
+  }).catch(() => null)
+  if (!result?.ok) return null
+
+  try {
+    const payload = parseJsonFromCommandResult<unknown>(result)
+    if (Array.isArray(payload)) {
+      return payload.map((item) => normalizeText(item)).filter(Boolean)
+    }
+
+    const pluginEntries = hasOwnRecord(payload) && Array.isArray(payload.plugins)
+      ? payload.plugins
+      : []
+    return pluginEntries
+      .map((item) => {
+        if (typeof item === 'string') return normalizeText(item)
+        if (!hasOwnRecord(item)) return ''
+        return normalizeText(item.id || item.pluginId || item.name)
+      })
+      .filter(Boolean)
+  } catch {
+    return null
+  }
+}
+
+export interface BuildAuthoritativeWindowsChannelRuntimeSnapshotDependencies {
+  buildGatewayOwnerSnapshotFromLauncherIntegrity?: (input: {
+    launcherPath: string | null
+    shouldReinstallService: boolean
+    status: 'healthy' | 'launcher-missing' | 'service-missing' | 'unknown'
+    taskName: string | null
+  }) => WindowsChannelRuntimeSnapshot['gatewayOwner']
+  inspectGatewayLauncherIntegrity?: (input: { homeDir: string }) => Promise<{
+    launcherPath: string | null
+    shouldReinstallService: boolean
+    status: 'healthy' | 'launcher-missing' | 'service-missing' | 'unknown'
+    taskName: string | null
+  }>
+  isPluginInstalledOnDisk?: (pluginId: string) => Promise<boolean>
+  listRegisteredPlugins?: (input: {
+    activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+  }) => Promise<string[] | null>
+  readConfig?: () => Promise<Record<string, any> | null>
+  readSelectedRuntimeSnapshot?: () => Promise<WindowsActiveRuntimeSnapshot | null>
+}
+
+export interface CommitSelectedWindowsActiveRuntimeSnapshotDependencies {
+  ensureAuthoritativeWindowsChannelRuntimeSnapshot?: typeof ensureAuthoritativeWindowsChannelRuntimeSnapshot
+  getSelectedRuntimeSnapshot?: () => WindowsActiveRuntimeSnapshot | null
+  readCachedWindowsChannelRuntimeSnapshot?: () => WindowsChannelRuntimeSnapshot | null
+  reconcileWindowsChannelRuntimeSelection?: typeof reconcileWindowsChannelRuntimeSelection
+  replaceCachedWindowsChannelRuntimeSnapshot?: (
+    snapshot: WindowsChannelRuntimeSnapshot | null | undefined
+  ) => WindowsChannelRuntimeSnapshot | null
+  setSelectedRuntimeSnapshot?: (
+    snapshot: WindowsActiveRuntimeSnapshot | null | undefined
+  ) => WindowsActiveRuntimeSnapshot | null
+}
+
+export interface EnsureAuthoritativeWindowsChannelRuntimeSnapshotDependencies
+  extends BuildAuthoritativeWindowsChannelRuntimeSnapshotDependencies {
+  buildAuthoritativeWindowsChannelRuntimeSnapshot?: typeof buildAuthoritativeWindowsChannelRuntimeSnapshot
+  readCachedWindowsChannelRuntimeSnapshot?: () => WindowsChannelRuntimeSnapshot | null
+  replaceCachedWindowsChannelRuntimeSnapshot?: (
+    snapshot: WindowsChannelRuntimeSnapshot | null | undefined
+  ) => WindowsChannelRuntimeSnapshot | null
+}
+
+export function readAuthoritativeWindowsChannelRuntimeSnapshot(): WindowsChannelRuntimeSnapshot | null {
+  if (process.platform !== 'win32') return null
+  return readCachedWindowsChannelRuntimeSnapshot()
+}
+
+export async function ensureAuthoritativeWindowsChannelRuntimeSnapshot(
+  dependencies: EnsureAuthoritativeWindowsChannelRuntimeSnapshotDependencies = {}
+): Promise<WindowsChannelRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+
+  const {
+    buildAuthoritativeWindowsChannelRuntimeSnapshot: buildSnapshot,
+    readCachedWindowsChannelRuntimeSnapshot: readCachedSnapshot,
+    replaceCachedWindowsChannelRuntimeSnapshot: persistCachedSnapshot,
+    ...buildDependencies
+  } = dependencies
+  const cachedSnapshot = (readCachedSnapshot || readCachedWindowsChannelRuntimeSnapshot)()
+  if (cachedSnapshot) return cachedSnapshot
+
+  const rebuiltSnapshot = await (
+    buildSnapshot || buildAuthoritativeWindowsChannelRuntimeSnapshot
+  )(null, buildDependencies)
+
+  return (persistCachedSnapshot || replaceCachedWindowsChannelRuntimeSnapshot)(rebuiltSnapshot)
+}
+
+export async function commitSelectedWindowsActiveRuntimeSnapshot(
+  snapshot: WindowsActiveRuntimeSnapshot | null | undefined,
+  dependencies: CommitSelectedWindowsActiveRuntimeSnapshotDependencies = {}
+): Promise<WindowsActiveRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') {
+    return snapshot ? { ...snapshot } : null
+  }
+
+  const getSelectedRuntimeSnapshot =
+    dependencies.getSelectedRuntimeSnapshot || getSelectedWindowsActiveRuntimeSnapshot
+  const readCachedSnapshot =
+    dependencies.readCachedWindowsChannelRuntimeSnapshot || readCachedWindowsChannelRuntimeSnapshot
+  const persistCachedSnapshot =
+    dependencies.replaceCachedWindowsChannelRuntimeSnapshot || replaceCachedWindowsChannelRuntimeSnapshot
+  const setSelectedRuntimeSnapshot =
+    dependencies.setSelectedRuntimeSnapshot || setSelectedWindowsActiveRuntimeSnapshot
+  const previousSelectedRuntimeSnapshot = getSelectedRuntimeSnapshot()
+  const nextSelectedRuntimeSnapshot = snapshot ? { ...snapshot } : null
+  const previousAuthoritativeSnapshot = readCachedSnapshot()
+
+  const changed = (
+    [
+      ['nodePath', previousSelectedRuntimeSnapshot?.nodePath, nextSelectedRuntimeSnapshot?.nodePath],
+      ['openclawPath', previousSelectedRuntimeSnapshot?.openclawPath, nextSelectedRuntimeSnapshot?.openclawPath],
+      ['hostPackageRoot', previousSelectedRuntimeSnapshot?.hostPackageRoot, nextSelectedRuntimeSnapshot?.hostPackageRoot],
+      ['stateDir', previousSelectedRuntimeSnapshot?.stateDir, nextSelectedRuntimeSnapshot?.stateDir],
+    ] as const
+  ).some(([, previousValue, nextValue]) => {
+    return normalizeRuntimePathForCompare(previousValue || '') !== normalizeRuntimePathForCompare(nextValue || '')
+  })
+
+  if (!changed) {
+    if (previousSelectedRuntimeSnapshot && !readCachedSnapshot()) {
+      await (
+        dependencies.ensureAuthoritativeWindowsChannelRuntimeSnapshot
+        || ensureAuthoritativeWindowsChannelRuntimeSnapshot
+      )({
+        readSelectedRuntimeSnapshot: async () => previousSelectedRuntimeSnapshot,
+      })
+    }
+    return previousSelectedRuntimeSnapshot
+  }
+
+  const reconciledRuntimeSnapshot = await (
+    dependencies.reconcileWindowsChannelRuntimeSelection || reconcileWindowsChannelRuntimeSelection
+  )(
+    {
+      nextSelectedRuntimeSnapshot,
+      previousSelectedRuntimeSnapshot,
+    },
+    {
+      buildAuthoritativeSnapshot: (existingSnapshot, buildDependencies) =>
+        buildAuthoritativeWindowsChannelRuntimeSnapshot(existingSnapshot, {
+          ...buildDependencies,
+          readSelectedRuntimeSnapshot: async () => nextSelectedRuntimeSnapshot,
+        }),
+      persistSnapshot: false,
+      platform: 'win32',
+    }
+  )
+
+  try {
+    const committedSelectedRuntimeSnapshot = setSelectedRuntimeSnapshot(nextSelectedRuntimeSnapshot)
+    persistCachedSnapshot(reconciledRuntimeSnapshot.snapshot)
+    return committedSelectedRuntimeSnapshot
+  } catch (error) {
+    setSelectedRuntimeSnapshot(previousSelectedRuntimeSnapshot)
+    persistCachedSnapshot(previousAuthoritativeSnapshot)
+    throw error
+  }
+}
+
+export async function buildAuthoritativeWindowsChannelRuntimeSnapshot(
+  existingSnapshot: WindowsChannelRuntimeSnapshot | null = null,
+  dependencies: BuildAuthoritativeWindowsChannelRuntimeSnapshotDependencies = {}
+): Promise<WindowsChannelRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+
+  const selectedRuntimeSnapshot = await (
+    dependencies.readSelectedRuntimeSnapshot || ensureSelectedWindowsActiveRuntimeSnapshot
+  )()
+  if (!selectedRuntimeSnapshot) return null
+
+  const selectedRuntimeFields = reuseWindowsSelectedRuntimeSnapshotFields(
+    selectedRuntimeSnapshot,
+    existingSnapshot ? buildWindowsSelectedRuntimeSnapshotFields(existingSnapshot) : null
+  )
+  const config = await (dependencies.readConfig || readConfig)().catch(() => null)
+  const feishuPlugin = getManagedChannelPluginByChannelId('feishu')
+  const [launcherIntegrity, registeredPlugins, installedOnDisk] = await Promise.all([
+    (async () => {
+      if (dependencies.inspectGatewayLauncherIntegrity) {
+        return dependencies.inspectGatewayLauncherIntegrity({ homeDir: selectedRuntimeFields.stateDir })
+      }
+
+      const { inspectWindowsGatewayLauncherIntegrity } = await import('./platforms/windows/windows-platform-ops')
+      return inspectWindowsGatewayLauncherIntegrity({
+        homeDir: selectedRuntimeFields.stateDir,
+      })
+    })(),
+    (dependencies.listRegisteredPlugins || listRegisteredPluginsForWindowsSnapshot)({
+      activeRuntimeSnapshot: selectedRuntimeSnapshot,
+    }),
+    feishuPlugin?.pluginId
+      ? (dependencies.isPluginInstalledOnDisk || isPluginInstalledOnDisk)(feishuPlugin.pluginId)
+      : Promise.resolve(false),
+  ])
+
+  const buildGatewayOwnerSnapshotFromLauncherIntegrity =
+    dependencies.buildGatewayOwnerSnapshotFromLauncherIntegrity ||
+    (
+      await import('./platforms/windows/windows-platform-ops')
+    ).buildWindowsGatewayOwnerSnapshotFromLauncherIntegrity
+
+  return normalizeWindowsChannelRuntimeSnapshot({
+    ...selectedRuntimeFields,
+    gatewayOwner: buildGatewayOwnerSnapshotFromLauncherIntegrity(launcherIntegrity),
+    managedPlugin: resolveWindowsManagedPluginSnapshot(config, installedOnDisk, registeredPlugins),
+    resolvedBinding: resolveWindowsResolvedChannelBinding(config),
+  })
+}
 
 function extractFirstNonEmptyLine(text: string): string {
   for (const line of String(text || '').split(/\r?\n/g)) {
@@ -157,34 +750,102 @@ function extractFirstNonEmptyLine(text: string): string {
 }
 
 async function ensureOpenClawConfigRepairPreflight(): Promise<void> {
+  return ensureOpenClawConfigRepairPreflightWithOptions({})
+}
+
+interface EnsureOpenClawConfigRepairPreflightOptions {
+  preferredHomeDir?: string | null
+}
+
+async function ensureOpenClawConfigRepairPreflightWithOptions(
+  options: EnsureOpenClawConfigRepairPreflightOptions = {}
+): Promise<void> {
   if (openClawConfigRepairPreflightPromise) {
+    appendEnvCheckDiagnostic('main-config-preflight-reuse-pending', {}).catch(() => undefined)
     return openClawConfigRepairPreflightPromise
   }
 
+  const preferredHomeDir = String(options.preferredHomeDir || '').trim() || null
+
   openClawConfigRepairPreflightPromise = (async () => {
-    await runPluginRepairPreflight({
-      resolveHomeDir: async () => {
-        const openClawPaths = await getOpenClawPaths().catch(() => null)
-        return String(openClawPaths?.homeDir || '').trim() || null
-      },
-      repair: async (homeDir) =>
-        repairIncompatibleExtensionPluginsOnDisk({
-          homeDir,
-          readConfig,
-          writeConfig,
-        }),
-    })
-    await runPluginRepairPreflight({
-      resolveHomeDir: async () => {
-        const openClawPaths = await getOpenClawPaths().catch(() => null)
-        return String(openClawPaths?.homeDir || '').trim() || null
-      },
-      repair: async () =>
-        repairKnownProviderConfigGapsOnDisk({
-          readConfig,
-          writeConfig,
-        }),
-    })
+    try {
+      appendEnvCheckDiagnostic('main-config-preflight-start', {}).catch(() => undefined)
+      await runPluginRepairPreflight({
+        resolveHomeDir: async () => {
+          appendEnvCheckDiagnostic('main-config-preflight-step-home-dir-start', {
+            step: 'incompatible-plugins',
+          }).catch(() => undefined)
+          const homeDir = preferredHomeDir || String((await getOpenClawPaths().catch(() => null))?.homeDir || '').trim() || null
+          appendEnvCheckDiagnostic('main-config-preflight-step-home-dir-result', {
+            step: 'incompatible-plugins',
+            hasHomeDir: Boolean(homeDir),
+            homeDir,
+          }).catch(() => undefined)
+          return homeDir
+        },
+        repair: async (homeDir) => {
+          appendEnvCheckDiagnostic('main-config-preflight-step-repair-start', {
+            step: 'incompatible-plugins',
+            homeDir,
+          }).catch(() => undefined)
+          const result = await repairIncompatibleExtensionPluginsOnDisk({
+            homeDir,
+            readConfig,
+            writeConfig,
+          })
+          appendEnvCheckDiagnostic('main-config-preflight-step-repair-result', {
+            step: 'incompatible-plugins',
+            repaired: Boolean(result?.repaired),
+          }).catch(() => undefined)
+          return result
+        },
+      })
+      appendEnvCheckDiagnostic('main-config-preflight-step-complete', {
+        step: 'incompatible-plugins',
+      }).catch(() => undefined)
+      await runPluginRepairPreflight({
+        resolveHomeDir: async () => {
+          appendEnvCheckDiagnostic('main-config-preflight-step-home-dir-start', {
+            step: 'provider-config-gaps',
+          }).catch(() => undefined)
+          const homeDir = preferredHomeDir || String((await getOpenClawPaths().catch(() => null))?.homeDir || '').trim() || null
+          appendEnvCheckDiagnostic('main-config-preflight-step-home-dir-result', {
+            step: 'provider-config-gaps',
+            hasHomeDir: Boolean(homeDir),
+            homeDir,
+          }).catch(() => undefined)
+          return homeDir
+        },
+        repair: async () => {
+          appendEnvCheckDiagnostic('main-config-preflight-step-repair-start', {
+            step: 'provider-config-gaps',
+          }).catch(() => undefined)
+          const result = await repairKnownProviderConfigGapsOnDisk({
+            readConfig,
+            writeConfig,
+          })
+          appendEnvCheckDiagnostic('main-config-preflight-step-repair-result', {
+            step: 'provider-config-gaps',
+            changed: Boolean(result?.changed),
+          }).catch(() => undefined)
+          return result
+        },
+      })
+      appendEnvCheckDiagnostic('main-config-preflight-step-complete', {
+        step: 'provider-config-gaps',
+      }).catch(() => undefined)
+      appendEnvCheckDiagnostic('main-config-preflight-result', {
+        ok: true,
+      }).catch(() => undefined)
+    } catch (error) {
+      appendEnvCheckDiagnostic('main-config-preflight-result', {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined)
+      throw error
+    } finally {
+      openClawConfigRepairPreflightPromise = null
+    }
   })()
 
   return openClawConfigRepairPreflightPromise
@@ -230,6 +891,10 @@ export interface GatewayHealthCheckResult {
   summary?: string
 }
 
+export interface GatewayStatusCheckResult extends GatewayHealthCheckResult {
+  rpcReachable?: boolean
+}
+
 export interface OnboardResult extends CliResult {
   errorCode?: OnboardErrorCode
 }
@@ -260,6 +925,12 @@ export interface NodeCheckResult {
   installStrategy: 'nvm' | 'installer'
 }
 
+export interface OpenClawCheckResult {
+  installed: boolean
+  selectedRuntimeComplete: boolean
+  version: string
+}
+
 export interface RunCliStreamOptions {
   timeout?: number
   onStdout?: (chunk: string) => void
@@ -269,10 +940,42 @@ export interface RunCliStreamOptions {
   controlDomain?: CommandControlDomain
   env?: Partial<NodeJS.ProcessEnv>
   binaryPath?: string
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot
+  configRepairPreflightHomeDir?: string | null
+  requireConfigRepairPreflight?: boolean
+  skipPermissionAutoRepair?: boolean
+  skipConfigRepairPreflight?: boolean
+}
+
+interface GatewayMutationCommandOptions {
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
+  configRepairPreflightHomeDir?: string | null
 }
 
 export async function getOpenClawPaths(): Promise<OpenClawPaths> {
-  return resolveRuntimeOpenClawPaths()
+  const activeRuntimeSnapshot = await ensureSelectedWindowsActiveRuntimeSnapshot()
+  return resolveRuntimeOpenClawPaths({
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+  })
+}
+
+export async function getOpenClawPathsForRead(
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
+): Promise<OpenClawPaths> {
+  const runtimeSnapshotForRead = await resolveWindowsActiveRuntimeSnapshotForRead(activeRuntimeSnapshot)
+  return resolveOpenClawPathsForRead({
+    activeRuntimeSnapshot: runtimeSnapshotForRead || undefined,
+  })
+}
+
+interface ReadConfigOptions {
+  configPath?: string | null
+}
+
+interface ReadEnvFileOptions {
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
+  openClawPaths?: OpenClawPaths | null
+  diagnosticProbe?: 'gateway-health' | 'version-probe' | null
 }
 
 const isWin = process.platform === 'win32'
@@ -325,7 +1028,7 @@ const QCLAW_PLUGIN_NPM_CACHE_ROOT_DIR = join(tmpdir(), 'qclaw-lite', 'npm-cache'
 const QCLAW_PLUGIN_INSTALL_PERMISSION_MARKER = 'QCLAW_PLUGIN_INSTALL_PERMISSION_DENIED'
 const RUNTIME_INSTALL_LOCK_KEY = 'runtime-install'
 
-function createPermissionAutoRepairDependencies() {
+function createPermissionAutoRepairDependencies(options: { readOnlyPaths?: boolean } = {}) {
   const currentUser = userInfo()
   return {
     platform: process.platform,
@@ -338,7 +1041,7 @@ function createPermissionAutoRepairDependencies() {
       gid: typeof currentUser.gid === 'number' ? currentUser.gid : 0,
       username: currentUser.username,
     },
-    getOpenClawPaths: () => getOpenClawPaths(),
+    getOpenClawPaths: () => options.readOnlyPaths ? getOpenClawPathsForRead() : getOpenClawPaths(),
     probePath: (pathname: string) => probeOpenClawInstallPath(pathname),
     runPrivilegedRepair: async (request: {
       command: string
@@ -375,14 +1078,23 @@ async function createPluginInstallNpmEnv(): Promise<{
 }
 
 async function resolveManagedOpenClawInstallNpmCommandOptions(
-  operationLabel: string
+  operationLabel: string,
+  options: {
+    prefixPath?: string | null
+  } = {}
 ): Promise<{ options: OpenClawNpmCommandOptions } | { error: CliResult }> {
   try {
     const runtime = await ensureManagedOpenClawNpmRuntime({
       workingDirectory: resolveManagedSpawnCwd(),
     })
+    const prefixPath = String(options.prefixPath || '').trim()
     return {
-      options: runtime.commandOptions,
+      options: prefixPath
+        ? {
+            ...runtime.commandOptions,
+            prefixPath,
+          }
+        : runtime.commandOptions,
     }
   } catch (error) {
     return {
@@ -525,11 +1237,21 @@ export interface RepairIncompatibleExtensionPluginsOptions {
   restoreConfiguredManagedChannels?: boolean
 }
 
-export async function repairIncompatibleExtensionPlugins(
-  options: RepairIncompatibleExtensionPluginsOptions = {}
-): Promise<RepairIncompatibleExtensionsResult> {
-  const openClawPaths = await getOpenClawPaths().catch(() => null)
+export interface ScanIncompatibleExtensionPluginsOptions {
+  scopePluginIds?: string[]
+  quarantineOfficialManagedPlugins?: boolean
+}
+
+async function resolveOpenClawPluginRepairHomeDir(): Promise<string | null> {
+  const openClawPaths = await getOpenClawPathsForRead().catch(() => null)
   const homeDir = String(openClawPaths?.homeDir || '').trim()
+  return homeDir || null
+}
+
+export async function scanIncompatibleExtensionPlugins(
+  options: ScanIncompatibleExtensionPluginsOptions = {}
+): Promise<RepairIncompatibleExtensionsResult> {
+  const homeDir = await resolveOpenClawPluginRepairHomeDir()
   if (!homeDir) {
     return {
       ok: false,
@@ -542,19 +1264,64 @@ export async function repairIncompatibleExtensionPlugins(
     }
   }
 
-  const referenceConfig = options.restoreConfiguredManagedChannels === true
-    ? await readConfig().catch(() => null)
-    : null
-
-  const result = await repairIncompatibleExtensionPluginsOnDisk({
+  return repairIncompatibleExtensionPluginsOnDisk({
     homeDir,
     readConfig,
     writeConfig,
     scopePluginIds: options.scopePluginIds,
     quarantineOfficialManagedPlugins: options.quarantineOfficialManagedPlugins,
   })
+}
+
+export async function repairIncompatibleExtensionPlugins(
+  options: RepairIncompatibleExtensionPluginsOptions = {}
+): Promise<RepairIncompatibleExtensionsResult> {
+  await appendEnvCheckDiagnostic('main-plugin-repair-start', {
+    restoreConfiguredManagedChannels: options.restoreConfiguredManagedChannels === true,
+    scopePluginIds: options.scopePluginIds || [],
+    quarantineOfficialManagedPlugins: options.quarantineOfficialManagedPlugins === true,
+  })
+  const openClawPaths = await getOpenClawPathsForRead().catch(() => null)
+  const homeDir = String(openClawPaths?.homeDir || '').trim()
+  const configPath = String(openClawPaths?.configFile || '').trim()
+  if (!homeDir) {
+    await appendEnvCheckDiagnostic('main-plugin-repair-home-dir-missing', {})
+    return {
+      ok: false,
+      repaired: false,
+      incompatiblePlugins: [],
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+      summary: '未能定位 OpenClaw 状态目录，暂时无法修复损坏插件环境。',
+      stderr: 'OpenClaw homeDir unavailable',
+    }
+  }
+
+  const referenceConfig = options.restoreConfiguredManagedChannels === true
+    ? configPath
+      ? await readConfig({ configPath }).catch(() => null)
+      : null
+    : null
+
+  const result = await scanIncompatibleExtensionPlugins({
+    scopePluginIds: options.scopePluginIds,
+    quarantineOfficialManagedPlugins: options.quarantineOfficialManagedPlugins,
+  })
+  await appendEnvCheckDiagnostic('main-plugin-repair-after-scan', {
+    ok: result.ok,
+    repaired: result.repaired,
+    quarantinedPluginIds: result.quarantinedPluginIds,
+    prunedPluginIds: result.prunedPluginIds,
+    summary: String(result.summary || '').trim() || null,
+  })
 
   if (result.ok && options.restoreConfiguredManagedChannels === true) {
+    await appendEnvCheckDiagnostic('main-plugin-repair-before-restore-configured-managed-channels', {
+      affectedPluginIds: Array.from(new Set([
+        ...(result.quarantinedPluginIds || []),
+        ...(result.prunedPluginIds || []),
+      ])),
+    })
     const managedLifecycle = await import('./managed-channel-plugin-lifecycle')
 
     const restoreResult = await restoreConfiguredManagedChannelPlugins({
@@ -564,6 +1331,12 @@ export async function repairIncompatibleExtensionPlugins(
         inspectManagedChannelPlugin: managedLifecycle.inspectManagedChannelPlugin,
         repairManagedChannelPlugin: managedLifecycle.repairManagedChannelPlugin,
       },
+    })
+    await appendEnvCheckDiagnostic('main-plugin-repair-after-restore-configured-managed-channels', {
+      ok: restoreResult.ok,
+      restoredChannelIds: restoreResult.restoredChannelIds,
+      gatewayReloaded: restoreResult.gatewayReloaded,
+      summary: String(restoreResult.summary || '').trim() || null,
     })
 
     const summaryParts = [
@@ -665,12 +1438,36 @@ export async function openOAuthUrl(url?: string): Promise<CliResult> {
 export async function runCli(
   args: string[],
   timeout = MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs,
-  controlDomain?: CommandControlDomain
+  controlDomain?: CommandControlDomain,
+  options: Pick<
+    RunCliStreamOptions,
+    | 'activeRuntimeSnapshot'
+    | 'configRepairPreflightHomeDir'
+    | 'requireConfigRepairPreflight'
+    | 'skipPermissionAutoRepair'
+    | 'skipConfigRepairPreflight'
+  > = {}
 ): Promise<CliResult> {
   return runCliStreaming(args, {
     timeout,
     controlDomain: resolveCommandControlDomain(args, controlDomain),
+    activeRuntimeSnapshot: options.activeRuntimeSnapshot,
+    configRepairPreflightHomeDir: options.configRepairPreflightHomeDir,
+    requireConfigRepairPreflight: options.requireConfigRepairPreflight,
+    skipPermissionAutoRepair: options.skipPermissionAutoRepair,
+    skipConfigRepairPreflight: options.skipConfigRepairPreflight,
   })
+}
+
+function isReadOnlyCommand(controlDomain: CommandControlDomain, args: string[]): boolean {
+  const lastArg = args[args.length - 1]
+  return (
+    (args.length === 1 && args[0] === '--version')
+    || lastArg === '--help'
+    || (args[0] === 'plugins' && args[1] === 'list' && args.includes('--json'))
+    || (controlDomain === 'gateway' && args[0] === 'health' && args[1] === '--json')
+    || (controlDomain === 'gateway' && args[0] === 'status' && args[1] === '--json')
+  )
 }
 
 export async function runCliWithBinary(
@@ -690,18 +1487,134 @@ export async function runCliWithBinary(
 
 /** Run openclaw command while exposing stream callbacks for long-running flows */
 async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions = {}): Promise<CliResult> {
-  await ensureOpenClawConfigRepairPreflight()
+  const controlDomain = resolveCommandControlDomain(args, options.controlDomain)
+  const readOnlyCommand = isReadOnlyCommand(controlDomain, args)
+  const isEnvCheckVersionProbe = controlDomain === 'env-setup' && args.length === 1 && args[0] === '--version'
+  const isGatewayHealthProbe = controlDomain === 'gateway' && args[0] === 'health' && args[1] === '--json'
+  const isGatewayStartCommand = controlDomain === 'gateway' && args[0] === 'gateway' && args[1] === 'start'
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-streaming-once-start', {})
+  }
+  if (isGatewayHealthProbe) {
+    await appendEnvCheckDiagnostic('main-gateway-health-run-cli-enter', {})
+  }
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-enter', {})
+  }
+  if (isGatewayStartCommand && options.requireConfigRepairPreflight && !options.skipConfigRepairPreflight) {
+    await appendEnvCheckDiagnostic('main-gateway-start-before-config-preflight', {})
+  }
+  if (options.requireConfigRepairPreflight && !options.skipConfigRepairPreflight) {
+    await ensureOpenClawConfigRepairPreflightWithOptions({
+      preferredHomeDir: options.configRepairPreflightHomeDir,
+    })
+  }
+  if (isGatewayStartCommand && options.requireConfigRepairPreflight && !options.skipConfigRepairPreflight) {
+    await appendEnvCheckDiagnostic('main-gateway-start-after-config-preflight', {})
+  }
   // 读取 ~/.openclaw/.env 文件中的环境变量，合并到 CLI 进程环境中
-  const envFromFile = await readEnvFile()
+  const activeRuntimeSnapshot =
+    options.activeRuntimeSnapshot
+    || getCurrentWindowsActiveRuntimeSnapshot()
+    || (
+      readOnlyCommand
+        ? null
+        : await ensureSelectedWindowsActiveRuntimeSnapshot()
+    )
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-runtime-snapshot', {
+      providedSnapshot: Boolean(options.activeRuntimeSnapshot),
+      resolvedSnapshot: Boolean(activeRuntimeSnapshot),
+      stateDir: String(activeRuntimeSnapshot?.stateDir || '').trim() || null,
+      nodePath: String(activeRuntimeSnapshot?.nodePath || '').trim() || null,
+    })
+  }
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-before-read-env-file', {})
+  }
+  if (isGatewayHealthProbe) {
+    await appendEnvCheckDiagnostic('main-gateway-health-run-cli-before-read-env-file', {})
+  }
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-before-read-env-file', {})
+  }
+  const envFromFile = await readEnvFile({
+    diagnosticProbe: isGatewayHealthProbe
+      ? 'gateway-health'
+      : isEnvCheckVersionProbe
+        ? 'version-probe'
+        : null,
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    openClawPaths: readOnlyCommand
+      ? await getOpenClawPathsForRead(activeRuntimeSnapshot || undefined).catch(() => undefined)
+      : undefined,
+  })
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-after-read-env-file', {
+      envKeyCount: Object.keys(envFromFile || {}).length,
+    })
+  }
+  if (isGatewayHealthProbe) {
+    await appendEnvCheckDiagnostic('main-gateway-health-run-cli-after-read-env-file', {
+      envKeyCount: Object.keys(envFromFile || {}).length,
+    })
+  }
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-after-read-env-file', {
+      envKeyCount: Object.keys(envFromFile || {}).length,
+    })
+  }
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-before-get-spawn', {})
+  }
+  if (isGatewayHealthProbe) {
+    await appendEnvCheckDiagnostic('main-gateway-health-run-cli-before-get-spawn', {})
+  }
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-before-get-spawn', {})
+  }
   const spawn = await getSpawnFn()
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-after-get-spawn', {})
+  }
+  if (isGatewayHealthProbe) {
+    await appendEnvCheckDiagnostic('main-gateway-health-run-cli-after-get-spawn', {})
+  }
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-after-get-spawn', {})
+  }
   const timeout = options.timeout ?? MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs
-  const commandProbeEnv = buildCommandCapabilityEnv()
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-active-runtime-snapshot', {
+      nodePath: activeRuntimeSnapshot?.nodePath || null,
+      openclawPath: activeRuntimeSnapshot?.openclawPath || null,
+      hostPackageRoot: activeRuntimeSnapshot?.hostPackageRoot || null,
+    })
+  }
+  const commandProbeEnv = buildCommandCapabilityEnv(activeRuntimeSnapshot)
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-command-probe-env-built', {
+      hasPath: Boolean(commandProbeEnv.PATH),
+    })
+  }
   const explicitBinaryPath = String(options.binaryPath || '').trim()
   if (!explicitBinaryPath) {
     const openClawCapability = await probePlatformCommandCapability('openclaw', {
       platform: process.platform,
       env: commandProbeEnv,
     })
+    if (isEnvCheckVersionProbe) {
+      await appendEnvCheckDiagnostic('main-run-cli-openclaw-capability', {
+        available: openClawCapability.available,
+        message: openClawCapability.message || null,
+      })
+    }
+    if (isGatewayStartCommand) {
+      await appendEnvCheckDiagnostic('main-gateway-start-run-cli-openclaw-capability', {
+        available: openClawCapability.available,
+        message: openClawCapability.message || null,
+      })
+    }
     if (!openClawCapability.available) {
       return {
         ok: false,
@@ -733,8 +1646,39 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
         env: commandProbeEnv,
       })
     : null
+  const resolvedCommand = await resolveBoundOpenClawCommand(args, {
+    platform: process.platform,
+    expectAvailable: expectCapability?.available,
+    expectWarning: expectCapability?.message,
+    scriptAvailable: scriptCapability?.available,
+    scriptWarning: scriptCapability?.message,
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    commandPath: explicitBinaryPath || undefined,
+  })
+  if (isEnvCheckVersionProbe) {
+    await appendEnvCheckDiagnostic('main-run-cli-command-resolved', {
+      command: resolvedCommand.command,
+      shell: resolvedCommand.shell,
+      capabilityWarning: resolvedCommand.capabilityWarning || null,
+      args,
+    })
+  }
+  if (isGatewayHealthProbe) {
+    await appendEnvCheckDiagnostic('main-gateway-health-run-cli-command-resolved', {
+      command: resolvedCommand.command,
+      shell: resolvedCommand.shell,
+      capabilityWarning: resolvedCommand.capabilityWarning || null,
+    })
+  }
+  if (isGatewayStartCommand) {
+    await appendEnvCheckDiagnostic('main-gateway-start-run-cli-command-resolved', {
+      command: resolvedCommand.command,
+      shell: resolvedCommand.shell,
+      capabilityWarning: resolvedCommand.capabilityWarning || null,
+      args,
+    })
+  }
 
-  const controlDomain = resolveCommandControlDomain(args, options.controlDomain)
   return new Promise((resolve) => {
     // 把常见的 node bin 目录加到 PATH，确保能找到 openclaw
     const envPath = buildCliPathWithCandidates({
@@ -742,17 +1686,10 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
       currentPath: process.env.PATH || '',
       detectedNodeBinDir,
       env: process.env,
+      activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
     })
     const managedCwd = resolveManagedSpawnCwd()
 
-    const resolvedCommand = resolveOpenClawCommand(args, {
-      platform: process.platform,
-      expectAvailable: expectCapability?.available,
-      expectWarning: expectCapability?.message,
-      scriptAvailable: scriptCapability?.available,
-      scriptWarning: scriptCapability?.message,
-      commandPath: explicitBinaryPath || undefined,
-    })
     const mergedEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...envFromFile,
@@ -768,13 +1705,52 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
       }
     }
 
-    const proc = spawn(resolvedCommand.command, resolvedCommand.args, {
-      env: mergedEnv,
-      cwd: managedCwd,
-      timeout,
-      shell: resolvedCommand.shell,
-      stdio: resolveStdioForCommand(resolvedCommand.command),
-    })
+    let proc: ChildProcess
+    try {
+      if (isEnvCheckVersionProbe) {
+        void appendEnvCheckDiagnostic('main-run-cli-before-spawn', {
+          command: resolvedCommand.command,
+          cwd: managedCwd,
+        })
+      }
+      if (isGatewayHealthProbe) {
+        void appendEnvCheckDiagnostic('main-gateway-health-run-cli-before-spawn', {
+          command: resolvedCommand.command,
+          cwd: managedCwd,
+        })
+      }
+      if (isGatewayStartCommand) {
+        void appendEnvCheckDiagnostic('main-gateway-start-run-cli-before-spawn', {
+          command: resolvedCommand.command,
+          cwd: managedCwd,
+        })
+      }
+      proc = spawn(resolvedCommand.command, resolvedCommand.args, {
+        env: mergedEnv,
+        cwd: managedCwd,
+        timeout,
+        shell: resolvedCommand.shell,
+        stdio: resolveStdioForCommand(resolvedCommand.command),
+      })
+    } catch (error) {
+      if (isEnvCheckVersionProbe) {
+        void appendEnvCheckDiagnostic('main-run-cli-spawn-failed', {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+      if (isGatewayHealthProbe) {
+        void appendEnvCheckDiagnostic('main-gateway-health-run-cli-spawn-failed', {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+      if (isGatewayStartCommand) {
+        void appendEnvCheckDiagnostic('main-gateway-start-run-cli-spawn-failed', {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+      resolve(createSpawnFailureResult(error))
+      return
+    }
     trackActiveProcess(proc, controlDomain)
     const enableOAuthScan = shouldAutoOpenBrowserForArgs(args)
     if (enableOAuthScan) {
@@ -814,6 +1790,30 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
     proc.on('close', (code) => {
       clearActiveProcessIfMatch(proc, controlDomain)
       const canceled = consumeCanceledProcess(proc, controlDomain)
+      if (isEnvCheckVersionProbe) {
+        void appendEnvCheckDiagnostic('main-run-cli-close', {
+          code,
+          canceled,
+          stdout: stdout.trim() || null,
+          stderr: stderr.trim() || null,
+        })
+      }
+      if (isGatewayHealthProbe) {
+        void appendEnvCheckDiagnostic('main-gateway-health-run-cli-close', {
+          code,
+          canceled,
+          stdout: stdout.trim() || null,
+          stderr: stderr.trim() || null,
+        })
+      }
+      if (isGatewayStartCommand) {
+        void appendEnvCheckDiagnostic('main-gateway-start-run-cli-close', {
+          code,
+          canceled,
+          stdout: stdout.trim() || null,
+          stderr: stderr.trim() || null,
+        })
+      }
       resolve({
         ok: code === 0 && !canceled,
         stdout,
@@ -825,6 +1825,24 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
     proc.on('error', (err) => {
       clearActiveProcessIfMatch(proc, controlDomain)
       const canceled = consumeCanceledProcess(proc, controlDomain)
+      if (isEnvCheckVersionProbe) {
+        void appendEnvCheckDiagnostic('main-run-cli-error', {
+          canceled,
+          message: err.message,
+        })
+      }
+      if (isGatewayHealthProbe) {
+        void appendEnvCheckDiagnostic('main-gateway-health-run-cli-error', {
+          canceled,
+          message: err.message,
+        })
+      }
+      if (isGatewayStartCommand) {
+        void appendEnvCheckDiagnostic('main-gateway-start-run-cli-error', {
+          canceled,
+          message: err.message,
+        })
+      }
       resolve({
         ok: false,
         stdout,
@@ -839,6 +1857,10 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
 /** Run openclaw command while exposing stream callbacks for long-running flows */
 export async function runCliStreaming(args: string[], options: RunCliStreamOptions = {}): Promise<CliResult> {
   const controlDomain = resolveCommandControlDomain(args, options.controlDomain)
+  const readOnlyCommand = isReadOnlyCommand(controlDomain, args)
+  if (options.skipPermissionAutoRepair || readOnlyCommand) {
+    return runCliStreamingOnce(args, { ...options, controlDomain })
+  }
   return runCliLikeWithPermissionAutoRepair(
     () => runCliStreamingOnce(args, { ...options, controlDomain }),
     {
@@ -929,6 +1951,45 @@ function resolveCommandForShelllessSpawn(command: string): string {
   return normalized
 }
 
+function createSpawnFailureResult(error: unknown): CliResult {
+  return {
+    ok: false,
+    stdout: '',
+    stderr: error instanceof Error ? error.message : String(error || ''),
+    code: -1,
+  }
+}
+
+function normalizeWindowsRuntimePath(value: string | null | undefined): string {
+  return String(value || '').trim().toLowerCase()
+}
+
+function resolvePreferredWindowsOpenClawInstallPrefix(
+  explicitPrefixPath?: string | null
+): string | null {
+  if (process.platform !== 'win32') return null
+
+  const explicitPrefix = String(explicitPrefixPath || '').trim()
+  if (explicitPrefix) return explicitPrefix
+
+  const privateRuntimeRoot = normalizeWindowsRuntimePath(
+    resolveWindowsPrivateNodeRuntimePaths({
+      env: process.env,
+    }).runtimeRoot
+  )
+
+  const snapshotPrefix = String(getSelectedWindowsActiveRuntimeSnapshot()?.npmPrefix || '').trim()
+  if (snapshotPrefix && normalizeWindowsRuntimePath(snapshotPrefix).startsWith(privateRuntimeRoot)) {
+    return snapshotPrefix
+  }
+
+  if (detectedNodeBinDir && normalizeWindowsRuntimePath(detectedNodeBinDir).startsWith(privateRuntimeRoot)) {
+    return detectedNodeBinDir
+  }
+
+  return null
+}
+
 function normalizeRunShellOptions(
   input?: CommandControlDomain | RunShellOptions
 ): RunShellOptions {
@@ -952,13 +2013,19 @@ async function runShellOnce(
   const resolvedCommand = useShell ? command : resolveCommandForShelllessSpawn(command)
   const runOnce = (env: NodeJS.ProcessEnv): Promise<CliResult> =>
     new Promise((resolve) => {
-      const forceOpenShell = resolvedCommand.endsWith(".cmd") && process.platform === "win32";
-      const proc = spawn(resolvedCommand, args, {
-        env,
-        cwd: normalizedOptions.cwd || resolveManagedSpawnCwd(),
-        shell: forceOpenShell ? true : useShell,
-        timeout,
-      })
+      const forceOpenShell = resolvedCommand.endsWith('.cmd') && process.platform === 'win32'
+      let proc: ChildProcess
+      try {
+        proc = spawn(resolvedCommand, args, {
+          env,
+          cwd: normalizedOptions.cwd || resolveManagedSpawnCwd(),
+          shell: forceOpenShell ? true : useShell,
+          timeout,
+        })
+      } catch (error) {
+        resolve(createSpawnFailureResult(error))
+        return
+      }
       trackActiveProcess(proc, controlDomain)
       let stdout = ''
       let stderr = ''
@@ -1004,6 +2071,7 @@ async function runShellOnce(
     currentPath: mergedEnv.PATH || process.env.PATH || '',
     detectedNodeBinDir,
     env: mergedEnv,
+    activeRuntimeSnapshot: getCurrentWindowsActiveRuntimeSnapshot() || undefined,
   })
   const managedEnv = sanitizeManagedEnv(mergedEnv, controlDomain)
 
@@ -1050,11 +2118,17 @@ async function runDirectOnce(
   const spawn = await getSpawnFn()
   return new Promise((resolve) => {
     const managedEnv = sanitizeManagedEnv(process.env, controlDomain)
-    const proc = spawn(command, args, {
-      env: managedEnv,
-      cwd: resolveManagedSpawnCwd(),
-      timeout,
-    })
+    let proc: ChildProcess
+    try {
+      proc = spawn(command, args, {
+        env: managedEnv,
+        cwd: resolveManagedSpawnCwd(),
+        timeout,
+      })
+    } catch (error) {
+      resolve(createSpawnFailureResult(error))
+      return
+    }
     trackActiveProcess(proc, controlDomain)
     let stdout = ''
     let stderr = ''
@@ -1104,7 +2178,9 @@ export async function runDirect(
   )
 }
 
-function buildCommandCapabilityEnv(): NodeJS.ProcessEnv {
+function buildCommandCapabilityEnv(
+  activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null = getCurrentWindowsActiveRuntimeSnapshot()
+): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PATH: buildCliPathWithCandidates({
@@ -1112,6 +2188,7 @@ function buildCommandCapabilityEnv(): NodeJS.ProcessEnv {
       currentPath: process.env.PATH || '',
       detectedNodeBinDir,
       env: process.env,
+      activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
     }),
   }
 }
@@ -1297,7 +2374,7 @@ async function resolveNodeFromShell(): Promise<{ version: string; binDir: string
     }
   }
 
-  detectedNodeBinDir = binDir
+  rememberDetectedNodeBinDir(binDir)
 
   return {
     version: versionResult.stdout.trim(),
@@ -1325,12 +2402,28 @@ function buildNodeCheckResult(
   }
 }
 
+async function resolveNodeInstallPlanForNodeCheck(): Promise<NodeInstallPlan | null> {
+  if (!isWin) {
+    return resolveRuntimeNodeInstallPlan().catch(() => null)
+  }
+
+  return resolveRuntimeNodeInstallPlan({
+    skipDynamicOpenClawRequirementProbe: true,
+  }).catch(() => null)
+}
+
 export async function checkNode(): Promise<NodeCheckResult> {
-  const requirement = await resolveOpenClawNodeRequirement().catch(() => ({
+  const requirement = await resolveOpenClawNodeRequirement(
+    isWin
+      ? {
+          skipDynamicOpenClawRequirementProbe: true,
+        }
+      : undefined
+  ).catch(() => ({
     minVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
     source: 'bundled-fallback' as const,
   }))
-  const installPlan = await resolveRuntimeNodeInstallPlan().catch(() => null)
+  const installPlan = await resolveNodeInstallPlanForNodeCheck()
   const requiredVersion = installPlan?.requiredVersion || requirement.minVersion
   const targetVersion = installPlan?.version || ''
   const nvmDir = !isWin ? await detectNvmDir() : null
@@ -1351,7 +2444,7 @@ export async function checkNode(): Promise<NodeCheckResult> {
   })
 
   if (preferredNode) {
-    detectedNodeBinDir = preferredNode.candidate.binDir
+    rememberDetectedNodeBinDir(preferredNode.candidate.binDir)
     return buildNodeCheckResult(
       preferredNode.candidate.version,
       true,
@@ -1365,7 +2458,7 @@ export async function checkNode(): Promise<NodeCheckResult> {
     const r = await runDirect(nodePath, ['--version'], MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs, 'env-setup')
     if (r.ok) {
       const nodeBinDir = dirname(nodePath)
-      detectedNodeBinDir = nodeBinDir
+      rememberDetectedNodeBinDir(nodeBinDir)
       return buildNodeCheckResult(
         r.stdout.trim(),
         true,
@@ -1422,7 +2515,7 @@ async function upgradeNodeViaNvm(nvmDir: string, targetVersion: string): Promise
     const preferredBinDir = buildNvmNodeBinDir(nvmDir, targetVersion)
     try {
       await access(join(preferredBinDir, 'node'))
-      detectedNodeBinDir = preferredBinDir
+      rememberDetectedNodeBinDir(preferredBinDir)
     } catch {
       // Fall back to wider nvm discovery when the exact install path is unavailable.
     }
@@ -1453,7 +2546,7 @@ async function resolveNodeFromInstalledNvmVersions(
     )
     if (!versionResult.ok) continue
 
-    detectedNodeBinDir = binDir
+    rememberDetectedNodeBinDir(binDir)
     return {
       version: versionResult.stdout.trim(),
       binDir,
@@ -1488,7 +2581,7 @@ async function resolveNodeFromInstalledNvmWindowsVersions(
     if (!versionResult.ok) continue
 
     const binDir = dirname(exePath)
-    detectedNodeBinDir = binDir
+    rememberDetectedNodeBinDir(binDir)
     return {
       version: versionResult.stdout.trim(),
       binDir,
@@ -1767,7 +2860,13 @@ function shouldAttachOpenClawMirrorDetailsForCombinedInstall(
 }
 
 export async function resolveNodeInstallPlan(): Promise<NodeInstallPlan> {
-  return resolveRuntimeNodeInstallPlan()
+  return resolveRuntimeNodeInstallPlan(
+    isWin
+      ? {
+          skipDynamicOpenClawRequirementProbe: true,
+        }
+      : undefined
+  )
 }
 
 async function downloadFile(url: string, destPath: string): Promise<void> {
@@ -1881,7 +2980,7 @@ export async function downloadNodeInstaller(
   installPlan?: NodeInstallPlan
 ): Promise<{ ok: boolean; path: string; error?: string; plan?: NodeInstallPlan }> {
   try {
-    const plan = installPlan || (await resolveRuntimeNodeInstallPlan())
+    const plan = installPlan || (await resolveNodeInstallPlan())
     const installerPath = join(tmpdir(), plan.filename)
     await downloadFile(plan.url, installerPath)
     return { ok: true, path: installerPath, plan }
@@ -1900,10 +2999,90 @@ export async function inspectNodeInstaller(installerPath: string): Promise<NodeI
   })
 }
 
-export async function checkOpenClaw() {
-  const r = await runCli(['--version'], MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs, 'env-setup')
-  if (!r.ok) return { installed: false, version: '' }
-  return { installed: true, version: r.stdout.trim() }
+export async function checkOpenClaw(): Promise<OpenClawCheckResult> {
+  await appendEnvCheckDiagnostic('main-check-openclaw-start', {})
+  const selectedRuntimeSnapshot = await resolveSelectedWindowsOpenClawRuntimeSnapshot()
+  const selectedRuntimeComplete = await inspectSelectedWindowsOpenClawRuntimeCompleteness()
+  if (!selectedRuntimeComplete) {
+    await appendEnvCheckDiagnostic('main-check-openclaw-result', {
+      installed: false,
+      selectedRuntimeComplete,
+      version: null,
+      reason: 'selected-runtime-incomplete',
+    })
+    return {
+      installed: false,
+      selectedRuntimeComplete,
+      version: '',
+    }
+  }
+
+  await appendEnvCheckDiagnostic('main-check-openclaw-before-run-cli', {
+    nodePath: selectedRuntimeSnapshot?.nodePath || null,
+    openclawPath: selectedRuntimeSnapshot?.openclawPath || null,
+  })
+  const r = await runCli(['--version'], MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs, 'env-setup', {
+    activeRuntimeSnapshot: selectedRuntimeSnapshot || undefined,
+    skipConfigRepairPreflight: true,
+  })
+  if (!r.ok) {
+    await appendEnvCheckDiagnostic('main-check-openclaw-result', {
+      installed: false,
+      selectedRuntimeComplete,
+      version: null,
+      reason: 'run-cli-failed',
+      stderr: String(r.stderr || '').trim() || null,
+      stdout: String(r.stdout || '').trim() || null,
+    })
+    return {
+      installed: false,
+      selectedRuntimeComplete,
+      version: '',
+    }
+  }
+  await appendEnvCheckDiagnostic('main-check-openclaw-result', {
+    installed: true,
+    selectedRuntimeComplete,
+    version: r.stdout.trim() || null,
+    reason: 'ok',
+  })
+  return {
+    installed: true,
+    selectedRuntimeComplete,
+    version: r.stdout.trim(),
+  }
+}
+
+export async function discoverOpenClawForEnvCheck(): Promise<OpenClawDiscoveryResult> {
+  if (process.platform !== 'win32') {
+    return discoverOpenClawInstallations()
+  }
+
+  const selectedRuntimeSnapshot = await resolveSelectedWindowsOpenClawRuntimeSnapshot()
+  const selectedOpenClawPath = String(selectedRuntimeSnapshot?.openclawPath || '').trim()
+  const discovery = await discoverOpenClawInstallationsFromKnownPaths({
+    activeBinaryPath: selectedOpenClawPath || null,
+    knownPaths: selectedOpenClawPath ? [selectedOpenClawPath] : [],
+  })
+  const gatewayOwnerHomeDir =
+    String(selectedRuntimeSnapshot?.stateDir || '').trim() || resolveOpenClawPaths().homeDir
+
+  try {
+    const { inspectWindowsGatewayLauncherIntegrity } = await import('./platforms/windows/windows-platform-ops')
+    const launcherIntegrity = await inspectWindowsGatewayLauncherIntegrity({
+      homeDir: gatewayOwnerHomeDir,
+    })
+
+    return {
+      ...discovery,
+      windowsGatewayOwnerState: launcherIntegrity.status,
+    }
+  } catch {
+    return {
+      ...discovery,
+      windowsGatewayOwnerState: 'unknown',
+    }
+  }
 }
 
 export async function installOpenClaw(): Promise<CliResult> {
@@ -1911,7 +3090,12 @@ export async function installOpenClaw(): Promise<CliResult> {
     if (isWin) {
       const capabilityError = await guardPlatformCommands(['npm'])
       if (capabilityError) return capabilityError
-      const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw 命令行工具安装')
+      const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions(
+        'OpenClaw 命令行工具安装',
+        {
+          prefixPath: resolvePreferredWindowsOpenClawInstallPrefix(),
+        }
+      )
       if ('error' in managedNpmOptionsResult) return managedNpmOptionsResult.error
       // Windows: npm install -g 不需要管理员权限（安装到 %APPDATA%\npm）
       const result = await installOpenClawWithNpmMirrorFallback(
@@ -1957,42 +3141,46 @@ export async function installEnv(opts: InstallEnvOptions): Promise<CliResult> {
       return { ok: true, stdout: '', stderr: '', code: 0 }
     }
 
-    // Windows 需要提前下载 .msi 安装器
-    if (isWin && needNode && !nodeInstallerPath) {
-      const downloadResult = await downloadNodeInstaller(providedNodeInstallPlan)
-      if (!downloadResult.ok || !downloadResult.path) {
-        return {
-          ok: false,
-          stdout: '',
-          stderr: downloadResult.error || 'Failed to download Node installer',
-          code: -1,
-        }
-      }
-      nodeInstallerPath = downloadResult.path
-    }
-
     if (isWin) {
-      // Windows: 分步安装
-      if (needNode && nodeInstallerPath) {
-        const capabilityError = await guardPlatformCommands(['msiexec'])
-        if (capabilityError) return capabilityError
-        // 使用 msiexec 静默安装 Node.js
-        const nodeResult = await runShell(
-          'msiexec',
-          ['/i', nodeInstallerPath, '/qn', '/norestart'],
-          MAIN_RUNTIME_POLICY.node.installNodeTimeoutMs,
-          'env-setup'
-        )
-        if (!nodeResult.ok) {
-          return nodeResult
+      let windowsSelectedNodePrefix: string | null = null
+      if (needNode) {
+        const installPlan = providedNodeInstallPlan || (await resolveNodeInstallPlan())
+        const nodeRuntimeResult = await ensureWindowsPrivateNodeRuntime({
+          plan: installPlan,
+          downloadFile,
+          env: process.env,
+          runPowerShell: (command, args, timeoutMs) =>
+            runShell(command, args, timeoutMs, 'env-setup'),
+          timeoutMs: MAIN_RUNTIME_POLICY.node.installNodeTimeoutMs,
+        })
+        if (!nodeRuntimeResult.ok) {
+          return {
+            ok: false,
+            stdout: nodeRuntimeResult.stdout || '',
+            stderr: nodeRuntimeResult.stderr || 'Failed to install private Node.js runtime',
+            code: nodeRuntimeResult.code ?? 1,
+          }
         }
-        // 刷新 PATH 以便后续找到 npm
-        await refreshEnvironment()
+        rememberDetectedNodeBinDir(nodeRuntimeResult.nodeBinDir || detectedNodeBinDir)
+        windowsSelectedNodePrefix = nodeRuntimeResult.nodeBinDir || null
+        process.env.PATH = buildCliPathWithCandidates({
+          platform: process.platform,
+          currentPath: process.env.PATH || '',
+          detectedNodeBinDir,
+          env: process.env,
+        })
+        resetCommandCapabilityCache()
+        resetRuntimeOpenClawPathsCache()
       }
       if (needOpenClaw) {
         const capabilityError = await guardPlatformCommands(['npm'])
         if (capabilityError) return capabilityError
-        const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions('OpenClaw 命令行工具安装')
+        const managedNpmOptionsResult = await resolveManagedOpenClawInstallNpmCommandOptions(
+          'OpenClaw 命令行工具安装',
+          {
+            prefixPath: resolvePreferredWindowsOpenClawInstallPrefix(windowsSelectedNodePrefix),
+          }
+        )
         if ('error' in managedNpmOptionsResult) return managedNpmOptionsResult.error
         const result = await installOpenClawWithNpmMirrorFallback(
           PINNED_OPENCLAW_VERSION,
@@ -2227,9 +3415,15 @@ export async function runOnboard(opts: Record<string, any>): Promise<OnboardResu
 }
 
 export async function gatewayHealth(): Promise<GatewayHealthCheckResult> {
-  const r = await runCli(['health', '--json'], MAIN_RUNTIME_POLICY.cli.gatewayHealthTimeoutMs, 'gateway')
+  await appendEnvCheckDiagnostic('main-gateway-health-start', {})
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  const r = await runCli(['health', '--json'], MAIN_RUNTIME_POLICY.cli.gatewayHealthTimeoutMs, 'gateway', {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    skipConfigRepairPreflight: true,
+    skipPermissionAutoRepair: true,
+  })
   const classification = classifyGatewayRuntimeState(r)
-  return {
+  const result: GatewayHealthCheckResult = {
     running: r.ok,
     raw: r.stdout,
     stderr: r.stderr,
@@ -2237,17 +3431,138 @@ export async function gatewayHealth(): Promise<GatewayHealthCheckResult> {
     stateCode: r.ok ? 'healthy' : classification.stateCode,
     summary: r.ok ? '网关已确认可用' : classification.summary,
   }
+  await appendEnvCheckDiagnostic('main-gateway-health-result', {
+    running: result.running,
+    code: result.code,
+    stateCode: result.stateCode,
+    summary: result.summary,
+  })
+  return result
 }
 
-export async function gatewayStart(): Promise<CliResult> {
-  return runCli(['gateway', 'start'], MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs, 'gateway')
+export async function gatewayStatus(): Promise<GatewayStatusCheckResult> {
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  const result = await runCli(['status', '--json'], MAIN_RUNTIME_POLICY.cli.statusTimeoutMs, 'gateway', {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    skipConfigRepairPreflight: true,
+    skipPermissionAutoRepair: true,
+  })
+
+  let payload: {
+    service?: {
+      runtime?: {
+        status?: unknown
+      } | null
+    } | null
+    health?: {
+      healthy?: unknown
+    } | null
+    rpc?: {
+      ok?: unknown
+    } | null
+  } | null = null
+
+  try {
+    payload = parseJsonFromCommandResult(result)
+  } catch {
+    payload = null
+  }
+
+  const serviceStatus = String(payload?.service?.runtime?.status || '').trim().toLowerCase()
+  const serviceRunning = serviceStatus === 'running'
+  const healthHealthy = payload?.health?.healthy === true
+  const rpcReachable = payload?.rpc?.ok === true
+  const running = serviceRunning || healthHealthy
+
+  if (running) {
+    return {
+      running: true,
+      rpcReachable,
+      raw: result.stdout,
+      stderr: result.stderr,
+      code: result.code,
+      stateCode: 'healthy',
+      summary:
+        rpcReachable === false
+          ? '网关服务已确认正在运行；本地 RPC 探测未通过'
+          : '网关已确认可用',
+    }
+  }
+
+  const classification = classifyGatewayRuntimeState({
+    ...result,
+    running: false,
+  })
+  return {
+    running: false,
+    rpcReachable,
+    raw: result.stdout,
+    stderr: result.stderr,
+    code: result.code,
+    stateCode: classification.stateCode,
+    summary: classification.summary,
+  }
+}
+
+async function resolveGatewayMutationPreflightHomeDir(): Promise<string | null> {
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  if (activeRuntimeSnapshot?.stateDir) {
+    return String(activeRuntimeSnapshot.stateDir).trim() || null
+  }
+
+  const authoritativeRuntimeSnapshot = readAuthoritativeWindowsChannelRuntimeSnapshot()
+  if (authoritativeRuntimeSnapshot?.stateDir) {
+    return String(authoritativeRuntimeSnapshot.stateDir).trim() || null
+  }
+
+  const readOnlyPaths = await resolveOpenClawPathsForRead({
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+  }).catch(() => null)
+  if (readOnlyPaths?.homeDir) {
+    return String(readOnlyPaths.homeDir).trim() || null
+  }
+
+  return String(resolveOpenClawPaths().homeDir || '').trim() || null
+}
+
+export async function gatewayStart(options: GatewayMutationCommandOptions = {}): Promise<CliResult> {
+  await appendEnvCheckDiagnostic('main-gateway-start-start', {})
+  const activeRuntimeSnapshot =
+    options.activeRuntimeSnapshot || await resolveWindowsActiveRuntimeSnapshotForRead()
+  await appendEnvCheckDiagnostic('main-gateway-start-runtime-snapshot', {
+    providedSnapshot: Boolean(options.activeRuntimeSnapshot),
+    hasSnapshot: Boolean(activeRuntimeSnapshot),
+    stateDir: String(activeRuntimeSnapshot?.stateDir || '').trim() || null,
+    nodePath: String(activeRuntimeSnapshot?.nodePath || '').trim() || null,
+  })
+  const configRepairPreflightHomeDir =
+    String(options.configRepairPreflightHomeDir || '').trim()
+    || await resolveGatewayMutationPreflightHomeDir()
+  const result = await runCli(['gateway', 'start'], MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs, 'gateway', {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    configRepairPreflightHomeDir,
+    requireConfigRepairPreflight: true,
+  })
+  await appendEnvCheckDiagnostic('main-gateway-start-result', {
+    ok: result.ok,
+    code: result.code,
+    stdout: String(result.stdout || '').slice(0, 400),
+    stderr: String(result.stderr || '').slice(0, 400),
+  })
+  return result
 }
 
 // Singleflight lock to prevent concurrent restart operations
 let restartPromise: Promise<CliResult> | null = null
 
 async function gatewayRestartImpl(): Promise<CliResult> {
-  return runCli(['gateway', 'restart'], MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs, 'gateway')
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  const configRepairPreflightHomeDir = await resolveGatewayMutationPreflightHomeDir()
+  return runCli(['gateway', 'restart'], MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs, 'gateway', {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    configRepairPreflightHomeDir,
+    requireConfigRepairPreflight: true,
+  })
 }
 
 export async function gatewayRestart(): Promise<CliResult> {
@@ -2265,7 +3580,13 @@ export async function gatewayRestart(): Promise<CliResult> {
 }
 
 export async function gatewayForceRestart(): Promise<CliResult> {
-  return runCli(['gateway', 'restart', '--force'])
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  const configRepairPreflightHomeDir = await resolveGatewayMutationPreflightHomeDir()
+  return runCli(['gateway', 'restart', '--force'], undefined, undefined, {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    configRepairPreflightHomeDir,
+    requireConfigRepairPreflight: true,
+  })
 }
 
 export async function gatewayStop(): Promise<CliResult> {
@@ -2273,24 +3594,49 @@ export async function gatewayStop(): Promise<CliResult> {
 }
 
 export async function getStatus(): Promise<CliResult> {
-  return runCli(['status', '--json'], MAIN_RUNTIME_POLICY.cli.statusTimeoutMs, 'gateway')
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  return runCli(['status', '--json'], MAIN_RUNTIME_POLICY.cli.statusTimeoutMs, 'gateway', {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    skipConfigRepairPreflight: true,
+    skipPermissionAutoRepair: true,
+  })
 }
 
-export async function readConfig(): Promise<Record<string, any> | null> {
+export async function readConfig(options: ReadConfigOptions = {}): Promise<Record<string, any> | null> {
+  const requestedConfigPath = String(options.configPath || '').trim()
   try {
-    return await runFsWithPermissionAutoRepair(
+    await appendEnvCheckDiagnostic('main-read-config-start', {
+      requestedConfigPath: requestedConfigPath || null,
+    })
+    const config = await runFsWithPermissionAutoRepair(
       async () => {
-        const openClawPaths = await getOpenClawPaths()
-        const raw = await readFile(openClawPaths.configFile, 'utf-8')
+        const openClawPaths = requestedConfigPath ? null : await getOpenClawPathsForRead()
+        const configFile = requestedConfigPath || openClawPaths?.configFile || ''
+        await appendEnvCheckDiagnostic('main-read-config-resolved-path', {
+          requestedConfigPath: requestedConfigPath || null,
+          resolvedConfigPath: configFile,
+        })
+        const raw = await readFile(configFile, 'utf-8')
         return JSON.parse(raw)
       },
       {
         operation: 'read-config',
         controlDomain: 'config-write',
       },
-      createPermissionAutoRepairDependencies()
+      createPermissionAutoRepairDependencies({ readOnlyPaths: true })
     )
+    await appendEnvCheckDiagnostic('main-read-config-result', {
+      requestedConfigPath: requestedConfigPath || null,
+      isNull: !config,
+      topLevelKeys: config && typeof config === 'object' ? Object.keys(config).length : 0,
+    })
+    return config
   } catch {
+    await appendEnvCheckDiagnostic('main-read-config-result', {
+      requestedConfigPath: requestedConfigPath || null,
+      isNull: true,
+      errored: true,
+    })
     return null
   }
 }
@@ -2315,12 +3661,45 @@ export async function writeConfig(config: Record<string, any>): Promise<void> {
 }
 
 /** Read and parse .env file as key-value pairs */
-export async function readEnvFile(): Promise<Record<string, string>> {
+export async function readEnvFile(options: ReadEnvFileOptions = {}): Promise<Record<string, string>> {
+  if (options.diagnosticProbe === 'gateway-health') {
+    await appendEnvCheckDiagnostic('main-gateway-health-read-env-enter', {})
+    await appendEnvCheckDiagnostic('main-gateway-health-read-env-before-run-fs', {})
+  }
   try {
-    return await runFsWithPermissionAutoRepair(
+    const env = await runFsWithPermissionAutoRepair(
       async () => {
-        const openClawPaths = await getOpenClawPaths()
+        if (options.diagnosticProbe === 'gateway-health') {
+          await appendEnvCheckDiagnostic('main-gateway-health-read-env-execute-start', {})
+          await appendEnvCheckDiagnostic('main-gateway-health-read-env-before-resolve-paths', {
+            hasProvidedPaths: Boolean(options.openClawPaths),
+            hasRuntimeSnapshot: Boolean(options.activeRuntimeSnapshot),
+          })
+        }
+        const openClawPaths =
+          options.openClawPaths
+          || (
+            options.activeRuntimeSnapshot
+              ? await resolveRuntimeOpenClawPaths({
+                  activeRuntimeSnapshot: options.activeRuntimeSnapshot,
+                })
+              : await getOpenClawPathsForRead()
+          )
+        if (options.diagnosticProbe === 'gateway-health') {
+          await appendEnvCheckDiagnostic('main-gateway-health-read-env-after-resolve-paths', {
+            envFile: openClawPaths.envFile,
+            homeDir: openClawPaths.homeDir,
+          })
+          await appendEnvCheckDiagnostic('main-gateway-health-read-env-before-read-file', {
+            envFile: openClawPaths.envFile,
+          })
+        }
         const raw = await readFile(openClawPaths.envFile, 'utf-8')
+        if (options.diagnosticProbe === 'gateway-health') {
+          await appendEnvCheckDiagnostic('main-gateway-health-read-env-after-read-file', {
+            size: raw.length,
+          })
+        }
         const env: Record<string, string> = {}
         for (const line of raw.split('\n')) {
           const trimmed = line.trim()
@@ -2338,9 +3717,18 @@ export async function readEnvFile(): Promise<Record<string, string>> {
         operation: 'read-env',
         controlDomain: 'config-write',
       },
-      createPermissionAutoRepairDependencies()
+      createPermissionAutoRepairDependencies({ readOnlyPaths: true })
     )
+    if (options.diagnosticProbe === 'gateway-health') {
+      await appendEnvCheckDiagnostic('main-gateway-health-read-env-after-run-fs', {
+        envKeyCount: Object.keys(env || {}).length,
+      })
+    }
+    return env
   } catch {
+    if (options.diagnosticProbe === 'gateway-health') {
+      await appendEnvCheckDiagnostic('main-gateway-health-read-env-catch', {})
+    }
     return {}
   }
 }
@@ -2459,8 +3847,14 @@ function normalizePairingSenderId(channel: string, senderId: string): string | n
   return trimmed
 }
 
-async function resolveAllowFromStorePaths(channel: string, accountId?: string): Promise<string[]> {
-  const openClawPaths = await getOpenClawPaths()
+async function resolveAllowFromStorePaths(
+  channel: string,
+  accountId?: string,
+  options: { readOnly?: boolean } = {}
+): Promise<string[]> {
+  const openClawPaths = options.readOnly
+    ? await getOpenClawPathsForRead()
+    : await getOpenClawPaths()
   const safeChannel = sanitizeStoreKey(channel)
   const safeAccount = sanitizeStoreKey(accountId?.trim() || 'default')
   const scoped = join(openClawPaths.credentialsDir, `${safeChannel}-${safeAccount}-allowFrom.json`)
@@ -2951,7 +4345,9 @@ async function collectPairingAllowFromUsers(
   const normalizedChannel = sanitizeStoreKey(channel)
   const users = new Set<string>()
 
-  const targets = await resolveAllowFromStorePaths(normalizedChannel, accountId)
+  const targets = await resolveAllowFromStorePaths(normalizedChannel, accountId, {
+    readOnly: true,
+  })
   for (const target of targets) {
     const allowFrom = await readAllowFromStore(target)
     for (const user of allowFrom) {
@@ -3321,7 +4717,7 @@ export async function isPluginInstalledOnDisk(pluginId: string): Promise<boolean
   const normalizedPluginId = String(pluginId || '').trim()
   if (!normalizedPluginId) return false
 
-  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const openClawPaths = await getOpenClawPathsForRead().catch(() => null)
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   if (!homeDir) return false
 
@@ -3348,7 +4744,10 @@ export async function channelsAdd(channel: string, token: string): Promise<CliRe
 }
 
 /** Install plugin via npx (for official plugins like feishu) */
-export async function installPluginNpx(url: string, expectedPluginIds: string[] = []): Promise<CliResult> {
+export async function installPluginNpx(
+  url: string,
+  expectedPluginIds: string[] = []
+): Promise<CliResult> {
   const capabilityError = await guardPlatformCommands(['npx'])
   if (capabilityError) return capabilityError
   const runNpxInstall = async (args: string[], registryUrl?: string | null) => {
@@ -3785,6 +5184,7 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
   try {
     const commitPath = (newPath: string) => {
       process.env.PATH = newPath
+      clearSelectedWindowsRuntimeSnapshot()
       resetCommandCapabilityCache()
       resetRuntimeOpenClawPathsCache()
       return { ok: true, newPath }
@@ -3839,7 +5239,7 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
       if (nvmDir) {
         const nvmNode = await resolveNodeFromInstalledNvmVersions(nvmDir)
         if (nvmNode?.binDir) {
-          detectedNodeBinDir = nvmNode.binDir
+          rememberDetectedNodeBinDir(nvmNode.binDir)
           return commitPath(buildCliPathWithCandidates({
             platform,
             currentPath: process.env.PATH || '',
@@ -3858,7 +5258,7 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
       )
       const shellNodeBinDir = shellNodeResult.ok ? extractNodeBinDir(shellNodeResult.stdout) : null
       if (shellNodeBinDir) {
-        detectedNodeBinDir = shellNodeBinDir
+        rememberDetectedNodeBinDir(shellNodeBinDir)
         return commitPath(buildCliPathWithCandidates({
           platform,
           currentPath: process.env.PATH || '',
@@ -3870,7 +5270,7 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
       for (const nodePath of listNodeExecutableCandidates(platform, process.env.PATH || '', detectedNodeBinDir)) {
         try {
           await access(nodePath)
-          detectedNodeBinDir = dirname(nodePath)
+          rememberDetectedNodeBinDir(dirname(nodePath))
           return commitPath(buildCliPathWithCandidates({
             platform,
             currentPath: process.env.PATH || '',
@@ -3882,7 +5282,7 @@ export async function refreshEnvironment(): Promise<{ ok: boolean; newPath?: str
         }
       }
 
-      detectedNodeBinDir = null
+      rememberDetectedNodeBinDir(null)
       return commitPath(buildCliPathWithCandidates({
         platform,
         currentPath: process.env.PATH || '',

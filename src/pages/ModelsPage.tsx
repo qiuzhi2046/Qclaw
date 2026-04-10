@@ -24,19 +24,15 @@ import {
   type ModelVerificationRecord,
 } from '../shared/model-verification-state'
 import {
-  getUpstreamCatalogItemsLike,
   getUpstreamModelStatusLike,
-  logUpstreamModelStateFallback,
   readOpenClawUpstreamModelState,
-  selectPreferredRendererCatalogItems,
   type RendererUpstreamModelStateResult,
 } from '../shared/upstream-model-state'
 import { canonicalizeModelProviderId, getModelProviderAliasCandidates } from '../lib/model-provider-aliases'
 import { listKnownProviderEnvKeys, listKnownProvidersForEnvKey } from '../lib/openclaw-provider-registry'
 
 type CatalogItem = Awaited<ReturnType<typeof window.api.listModelCatalog>>['items'][number]
-type ModelStatusResult = Awaited<ReturnType<typeof window.api.getModelStatus>>
-type RefreshModelDataResult = Awaited<ReturnType<typeof window.api.refreshModelData>>
+type ModelSnapshotResult = Awaited<ReturnType<typeof window.api.getModelSnapshot>>
 
 interface ModelsPageSnapshot {
   envVars: Record<string, string> | null
@@ -1013,43 +1009,55 @@ export default function ModelsPage() {
   const loadData = useCallback(async (options?: { background?: boolean; forceRefresh?: boolean; allowCliStatusFallback?: boolean }) => {
     const background = Boolean(options?.background)
     const forceRefresh = Boolean(options?.forceRefresh)
-    const allowCliStatusFallback = options?.allowCliStatusFallback !== false
     if (!background) {
       setLoading(true)
     }
     const nextErrors: string[] = []
 
     try {
-      const [env, cfg, upstreamState] = await Promise.all([
-        window.api.readEnvFile().catch(() => ({})),
-        window.api.readConfig(),
-        readOpenClawUpstreamModelState(),
-      ])
+      const snapshot: ModelSnapshotResult = await window.api.getModelSnapshot({
+        includeEnv: true,
+        includeCatalog: true,
+        forceCatalogRefresh: forceRefresh,
+      })
+      const env = snapshot.envVars ?? {}
+      const cfg = snapshot.config ?? null
+      const nextCatalog = snapshot.catalog?.items || latestCatalogRef.current
+      let resolvedModelStatus: Record<string, any> | null = snapshot.modelStatus ?? modelStatusRef.current ?? null
+
       setEnvVars(env)
       setConfig(cfg)
+      setModelStatus(resolvedModelStatus)
+      latestCatalogRef.current = nextCatalog
+      setCatalog(nextCatalog)
+      nextErrors.push(...snapshot.warnings)
 
-      logUpstreamModelStateFallback('ModelsPage', upstreamState)
-
-      const upstreamStatusData = getUpstreamModelStatusLike(upstreamState)
-      const upstreamCatalog = getUpstreamCatalogItemsLike(upstreamState)
-      const normalizedUpstreamCatalog = upstreamCatalog.map((item) => toCatalogItemFromUpstream(item))
-      const needsCliStatus = !upstreamStatusData && allowCliStatusFallback
-      let cliRefreshPromise: Promise<RefreshModelDataResult> | null = null
-      const loadCliRefresh = () => {
-        cliRefreshPromise ??= window.api.refreshModelData({
-          includeCapabilities: false,
-          includeStatus: needsCliStatus,
-          includeCatalog: true,
-          fullCatalog: true,
-          catalogQuery: forceRefresh ? { bypassCache: true } : {},
-        })
-        return cliRefreshPromise
+      if (!snapshot.modelStatus && options?.allowCliStatusFallback !== false) {
+        const statusResult = await window.api.getModelStatus().catch((reason: any) => ({
+          ok: false,
+          action: 'status',
+          command: [],
+          stdout: '',
+          stderr: '',
+          code: null,
+          message: reason?.message || 'æ¨¡åž‹çŠ¶æ€è¯»å–å¤±è´¥',
+        }))
+        if (statusResult.ok) {
+          resolvedModelStatus = ((statusResult.data || null) as Record<string, any> | null)
+          setModelStatus(resolvedModelStatus)
+        } else {
+          resolvedModelStatus = resolvedModelStatus ?? null
+        }
+      } else if (options?.allowCliStatusFallback === false) {
+        resolvedModelStatus = snapshot.modelStatus ?? modelStatusRef.current ?? null
+      } else if (snapshot.modelStatus) {
+        resolvedModelStatus = snapshot.modelStatus
+      } else {
+        resolvedModelStatus = modelStatusRef.current ?? null
       }
 
-      let resolvedModelStatus: Record<string, any> | null = upstreamStatusData
-      if (upstreamStatusData) {
-        setModelStatus(upstreamStatusData)
-      } else if (allowCliStatusFallback) {
+      
+      /*
         const statusResult = (await loadCliRefresh().catch(() => null))?.status
           || await window.api.getModelStatus().catch((reason: any) => ({
             ok: false,
@@ -1071,8 +1079,11 @@ export default function ModelsPage() {
       } else {
         resolvedModelStatus = modelStatusRef.current
       }
+      */
 
-      let resolvedVerificationRecords = verificationRecordsRef.current
+      const resolvedVerificationRecords = verificationRecordsRef.current
+      /*
+      /*
       try {
         const verificationSnapshot = await window.api.syncModelVerificationState({
           statusData: resolvedModelStatus,
@@ -1125,6 +1136,15 @@ export default function ModelsPage() {
           })
         }
       }
+      setError(nextErrors.join('；'))
+      */
+      modelsPageCache.set({
+        envVars: env,
+        config: cfg,
+        modelStatus: resolvedModelStatus,
+        catalog: nextCatalog,
+        verificationRecords: resolvedVerificationRecords,
+      })
       setError(nextErrors.join('；'))
     } catch (e) {
       setError('读取配置失败: ' + (e as Error).message)

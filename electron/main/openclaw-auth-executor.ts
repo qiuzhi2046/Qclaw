@@ -32,6 +32,7 @@ import {
   markRuntimeRevisionInProgress,
   resolveGatewayBlockingReasonFromState,
 } from './openclaw-runtime-reconcile'
+import { reconcileGatewayRuntimeMutation } from './gateway-runtime-owner'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import type { GatewayEnsureRunningResult } from './openclaw-gateway-service'
 import { classifyGatewayRuntimeState } from '../../src/shared/gateway-runtime-diagnostics'
@@ -872,13 +873,13 @@ async function executeOnboardCommandWithGatewayRecovery(params: {
   ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
   extras: Partial<ExecuteAuthRouteResult>
 }): Promise<
-  | { status: 'result'; result: CliResult }
+  | { status: 'result'; result: CliResult; recoveredGateway: boolean }
   | { status: 'failure'; failure: ExecuteAuthRouteResult }
 > {
   params.attemptedCommands.push(params.command)
   let result = await params.runCommand(params.command, ONBOARD_TIMEOUT_MS)
   if (result.ok || !shouldRetryOnboardAfterGatewayRecovery(result)) {
-    return { status: 'result', result }
+    return { status: 'result', result, recoveredGateway: false }
   }
 
   const recoveryResult = await params.ensureGatewayRunning()
@@ -908,7 +909,197 @@ async function executeOnboardCommandWithGatewayRecovery(params: {
 
   params.attemptedCommands.push(params.command)
   result = await params.runCommand(params.command, ONBOARD_TIMEOUT_MS)
-  return { status: 'result', result }
+  return { status: 'result', result, recoveredGateway: true }
+}
+
+async function reconcileSuccessfulOnboardRuntime(params: {
+  routeKind: OnboardRouteKind
+  authChoice: string
+  attemptedCommands: string[][]
+  gatewayTokenBeforeAuth: string | null
+  gatewayTokenAfterAuth: string | null
+  runCommand: (args: string[], timeout?: number) => Promise<CliResult>
+  ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
+  successResult: CliResult
+  recoveredGatewayDuringOnboard: boolean
+  extras: Partial<ExecuteAuthRouteResult>
+}): Promise<
+  | {
+      ok: true
+    }
+  | {
+      ok: false
+      failure: ExecuteAuthRouteResult
+    }
+> {
+  const gatewayTokenChanged = params.gatewayTokenBeforeAuth !== params.gatewayTokenAfterAuth
+  if (!gatewayTokenChanged && params.recoveredGatewayDuringOnboard) {
+    return { ok: true }
+  }
+  let runtimeRevision: number | null = null
+
+  if (gatewayTokenChanged) {
+    const pendingStore = await issueDesiredRuntimeRevision('auth', 'gateway_token_rotated_by_auth', {
+      actions: [
+        {
+          kind: 'repair',
+          action: params.routeKind === 'onboard-custom' ? 'auth-onboard-custom' : 'auth-onboard',
+          outcome: 'succeeded',
+          detail: `认证流程 "${params.authChoice}" 更新了 gateway.auth.token。`,
+          changedPaths: ['gateway.auth.token'],
+        },
+        {
+          kind: 'repair',
+          action: 'gateway-token-apply',
+          outcome: 'scheduled',
+        },
+      ],
+    })
+    runtimeRevision = pendingStore.runtime.desiredRevision
+    await markRuntimeRevisionInProgress(runtimeRevision, {
+      summary: `认证流程 "${params.authChoice}" 已更新 gateway.auth.token，正在确认网关是否已消费最新 token。`,
+      actions: pendingStore.runtime.lastActions,
+    })
+  }
+
+  const runtimeResult = await reconcileGatewayRuntimeMutation(
+    {
+      kind: params.routeKind === 'onboard-custom' ? 'auth-onboard-custom' : 'auth-onboard',
+      reason: params.routeKind,
+      gatewayTokenChanged,
+    },
+    {
+      ensureGatewayRunning: params.ensureGatewayRunning,
+      runCommand: params.runCommand,
+    }
+  )
+
+  params.attemptedCommands.push(...runtimeResult.attemptedCommands)
+
+  if (gatewayTokenChanged) {
+    const gatewayDeferred =
+      runtimeResult.ok
+      && runtimeResult.action === 'defer-token-apply'
+      && !runtimeResult.running
+    const gatewayConfirmed = runtimeResult.ok && runtimeResult.running
+    const gatewayBlockingReason =
+      runtimeResult.failureStage === 'token-apply'
+        ? 'runtime_token_stale'
+        : resolveGatewayBlockingReasonFromState({
+            gatewayStateCode: runtimeResult.stateCode || (gatewayDeferred ? 'gateway_not_running' : undefined),
+          })
+    const runtimeReconcileSummary =
+      gatewayConfirmed
+        ? `网关已确认消费认证流程 "${params.authChoice}" 更新后的 token。`
+        : runtimeResult.failureStage === 'token-apply'
+          ? runtimeResult.summary
+          : gatewayDeferred
+            ? runtimeResult.summary
+            : buildGatewayTokenConfirmFailureMessage({
+                authChoice: params.authChoice,
+                gatewaySummary: runtimeResult.summary || '网关未返回可用确认',
+              })
+    await persistAuthRuntimeReconcile({
+      revision: runtimeRevision,
+      confirmed: gatewayConfirmed,
+      blockingReason: gatewayBlockingReason,
+      blockingDetail: runtimeResult.reasonDetail,
+      safeToRetry: gatewayConfirmed || gatewayDeferred ? true : runtimeResult.safeToRetry,
+      summary: runtimeReconcileSummary,
+      actions:
+        runtimeResult.failureStage === 'token-apply'
+          ? [
+              {
+                kind: 'repair',
+                action: `gateway-token-${runtimeResult.appliedAction || 'hot-reload'}`,
+                outcome: 'failed',
+                detail: runtimeResult.summary,
+              },
+            ]
+          : gatewayDeferred
+            ? [
+                {
+                  kind: 'repair',
+                  action: 'gateway-token-apply',
+                  outcome: 'scheduled',
+                  detail: runtimeResult.summary,
+                },
+                {
+                  kind: 'probe',
+                  action: 'gateway-ensure-running',
+                  outcome: 'skipped',
+                  detail: '当前网关未运行，等待下一次生命周期放行时再应用最新 token。',
+                },
+              ]
+          : [
+              {
+                kind: 'repair',
+                action: `gateway-token-${runtimeResult.appliedAction || 'hot-reload'}`,
+                outcome: 'succeeded',
+                detail: gatewayConfirmed
+                  ? `网关已通过 ${runtimeResult.appliedAction || 'hot-reload'} 接收最新 token，并完成可用性确认。`
+                  : `网关已执行 ${runtimeResult.appliedAction || 'hot-reload'}，但后续可用性确认失败：${runtimeResult.summary}`,
+              },
+              {
+                kind: 'probe',
+                action: 'gateway-ensure-running',
+                outcome: gatewayConfirmed ? 'succeeded' : 'failed',
+                detail: runtimeResult.summary,
+              },
+            ],
+    })
+
+    if (gatewayDeferred) {
+      return { ok: true }
+    }
+
+    if (!gatewayConfirmed) {
+      const failureMessage =
+        runtimeResult.failureStage === 'token-apply'
+          ? runtimeResult.summary
+          : buildGatewayTokenConfirmFailureMessage({
+              authChoice: params.authChoice,
+              gatewaySummary: runtimeResult.summary || '网关未返回可用确认',
+            })
+      return {
+        ok: false,
+        failure: failed(
+          params.routeKind,
+          params.attemptedCommands,
+          failureMessage,
+          'command_failed',
+          {
+            ...params.extras,
+            stdout: [params.successResult.stdout, runtimeResult.stdout].filter(Boolean).join('\n'),
+            stderr: [params.successResult.stderr, runtimeResult.stderr].filter(Boolean).join('\n'),
+            code: runtimeResult.code,
+          }
+        ),
+      }
+    }
+
+    return { ok: true }
+  }
+
+  if (!runtimeResult.ok) {
+    return {
+      ok: false,
+      failure: failed(
+        params.routeKind,
+        params.attemptedCommands,
+        runtimeResult.summary || '网关未返回可用确认',
+        'command_failed',
+        {
+          ...params.extras,
+          stdout: [params.successResult.stdout, runtimeResult.stdout].filter(Boolean).join('\n'),
+          stderr: [params.successResult.stderr, runtimeResult.stderr].filter(Boolean).join('\n'),
+          code: runtimeResult.code,
+        }
+      ),
+    }
+  }
+
+  return { ok: true }
 }
 
 export function resolveAuthMethodDescriptor(
@@ -1531,115 +1722,24 @@ export async function executeAuthRoute(
         }
       }
       const gatewayTokenAfterAuth = readGatewayAuthToken(effectiveConfigAfterAuth)
-      if (gatewayTokenBeforeAuth !== gatewayTokenAfterAuth) {
-        const pendingStore = await issueDesiredRuntimeRevision('auth', 'gateway_token_rotated_by_auth', {
-          actions: [
-            {
-              kind: 'repair',
-              action: 'auth-onboard',
-              outcome: 'succeeded',
-              detail: `认证流程 "${method.authChoice}" 更新了 gateway.auth.token。`,
-              changedPaths: ['gateway.auth.token'],
-            },
-            {
-              kind: 'repair',
-              action: 'gateway-token-apply',
-              outcome: 'scheduled',
-            },
-          ],
-        })
-        const runtimeRevision = pendingStore.runtime.desiredRevision
-        await markRuntimeRevisionInProgress(runtimeRevision, {
-          summary: `认证流程 "${method.authChoice}" 已更新 gateway.auth.token，正在确认网关是否已消费最新 token。`,
-          actions: pendingStore.runtime.lastActions,
-        })
-        const gatewayApply = await applyGatewayTokenRefresh({
-          authChoice: method.authChoice,
-          runCommand,
-          attemptedCommands,
-        })
-        if (!gatewayApply.ok) {
-          await persistAuthRuntimeReconcile({
-            revision: runtimeRevision,
-            confirmed: false,
-            blockingReason: 'runtime_token_stale',
-            safeToRetry: true,
-            summary: gatewayApply.message,
-            actions: [
-              {
-                kind: 'repair',
-                action: 'gateway-token-apply',
-                outcome: 'failed',
-                detail: gatewayApply.message,
-              },
-            ],
-          })
-          return failed(
-            route.kind,
-            attemptedCommands,
-            gatewayApply.message,
-            'command_failed',
-            {
-              loginProviderId: route.providerId,
-              routeMethodId: resolvedRouteMethodId.value,
-              pluginId,
-              stdout: result.stdout,
-              stderr: result.stderr,
-              code: result.code,
-            }
-          )
-        }
-        const gatewayRuntime = await ensureGatewayRunning()
-        attemptedCommands.push(...(gatewayRuntime.attemptedCommands || []))
-        const gatewayConfirmed = gatewayRuntime.ok && gatewayRuntime.running
-        await persistAuthRuntimeReconcile({
-          revision: runtimeRevision,
-          confirmed: gatewayConfirmed,
-          blockingReason: resolveGatewayBlockingReasonFromState({
-            gatewayStateCode: gatewayRuntime.stateCode,
-          }),
-          blockingDetail: gatewayRuntime.reasonDetail,
-          safeToRetry: gatewayConfirmed ? true : gatewayRuntime.safeToRetry,
-          summary: gatewayConfirmed
-            ? `网关已确认消费认证流程 "${method.authChoice}" 更新后的 token。`
-            : buildGatewayTokenConfirmFailureMessage({
-                authChoice: method.authChoice,
-                gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
-              }),
-          actions: [
-            {
-              kind: 'repair',
-              action: `gateway-token-${gatewayApply.appliedAction}`,
-              outcome: 'succeeded',
-              detail: gatewayApply.note,
-            },
-            {
-              kind: 'probe',
-              action: 'gateway-ensure-running',
-              outcome: gatewayConfirmed ? 'succeeded' : 'failed',
-              detail: gatewayRuntime.summary,
-            },
-          ],
-        })
-        if (!gatewayConfirmed) {
-          return failed(
-            route.kind,
-            attemptedCommands,
-            buildGatewayTokenConfirmFailureMessage({
-              authChoice: method.authChoice,
-              gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
-            }),
-            'command_failed',
-            {
-              loginProviderId: route.providerId,
-              routeMethodId: resolvedRouteMethodId.value,
-              pluginId,
-              stdout: [result.stdout, gatewayRuntime.stdout].filter(Boolean).join('\n'),
-              stderr: [result.stderr, gatewayRuntime.stderr].filter(Boolean).join('\n'),
-              code: gatewayRuntime.code,
-            }
-          )
-        }
+      const runtimeReconcileResult = await reconcileSuccessfulOnboardRuntime({
+        routeKind: route.kind,
+        authChoice: method.authChoice,
+        attemptedCommands,
+        gatewayTokenBeforeAuth,
+        gatewayTokenAfterAuth,
+        runCommand,
+        ensureGatewayRunning,
+        successResult: result,
+        recoveredGatewayDuringOnboard: onboardResult.recoveredGateway,
+        extras: {
+          loginProviderId: route.providerId,
+          routeMethodId: resolvedRouteMethodId.value,
+          pluginId,
+        },
+      })
+      if (!runtimeReconcileResult.ok) {
+        return runtimeReconcileResult.failure
       }
     }
     return fromCommand(route.kind, attemptedCommands, result, {
@@ -1773,115 +1873,24 @@ export async function executeAuthRoute(
         }
       }
       const gatewayTokenAfterAuth = readGatewayAuthToken(effectiveConfigAfterAuth)
-      if (gatewayTokenBeforeAuth !== gatewayTokenAfterAuth) {
-        const pendingStore = await issueDesiredRuntimeRevision('auth', 'gateway_token_rotated_by_auth', {
-          actions: [
-            {
-              kind: 'repair',
-              action: 'auth-onboard-custom',
-              outcome: 'succeeded',
-              detail: `认证流程 "${method.authChoice}" 更新了 gateway.auth.token。`,
-              changedPaths: ['gateway.auth.token'],
-            },
-            {
-              kind: 'repair',
-              action: 'gateway-token-apply',
-              outcome: 'scheduled',
-            },
-          ],
-        })
-        const runtimeRevision = pendingStore.runtime.desiredRevision
-        await markRuntimeRevisionInProgress(runtimeRevision, {
-          summary: `认证流程 "${method.authChoice}" 已更新 gateway.auth.token，正在确认网关是否已消费最新 token。`,
-          actions: pendingStore.runtime.lastActions,
-        })
-        const gatewayApply = await applyGatewayTokenRefresh({
-          authChoice: method.authChoice,
-          runCommand,
-          attemptedCommands,
-        })
-        if (!gatewayApply.ok) {
-          await persistAuthRuntimeReconcile({
-            revision: runtimeRevision,
-            confirmed: false,
-            blockingReason: 'runtime_token_stale',
-            safeToRetry: true,
-            summary: gatewayApply.message,
-            actions: [
-              {
-                kind: 'repair',
-                action: 'gateway-token-apply',
-                outcome: 'failed',
-                detail: gatewayApply.message,
-              },
-            ],
-          })
-          return failed(
-            route.kind,
-            attemptedCommands,
-            gatewayApply.message,
-            'command_failed',
-            {
-              loginProviderId: route.providerId,
-              routeMethodId: resolvedRouteMethodId.value,
-              pluginId,
-              stdout: result.stdout,
-              stderr: result.stderr,
-              code: result.code,
-            }
-          )
-        }
-        const gatewayRuntime = await ensureGatewayRunning()
-        attemptedCommands.push(...(gatewayRuntime.attemptedCommands || []))
-        const gatewayConfirmed = gatewayRuntime.ok && gatewayRuntime.running
-        await persistAuthRuntimeReconcile({
-          revision: runtimeRevision,
-          confirmed: gatewayConfirmed,
-          blockingReason: resolveGatewayBlockingReasonFromState({
-            gatewayStateCode: gatewayRuntime.stateCode,
-          }),
-          blockingDetail: gatewayRuntime.reasonDetail,
-          safeToRetry: gatewayConfirmed ? true : gatewayRuntime.safeToRetry,
-          summary: gatewayConfirmed
-            ? `网关已确认消费认证流程 "${method.authChoice}" 更新后的 token。`
-            : buildGatewayTokenConfirmFailureMessage({
-                authChoice: method.authChoice,
-                gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
-              }),
-          actions: [
-            {
-              kind: 'repair',
-              action: `gateway-token-${gatewayApply.appliedAction}`,
-              outcome: 'succeeded',
-              detail: gatewayApply.note,
-            },
-            {
-              kind: 'probe',
-              action: 'gateway-ensure-running',
-              outcome: gatewayConfirmed ? 'succeeded' : 'failed',
-              detail: gatewayRuntime.summary,
-            },
-          ],
-        })
-        if (!gatewayConfirmed) {
-          return failed(
-            route.kind,
-            attemptedCommands,
-            buildGatewayTokenConfirmFailureMessage({
-              authChoice: method.authChoice,
-              gatewaySummary: gatewayRuntime.summary || '网关未返回可用确认',
-            }),
-            'command_failed',
-            {
-              loginProviderId: route.providerId,
-              routeMethodId: resolvedRouteMethodId.value,
-              pluginId,
-              stdout: [result.stdout, gatewayRuntime.stdout].filter(Boolean).join('\n'),
-              stderr: [result.stderr, gatewayRuntime.stderr].filter(Boolean).join('\n'),
-              code: gatewayRuntime.code,
-            }
-          )
-        }
+      const runtimeReconcileResult = await reconcileSuccessfulOnboardRuntime({
+        routeKind: route.kind,
+        authChoice: method.authChoice,
+        attemptedCommands,
+        gatewayTokenBeforeAuth,
+        gatewayTokenAfterAuth,
+        runCommand,
+        ensureGatewayRunning,
+        successResult: result,
+        recoveredGatewayDuringOnboard: onboardResult.recoveredGateway,
+        extras: {
+          loginProviderId: route.providerId,
+          routeMethodId: resolvedRouteMethodId.value,
+          pluginId,
+        },
+      })
+      if (!runtimeReconcileResult.ok) {
+        return runtimeReconcileResult.failure
       }
     }
     return fromCommand(route.kind, attemptedCommands, result, {

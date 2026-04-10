@@ -1,4 +1,6 @@
 import { resolveOpenClawPackageRoot } from './openclaw-package'
+import { resolveWindowsActiveRuntimeSnapshotForRead } from './openclaw-runtime-readonly'
+import { WINDOWS_PRIVATE_NODE_VERSION } from './platforms/windows/windows-runtime-policy'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 
 const http = process.getBuiltinModule('node:http') as typeof import('node:http')
@@ -18,7 +20,7 @@ const ENV_OPENCLAW_METADATA_URL = 'QCLAW_OPENCLAW_METADATA_URL'
 const DEFAULT_REQUEST_TIMEOUT_MS = MAIN_RUNTIME_POLICY.node.metadataRequestTimeoutMs
 
 const BUNDLED_LTS_RELEASES: Record<number, string> = {
-  24: 'v24.14.0',
+  24: WINDOWS_PRIVATE_NODE_VERSION,
   22: 'v22.22.1',
   20: 'v20.20.1',
   18: 'v18.20.8',
@@ -26,6 +28,7 @@ const BUNDLED_LTS_RELEASES: Record<number, string> = {
 
 type NodeArch = 'x64' | 'arm64' | 'x86'
 type NodeInstallerArch = NodeArch | 'universal'
+type NodeArtifactKind = 'pkg' | 'zip'
 type RequirementSource =
   | 'env-override'
   | 'installed-openclaw-package'
@@ -58,6 +61,7 @@ export interface NodeInstallPlan {
   platform: 'darwin' | 'win32'
   detectedArch: NodeArch
   installerArch: NodeInstallerArch
+  artifactKind: NodeArtifactKind
   distBaseUrl: string
   url: string
   filename: string
@@ -70,12 +74,14 @@ interface ResolveNodeInstallPlanOptions {
   readInstalledOpenClawPackageJson?: () => Promise<Record<string, unknown> | null>
   fetchOpenClawMetadata?: () => Promise<Record<string, unknown>>
   fetchNodeDistIndex?: () => Promise<NodeDistIndexEntry[]>
+  skipDynamicOpenClawRequirementProbe?: boolean
 }
 
 interface ResolveRequirementOptions {
   env?: NodeJS.ProcessEnv
   readInstalledOpenClawPackageJson?: () => Promise<Record<string, unknown> | null>
   fetchOpenClawMetadata?: () => Promise<Record<string, unknown>>
+  skipDynamicOpenClawRequirementProbe?: boolean
 }
 
 let cachedDefaultRequirement: Promise<OpenClawNodeRequirement> | null = null
@@ -152,7 +158,10 @@ function readEnginesNode(packageJson: Record<string, unknown> | null | undefined
 function getDefaultReadInstalledOpenClawPackageJson(): () => Promise<Record<string, unknown> | null> {
   return async () => {
     try {
-      const packageRoot = await resolveOpenClawPackageRoot()
+      const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+      const packageRoot = await resolveOpenClawPackageRoot({
+        activeRuntimeSnapshot,
+      })
       const packageJsonPath = path.join(packageRoot, 'package.json')
       const raw = await fsPromises.readFile(packageJsonPath, 'utf8')
       return JSON.parse(raw) as Record<string, unknown>
@@ -179,7 +188,12 @@ function getDefaultFetchNodeDistIndex(distBaseUrl: string): () => Promise<NodeDi
 }
 
 function shouldUseDefaultRequirementCache(options: ResolveRequirementOptions): boolean {
-  return !options.env && !options.readInstalledOpenClawPackageJson && !options.fetchOpenClawMetadata
+  return (
+    !options.env &&
+    !options.readInstalledOpenClawPackageJson &&
+    !options.fetchOpenClawMetadata &&
+    options.skipDynamicOpenClawRequirementProbe !== true
+  )
 }
 
 function shouldUseDefaultPlanCache(options: ResolveNodeInstallPlanOptions): boolean {
@@ -189,7 +203,8 @@ function shouldUseDefaultPlanCache(options: ResolveNodeInstallPlanOptions): bool
     !options.processArch &&
     !options.readInstalledOpenClawPackageJson &&
     !options.fetchOpenClawMetadata &&
-    !options.fetchNodeDistIndex
+    !options.fetchNodeDistIndex &&
+    options.skipDynamicOpenClawRequirementProbe !== true
   )
 }
 
@@ -324,27 +339,21 @@ export function getBundledTargetNodeVersion(requiredVersion: string): string {
   return getBundledFallbackVersion(requiredVersion)
 }
 
-function resolveWindowsInstallerArch(
-  files: string[],
-  detectedArch: NodeArch
-): NodeArch | null {
+function resolveWindowsZipInstallerArch(files: string[], detectedArch: NodeArch): NodeArch | null {
   const availability: Array<{ installerArch: NodeArch; fileKey: string }> =
     detectedArch === 'arm64'
       ? [
-          { installerArch: 'arm64', fileKey: 'win-arm64-msi' },
-          { installerArch: 'x64', fileKey: 'win-x64-msi' },
-          { installerArch: 'x86', fileKey: 'win-x86-msi' },
+          { installerArch: 'arm64', fileKey: 'win-arm64-zip' },
+          { installerArch: 'x64', fileKey: 'win-x64-zip' },
         ]
       : detectedArch === 'x64'
-        ? [
-            { installerArch: 'x64', fileKey: 'win-x64-msi' },
-            { installerArch: 'x86', fileKey: 'win-x86-msi' },
-          ]
-        : [{ installerArch: 'x86', fileKey: 'win-x86-msi' }]
+        ? [{ installerArch: 'x64', fileKey: 'win-x64-zip' }]
+        : []
 
   for (const candidate of availability) {
     if (files.includes(candidate.fileKey)) return candidate.installerArch
   }
+
   return null
 }
 
@@ -352,20 +361,32 @@ function resolveInstallerArchForRelease(
   platform: 'darwin' | 'win32',
   files: string[],
   detectedArch: NodeArch
-): NodeInstallerArch | null {
+): { artifactKind: NodeArtifactKind; installerArch: NodeInstallerArch } | null {
   if (platform === 'darwin') {
-    return files.includes('osx-x64-pkg') ? 'universal' : null
+    return files.includes('osx-x64-pkg')
+      ? { artifactKind: 'pkg', installerArch: 'universal' }
+      : null
   }
 
-  return resolveWindowsInstallerArch(files, detectedArch)
+  const installerArch = resolveWindowsZipInstallerArch(files, detectedArch)
+  return installerArch ? { artifactKind: 'zip', installerArch } : null
 }
 
-function buildInstallerFilename(version: string, platform: 'darwin' | 'win32', installerArch: NodeInstallerArch): string {
+function buildInstallerFilename(
+  version: string,
+  platform: 'darwin' | 'win32',
+  installerArch: NodeInstallerArch,
+  artifactKind: NodeArtifactKind
+): string {
   if (platform === 'darwin') {
     return `node-${version}.pkg`
   }
 
-  return `node-${version}-${installerArch}.msi`
+  if (artifactKind === 'zip') {
+    return `node-${version}-win-${installerArch}.zip`
+  }
+
+  return `node-${version}.pkg`
 }
 
 function buildInstallPlan(
@@ -374,12 +395,13 @@ function buildInstallPlan(
   platform: 'darwin' | 'win32',
   detectedArch: NodeArch,
   installerArch: NodeInstallerArch,
+  artifactKind: NodeArtifactKind,
   requiredVersion: string,
   requirementSource: RequirementSource,
   distBaseUrl: string
 ): NodeInstallPlan {
   const normalizedVersion = normalizeNodeVersionTag(version)
-  const filename = buildInstallerFilename(normalizedVersion, platform, installerArch)
+  const filename = buildInstallerFilename(normalizedVersion, platform, installerArch, artifactKind)
   return {
     version: normalizedVersion,
     requiredVersion,
@@ -388,6 +410,7 @@ function buildInstallPlan(
     platform,
     detectedArch,
     installerArch,
+    artifactKind,
     distBaseUrl,
     url: `${distBaseUrl}/${normalizedVersion}/${filename}`,
     filename,
@@ -432,14 +455,15 @@ function selectPlanFromDistIndex(
 
   for (const group of candidateGroups) {
     for (const entry of group) {
-      const installerArch = resolveInstallerArchForRelease(platform, entry.files, detectedArch)
-      if (!installerArch) continue
+      const installer = resolveInstallerArchForRelease(platform, entry.files, detectedArch)
+      if (!installer) continue
       return buildInstallPlan(
         entry.version,
         'official-dist-index',
         platform,
         detectedArch,
-        installerArch,
+        installer.installerArch,
+        installer.artifactKind,
         requiredVersion,
         requirementSource,
         distBaseUrl
@@ -472,6 +496,13 @@ export async function resolveOpenClawNodeRequirement(
       return {
         minVersion: envOverride,
         source: 'env-override' as const,
+      }
+    }
+
+    if (options.skipDynamicOpenClawRequirementProbe === true) {
+      return {
+        minVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
+        source: 'bundled-fallback' as const,
       }
     }
 
@@ -548,19 +579,40 @@ export async function resolveNodeInstallPlan(
       env,
       readInstalledOpenClawPackageJson: options.readInstalledOpenClawPackageJson,
       fetchOpenClawMetadata: options.fetchOpenClawMetadata,
+      skipDynamicOpenClawRequirementProbe: options.skipDynamicOpenClawRequirementProbe,
     })
     const detectedArch = detectInstallerArch(platform, options.processArch || process.arch, env)
     const distBaseUrl = normalizeDistBaseUrl(String(env[ENV_NODE_DIST_BASE_URL] || DEFAULT_NODE_DIST_BASE_URL))
     const pinnedVersion = normalizeNodeVersionTag(String(env[ENV_NODE_INSTALL_VERSION] || ''))
 
+    if (platform === 'win32' && detectedArch === 'x86') {
+      throw new Error('Unsupported Windows Node zip architecture: x86')
+    }
+
     if (pinnedVersion) {
-      const installerArch = platform === 'darwin' ? 'universal' : detectedArch === 'arm64' ? 'x64' : detectedArch
+      const installerArch = platform === 'darwin' ? 'universal' : detectedArch === 'arm64' ? 'arm64' : 'x64'
+      const artifactKind: NodeArtifactKind = platform === 'darwin' ? 'pkg' : 'zip'
       return buildInstallPlan(
         pinnedVersion,
         'env-override',
         platform,
         detectedArch,
         installerArch,
+        artifactKind,
+        required.minVersion,
+        required.source,
+        distBaseUrl
+      )
+    }
+
+    if (platform === 'win32') {
+      return buildInstallPlan(
+        WINDOWS_PRIVATE_NODE_VERSION,
+        'bundled-fallback',
+        platform,
+        detectedArch,
+        detectedArch === 'arm64' ? 'arm64' : 'x64',
+        'zip',
         required.minVersion,
         required.source,
         distBaseUrl
@@ -584,13 +636,14 @@ export async function resolveNodeInstallPlan(
     }
 
     const fallbackVersion = getBundledFallbackVersion(required.minVersion)
-    const fallbackInstallerArch = platform === 'darwin' ? 'universal' : detectedArch === 'arm64' ? 'x64' : detectedArch
+    const fallbackInstallerArch = 'universal'
     return buildInstallPlan(
       fallbackVersion,
       'bundled-fallback',
       platform,
       detectedArch,
       fallbackInstallerArch,
+      'pkg',
       required.minVersion,
       required.source,
       distBaseUrl

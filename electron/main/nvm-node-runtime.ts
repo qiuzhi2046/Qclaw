@@ -133,7 +133,14 @@ export async function detectNvmWindowsDir(
   const pathModule = options.pathModule || path
 
   const nvmHome = String(env.NVM_HOME || '').trim()
-  if (nvmHome) return nvmHome
+  if (nvmHome) {
+    try {
+      await access(nvmHome)
+      return nvmHome
+    } catch {
+      // Ignore stale nvm-windows environment variables and continue to the APPDATA fallback.
+    }
+  }
 
   const appData = String(env.APPDATA || '').trim()
   if (!appData) return null

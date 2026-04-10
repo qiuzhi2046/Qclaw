@@ -6,11 +6,17 @@ import {
   runDashboardEntryBootstrapFlow,
   type DashboardEntryBootstrapApi,
 } from '../GatewayBootstrapGate'
+import gatewayBootstrapSource from '../GatewayBootstrapGate.tsx?raw'
 
 function createBootstrapApi(
   overrides: Partial<DashboardEntryBootstrapApi> = {}
 ): DashboardEntryBootstrapApi {
   return {
+    ensureGatewayRunning: vi.fn().mockResolvedValue({
+      ok: false,
+      running: false,
+      summary: 'Gateway 未运行',
+    }),
     gatewayHealth: vi.fn().mockResolvedValue({
       running: false,
       summary: 'Gateway 未运行',
@@ -90,6 +96,13 @@ function createBootstrapApi(
 }
 
 describe('dashboard entry bootstrap flow', () => {
+  it('records gateway bootstrap flow progress into env-check diagnostics', () => {
+    expect(gatewayBootstrapSource).toContain("window.api.appendEnvCheckDiagnostic('gateway-bootstrap-run-start'")
+    expect(gatewayBootstrapSource).toContain("window.api.appendEnvCheckDiagnostic('gateway-bootstrap-flow-result'")
+    expect(gatewayBootstrapSource).toContain("window.api.appendEnvCheckDiagnostic('gateway-bootstrap-ready'")
+    expect(gatewayBootstrapSource).toContain("window.api.appendEnvCheckDiagnostic('gateway-bootstrap-flow-failed'")
+  })
+
   it('builds a dashboard entry snapshot and lets Dashboard render from it immediately', async () => {
     const api = createBootstrapApi({
       gatewayHealth: vi.fn().mockResolvedValue({
@@ -275,7 +288,119 @@ describe('dashboard entry bootstrap flow', () => {
     const result = await runDashboardEntryBootstrapFlow(api)
 
     expect(result.snapshot.gatewayRunning).toBe(false)
-    expect(result.softWarnings).toContain('网关当前未就绪：Gateway 未 ready')
+    expect(result.softWarnings).toContain('网关当前未就绪：Gateway 未运行')
+  })
+
+  it('attempts a lightweight gateway ensure before dashboard entry when the gateway is not running', async () => {
+    const ensureGatewayRunning = vi.fn().mockResolvedValue({
+      ok: true,
+      running: true,
+      summary: 'Gateway 已自动恢复',
+    })
+    const api = createBootstrapApi({
+      ensureGatewayRunning,
+      gatewayHealth: vi.fn().mockResolvedValue({
+        running: false,
+        summary: 'Gateway 未 ready',
+      }),
+    })
+
+    const result = await runDashboardEntryBootstrapFlow(api)
+
+    expect(ensureGatewayRunning).toHaveBeenCalledWith({ skipRuntimePrecheck: true })
+    expect(result.snapshot.gatewayRunning).toBe(true)
+    expect(result.softWarnings).toEqual([])
+  })
+
+  it('keeps dashboard entry soft-blocking when the lightweight gateway ensure still fails', async () => {
+    const ensureGatewayRunning = vi.fn().mockResolvedValue({
+      ok: false,
+      running: false,
+      summary: 'Gateway 自动恢复失败',
+    })
+    const api = createBootstrapApi({
+      ensureGatewayRunning,
+      gatewayHealth: vi.fn().mockResolvedValue({
+        running: false,
+        summary: 'Gateway 未 ready',
+      }),
+    })
+
+    const result = await runDashboardEntryBootstrapFlow(api)
+
+    expect(ensureGatewayRunning).toHaveBeenCalledWith({ skipRuntimePrecheck: true })
+    expect(result.snapshot.gatewayRunning).toBe(false)
+    expect(result.softWarnings).toContain('网关当前未就绪：Gateway 自动恢复失败')
+  })
+
+  it('lets dashboard entry continue when the lightweight gateway ensure exceeds the bootstrap wait budget', async () => {
+    const ensureGatewayRunning = vi.fn(
+      () =>
+        new Promise(() => {
+          // Keep the ensure request pending to simulate a long-running gateway recovery.
+        })
+    )
+    const api = createBootstrapApi({
+      ensureGatewayRunning,
+      gatewayHealth: vi.fn().mockResolvedValue({
+        running: false,
+        summary: 'Gateway 仍在恢复中',
+      }),
+    })
+
+    const outcome = await Promise.race([
+      runDashboardEntryBootstrapFlow(api, {
+        gatewayEnsureTimeoutMs: 5,
+      }).then((result) => ({ kind: 'resolved' as const, result })),
+      new Promise<{ kind: 'timed_out' }>((resolve) => {
+        setTimeout(() => resolve({ kind: 'timed_out' }), 40)
+      }),
+    ])
+
+    expect(outcome.kind).toBe('resolved')
+    if (outcome.kind !== 'resolved') {
+      throw new Error('dashboard bootstrap did not resolve before the test watchdog timeout')
+    }
+
+    expect(ensureGatewayRunning).toHaveBeenCalledWith({ skipRuntimePrecheck: true })
+    expect(outcome.result.snapshot.gatewayRunning).toBe(false)
+    expect(outcome.result.softWarnings).toContain('网关仍在后台继续恢复，控制面板先按当前状态打开。')
+    expect(outcome.result.softWarnings).toContain('网关当前未就绪：Gateway 仍在恢复中')
+  })
+
+  it('lets dashboard entry continue when model and pairing summaries exceed the bootstrap wait budgets', async () => {
+    const pending = () =>
+      new Promise<never>(() => {
+        // Keep the read pending to simulate a slow bootstrap side task.
+      })
+    const api = createBootstrapApi({
+      gatewayHealth: vi.fn().mockResolvedValue({
+        running: true,
+        summary: 'Gateway å·²è¿è¡Œ',
+      }),
+      getModelUpstreamState: vi.fn(pending),
+      pairingFeishuStatus: vi.fn(pending),
+      getFeishuRuntimeStatus: vi.fn(pending),
+    })
+
+    const outcome = await Promise.race([
+      runDashboardEntryBootstrapFlow(api, {
+        modelBootstrapTimeoutMs: 5,
+        pairingBootstrapTimeoutMs: 5,
+      } as any).then((result) => ({ kind: 'resolved' as const, result })),
+      new Promise<{ kind: 'timed_out' }>((resolve) => {
+        setTimeout(() => resolve({ kind: 'timed_out' }), 40)
+      }),
+    ])
+
+    expect(outcome.kind).toBe('resolved')
+    if (outcome.kind !== 'resolved') {
+      throw new Error('dashboard bootstrap did not resolve before the test watchdog timeout')
+    }
+
+    expect(outcome.result.snapshot.gatewayRunning).toBe(true)
+    expect(outcome.result.snapshot.modelStatus).toBeNull()
+    expect(outcome.result.snapshot.pairingSummary).toBeNull()
   })
 
   it('treats config reads as a hard block', async () => {

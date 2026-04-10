@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 
+const { probeWindowsPortOwnerMock } = vi.hoisted(() => ({
+  probeWindowsPortOwnerMock: vi.fn(),
+}))
+
 vi.mock('../cli', () => ({
   readConfig: vi.fn().mockResolvedValue(null),
   runCli: vi.fn(),
   runShell: vi.fn(),
 }))
 
-import { parseLsofPortOwnerOutput } from '../openclaw-gateway-probes'
+vi.mock('../platforms/windows/windows-platform-ops', () => ({
+  probeWindowsPortOwner: probeWindowsPortOwnerMock,
+}))
+
+import { parseLsofPortOwnerOutput, probeGatewayPortOwner } from '../openclaw-gateway-probes'
 import { DEFAULT_GATEWAY_PORT, isManagedGatewayPort, resolveGatewayConfiguredPort } from '../../../src/shared/gateway-runtime-state'
 
 describe('openclaw gateway probes', () => {
@@ -43,6 +51,29 @@ describe('openclaw gateway probes', () => {
     )
 
     expect(owner.kind).toBe('none')
+  })
+
+  const itOnWindows = process.platform === 'win32' ? it : it.skip
+
+  itOnWindows('routes Windows port ownership probing through windows platform ops', async () => {
+    probeWindowsPortOwnerMock.mockResolvedValue({
+      kind: 'foreign',
+      port: 18789,
+      pid: 2451,
+      processName: 'python.exe',
+      command: 'python.exe -m http.server',
+      source: 'powershell',
+    })
+
+    await expect(probeGatewayPortOwner(18789)).resolves.toEqual({
+      kind: 'foreign',
+      port: 18789,
+      pid: 2451,
+      processName: 'python.exe',
+      command: 'python.exe -m http.server',
+      source: 'powershell',
+    })
+    expect(probeWindowsPortOwnerMock).toHaveBeenCalledWith(18789)
   })
 
   it('resolves the configured gateway port and managed-port policy', () => {

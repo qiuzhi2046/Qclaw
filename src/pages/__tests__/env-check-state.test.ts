@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import * as EnvCheckModule from '../EnvCheck'
+import envCheckSource from '../EnvCheck.tsx?raw'
 import {
+  buildDeferredGatewayStepState,
   buildOpenClawAutoCorrectionConsentMessage,
   buildOpenClawGateState,
   canContinueWithOpenClawGate,
@@ -8,11 +10,13 @@ import {
   canShowOpenClawUpgradeAction,
   clearTakeoverFailure,
   createEnvCheckRestartState,
+  formatPluginRepairErrorSummaryForEnvCheck,
   formatTakeoverFailureManualBackupWarning,
   resolveTakeoverBackupRootDirectory,
   resolveEnvInstallProgressStep,
   resolveActiveTakeoverFailure,
   retryOpenClawLatestVersionCheck,
+  shouldDownloadNodeInstallerBeforeInstall,
   shouldOfferManualNodeUpgrade,
   shouldRenderStartupIssueInline,
 } from '../EnvCheck'
@@ -77,6 +81,142 @@ describe('createEnvCheckRestartState', () => {
         shouldInstallOpenClawRuntime: true,
       })
     ).toBe('node')
+  })
+
+  it('lets the main process install the Windows private Node zip instead of predownloading it in the renderer', () => {
+    expect(
+      shouldDownloadNodeInstallerBeforeInstall({
+        needNode: true,
+        installStrategy: 'installer',
+        platform: 'win32',
+        nodeInstallPlan: {
+          artifactKind: 'zip',
+        },
+      })
+    ).toBe(false)
+  })
+
+  it('bootstraps the Windows private Node zip before probing OpenClaw commands', () => {
+    const shouldBootstrapNodeBeforeOpenClawCheck = (
+      EnvCheckModule as typeof EnvCheckModule & {
+        shouldBootstrapNodeBeforeOpenClawCheck?: (options: {
+          installStrategy: 'nvm' | 'installer'
+          needNode: boolean
+          nodeInstallPlan?: { artifactKind?: 'pkg' | 'zip' } | null
+          platform: string
+        }) => boolean
+      }
+    ).shouldBootstrapNodeBeforeOpenClawCheck
+
+    expect(shouldBootstrapNodeBeforeOpenClawCheck).toBeTypeOf('function')
+    expect(
+      shouldBootstrapNodeBeforeOpenClawCheck?.({
+        needNode: true,
+        installStrategy: 'installer',
+        platform: 'win32',
+        nodeInstallPlan: {
+          artifactKind: 'zip',
+        },
+      })
+    ).toBe(true)
+    expect(
+      shouldBootstrapNodeBeforeOpenClawCheck?.({
+        needNode: true,
+        installStrategy: 'installer',
+        platform: 'darwin',
+        nodeInstallPlan: {
+          artifactKind: 'pkg',
+        },
+      })
+    ).toBe(false)
+
+    const source = envCheckSource
+    const bootstrapIndex = source.indexOf('shouldBootstrapNodeBeforeOpenClawCheck({')
+    const openClawCheckIndex = source.indexOf('const openclawResult = await window.api.checkOpenClaw()')
+    expect(bootstrapIndex).toBeGreaterThanOrEqual(0)
+    expect(openClawCheckIndex).toBeGreaterThan(bootstrapIndex)
+    expect(source.slice(bootstrapIndex, openClawCheckIndex)).toContain('needOpenClaw: false')
+  })
+
+  it('uses env-check-specific OpenClaw discovery instead of whole-machine discovery during the Windows check flow', () => {
+    const source = envCheckSource
+    expect(source).toContain('const discoverOpenClawDuringEnvCheck = async () => {')
+    expect(source).toContain('window.api.discoverOpenClawForEnvCheck().catch(() => null)')
+
+    const initialDiscoveryIndex = source.indexOf('const initialDiscovery = await discoverOpenClawDuringEnvCheck()')
+    const finalDiscoveryIndex = source.indexOf('shouldInstallOpenClawRuntime ? await discoverOpenClawDuringEnvCheck() : initialDiscovery')
+    const historyRecoveryDiscoveryIndex = source.indexOf('const recoveredDiscovery = await window.api.discoverOpenClaw().catch(() => null)')
+
+    expect(initialDiscoveryIndex).toBeGreaterThan(-1)
+    expect(finalDiscoveryIndex).toBeGreaterThan(initialDiscoveryIndex)
+    expect(historyRecoveryDiscoveryIndex).toBeGreaterThan(-1)
+  })
+
+  it('keeps the Windows upgrade check on the env-check discovery instead of rediscovering installs', () => {
+    const source = envCheckSource
+    expect(source).toContain("window.api.platform === 'win32'")
+    expect(source).toContain('window.api.checkOpenClawUpgradeForEnvCheck(discovery)')
+    expect(source).toContain('window.api.checkOpenClawUpgrade()')
+  })
+
+  it('shows a non-blocking gateway owner warning when Windows owner artifacts are missing', () => {
+    expect(buildDeferredGatewayStepState('service-missing').description).toContain('后台启动器缺失')
+    expect(buildDeferredGatewayStepState('service-missing').description).toContain('不会自动安装')
+    expect(buildDeferredGatewayStepState('launcher-missing').description).toContain('启动器损坏')
+    expect(buildDeferredGatewayStepState('healthy').description).toContain('认证和渠道配置完成后再确认网关可用性')
+  })
+
+  it('derives shared config readiness from the active candidate config path during env-check', () => {
+    const source = envCheckSource
+
+    expect(source).toContain('const readSharedConfigInitialized = async (configPath?: string | null) => {')
+    expect(source).toContain('const config = await window.api.readConfig({ configPath: configPath || undefined })')
+    expect(source).toContain('await readSharedConfigInitialized(')
+    expect(source).toContain('resolveActiveOpenClawCandidate(')
+    expect(source).toContain('?.configPath')
+  })
+
+  it('marks a freshly installed Windows OpenClaw runtime as managed before takeover inspection reruns', () => {
+    const source = envCheckSource
+    expect(source).toContain('const markInstalledOpenClawAsManagedDuringEnvCheck = async (')
+    expect(source).toContain("if (window.api.platform !== 'win32') return")
+    expect(source).toContain('await window.api.markManagedOpenClawInstall(activeCandidate.installFingerprint)')
+
+    const postInstallDiscoveryIndex = source.indexOf(
+      'shouldInstallOpenClawRuntime ? await discoverOpenClawDuringEnvCheck() : initialDiscovery'
+    )
+    const managedMarkIndex = source.indexOf(
+      'await markInstalledOpenClawAsManagedDuringEnvCheck(finalDiscoveryResult)'
+    )
+    const finalInspectionIndex = source.indexOf('const finalGateState = await inspectExistingOpenClaw(95)')
+
+    expect(postInstallDiscoveryIndex).toBeGreaterThan(-1)
+    expect(managedMarkIndex).toBeGreaterThan(postInstallDiscoveryIndex)
+    expect(finalInspectionIndex).toBeGreaterThan(managedMarkIndex)
+  })
+
+  it('keeps renderer predownload for macOS Node pkg installers', () => {
+    expect(
+      shouldDownloadNodeInstallerBeforeInstall({
+        needNode: true,
+        installStrategy: 'installer',
+        platform: 'darwin',
+        nodeInstallPlan: {
+          artifactKind: 'pkg',
+        },
+      })
+    ).toBe(true)
+
+    expect(
+      shouldDownloadNodeInstallerBeforeInstall({
+        needNode: true,
+        installStrategy: 'nvm',
+        platform: 'darwin',
+        nodeInstallPlan: {
+          artifactKind: 'pkg',
+        },
+      })
+    ).toBe(false)
   })
 
   it('renders Xcode pending issues inline so users can retry recognition from the page', () => {
@@ -207,6 +347,35 @@ describe('createEnvCheckRestartState', () => {
     resolveRepair()
     await repairPromise
     expect(events).toEqual(['repair-started', 'after-kickoff', 'repair-settled'])
+  })
+
+  it('defers plugin repair errors while Node bootstrap is still in progress', () => {
+    const pluginRepairResult = {
+      ok: false,
+      repaired: false,
+      summary: 'plugin repair failed because node is unavailable',
+    }
+
+    expect(
+      formatPluginRepairErrorSummaryForEnvCheck({
+        pluginRepairResult,
+        nodeStepStatus: 'checking',
+      })
+    ).toBe('')
+
+    expect(
+      formatPluginRepairErrorSummaryForEnvCheck({
+        pluginRepairResult,
+        nodeStepStatus: 'installing',
+      })
+    ).toBe('')
+
+    expect(
+      formatPluginRepairErrorSummaryForEnvCheck({
+        pluginRepairResult,
+        nodeStepStatus: 'ok',
+      })
+    ).toBe('plugin repair failed because node is unavailable')
   })
 
   it('treats 2026.3.22 as the minimum supported openclaw version after stripping suffixes', () => {

@@ -1,4 +1,8 @@
-import type { CliCommandResult, OpenClawCapabilities } from './openclaw-capabilities'
+import type {
+  CliCommandResult,
+  OpenClawCapabilities,
+  OpenClawCapabilitiesProfile,
+} from './openclaw-capabilities'
 import {
   buildModelsAliasesCommand,
   buildModelsFallbacksCommand,
@@ -11,7 +15,6 @@ import { pluginEnableLooksSuccessful } from './openclaw-auth-plugins'
 import { getCliFailureMessage, parseJsonFromOutput } from './openclaw-command-output'
 import type { RepairStalePluginConfigFromCommandResult } from './openclaw-config-warnings'
 import { buildOpenClawLegacyEnvPatch } from './openclaw-legacy-env-migration'
-import { rerunReadOnlyCommandAfterStalePluginRepair } from './openclaw-readonly-stale-plugin-repair'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import {
   listKnownProviderMetadata,
@@ -27,6 +30,7 @@ const { tmpdir } = process.getBuiltinModule('node:os') as typeof import('node:os
 const DEFAULT_ACTION_TIMEOUT_MS = MAIN_RUNTIME_POLICY.modelConfig.actionTimeoutMs
 const DEFAULT_STATUS_TIMEOUT_MS = MAIN_RUNTIME_POLICY.modelConfig.statusTimeoutMs
 const DEFAULT_PLUGIN_ENABLE_TIMEOUT_MS = MAIN_RUNTIME_POLICY.auth.pluginEnableTimeoutMs
+const MODEL_STATUS_CAPABILITIES_PROFILE: OpenClawCapabilitiesProfile = 'bootstrap'
 
 export type ModelConfigAction =
   | { kind: 'set-default-model'; model: string }
@@ -102,20 +106,12 @@ interface CommandExecutorOptions {
   ) => Promise<RepairStalePluginConfigFromCommandResult>
   enablePluginCommand?: (pluginId: string, timeout?: number) => Promise<CliCommandResult>
   capabilities?: OpenClawCapabilities
-  loadCapabilities?: () => Promise<OpenClawCapabilities>
+  loadCapabilities?: (options?: { profile?: OpenClawCapabilitiesProfile }) => Promise<OpenClawCapabilities>
 }
 
 interface EnvCommandExecutorOptions extends CommandExecutorOptions {
   createTempDir?: (prefix: string) => Promise<string>
   removeTempDir?: (pathname: string) => Promise<void>
-}
-
-async function skipStalePluginRepair(): Promise<RepairStalePluginConfigFromCommandResult> {
-  return {
-    stalePluginIds: [],
-    changed: false,
-    removedPluginIds: [],
-  }
 }
 
 async function defaultRunCommand(args: string[], timeout?: number): Promise<CliCommandResult> {
@@ -196,6 +192,19 @@ async function resolveCapabilities(
 
   const { loadOpenClawCapabilities } = await import('./openclaw-capabilities')
   return loadOpenClawCapabilities()
+}
+
+async function resolveModelStatusCapabilities(
+  options: CommandExecutorOptions
+): Promise<OpenClawCapabilities | undefined> {
+  if (options.capabilities) return options.capabilities
+  if (options.loadCapabilities) {
+    return options.loadCapabilities({ profile: MODEL_STATUS_CAPABILITIES_PROFILE })
+  }
+  if (options.runCommand || options.runCommandWithEnv) return undefined
+
+  const { loadOpenClawCapabilities } = await import('./openclaw-capabilities')
+  return loadOpenClawCapabilities({ profile: MODEL_STATUS_CAPABILITIES_PROFILE })
 }
 
 function mapActionToCommand(
@@ -713,7 +722,7 @@ export async function getModelStatus<T = unknown>(
 ): Promise<ModelConfigCommandResult<T>> {
   const runCommand = options.runCommand ?? defaultRunCommand
   const runCommandWithEnv = options.runCommandWithEnv ?? defaultRunCommandWithEnv
-  const capabilities = await resolveCapabilities(options)
+  const capabilities = await resolveModelStatusCapabilities(options)
 
   const buildResult = buildModelsStatusCommand(statusOptions, capabilities)
   if (!buildResult.ok) {
@@ -725,17 +734,9 @@ export async function getModelStatus<T = unknown>(
     ...buildOpenClawLegacyEnvPatch(process.env),
     OPENCLAW_AUTH_STORE_READONLY: '1',
   }
-  const repairStalePluginConfigFromCommandResult =
-    options.repairStalePluginConfigFromCommandResult || (options.runCommand ? skipStalePluginRepair : undefined)
-  const result = await rerunReadOnlyCommandAfterStalePluginRepair(
-    () =>
-      options.runCommand
-        ? runCommand(command, DEFAULT_STATUS_TIMEOUT_MS)
-        : runCommandWithEnv(command, DEFAULT_STATUS_TIMEOUT_MS, statusEnv),
-    {
-      repairStalePluginConfigFromCommandResult,
-    }
-  )
+  const result = options.runCommand
+    ? await runCommand(command, DEFAULT_STATUS_TIMEOUT_MS)
+    : await runCommandWithEnv(command, DEFAULT_STATUS_TIMEOUT_MS, statusEnv)
   if (!result.ok) {
     return {
       ok: false,

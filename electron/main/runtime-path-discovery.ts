@@ -1,13 +1,30 @@
+import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
+import {
+  resolveWindowsPrivateNodeRuntimePaths,
+  resolveWindowsPrivateOpenClawRuntimePaths,
+} from './platforms/windows/windows-runtime-policy'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
+
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 export type ExecutableSearchTarget = 'node' | 'openclaw'
 
 interface RuntimePathDiscoveryOptions {
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
   currentPath?: string
   detectedNodeBinDir?: string | null
   npmPrefix?: string | null
+}
+
+interface NormalizedRuntimePathDiscoveryOptions {
+  activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+  platform: NodeJS.Platform
+  env: NodeJS.ProcessEnv
+  currentPath: string
+  detectedNodeBinDir: string | null
+  npmPrefix: string | null
 }
 
 const SHARED_EXTRA_BIN_DIRS_ENV = 'QCLAW_CLI_EXTRA_BIN_DIRS'
@@ -19,9 +36,12 @@ const POSIX_SHARED_STATIC_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin']
 
 function normalizeRuntime(
   options: RuntimePathDiscoveryOptions = {}
-): Required<RuntimePathDiscoveryOptions> {
+): NormalizedRuntimePathDiscoveryOptions {
+  const platform = options.platform || process.platform
   return {
-    platform: options.platform || process.platform,
+    activeRuntimeSnapshot:
+      options.activeRuntimeSnapshot ?? (platform === 'win32' ? getSelectedWindowsActiveRuntimeSnapshot() : null),
+    platform,
     env: options.env || process.env,
     currentPath:
       options.currentPath !== undefined
@@ -154,6 +174,39 @@ function resolveNpmPrefixDirs(
   return uniqueNonEmpty(candidates, platform)
 }
 
+function resolveWindowsActiveRuntimeSnapshotBinDirs(
+  platform: NodeJS.Platform,
+  snapshot: WindowsActiveRuntimeSnapshot | null
+): string[] {
+  if (platform !== 'win32' || !snapshot) return []
+
+  const openclawBinDir = snapshot.openclawPath ? path.win32.dirname(snapshot.openclawPath) : ''
+  const nodeBinDir = snapshot.nodePath ? path.win32.dirname(snapshot.nodePath) : ''
+
+  return uniqueNonEmpty(
+    [openclawBinDir, nodeBinDir, snapshot.npmPrefix],
+    'win32'
+  )
+}
+
+function resolveWindowsPrivateNodeBinDirs(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): string[] {
+  if (platform !== 'win32') return []
+  const paths = resolveWindowsPrivateNodeRuntimePaths({ env })
+  return uniqueNonEmpty([paths.nodeBinDir], platform)
+}
+
+function resolveWindowsPrivateOpenClawBinDirs(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): string[] {
+  if (platform !== 'win32') return []
+  const paths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+  return uniqueNonEmpty([path.win32.dirname(paths.openclawExecutable), paths.npmPrefix], platform)
+}
+
 function resolvePosixSharedBinDirs(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv
@@ -208,9 +261,10 @@ function resolveOpenClawCommonBinDirs(platform: NodeJS.Platform, env: NodeJS.Pro
   )
 }
 
-function listAugmentBinDirs(options: Required<RuntimePathDiscoveryOptions>): string[] {
+function listAugmentBinDirs(options: NormalizedRuntimePathDiscoveryOptions): string[] {
   return uniqueNonEmpty(
     [
+      ...resolveWindowsActiveRuntimeSnapshotBinDirs(options.platform, options.activeRuntimeSnapshot),
       ...resolveExtraBinDirs(options.env, options.platform, [
         SHARED_EXTRA_BIN_DIRS_ENV,
         NODE_EXTRA_BIN_DIRS_ENV,
@@ -219,6 +273,8 @@ function listAugmentBinDirs(options: Required<RuntimePathDiscoveryOptions>): str
       options.detectedNodeBinDir,
       ...resolveToolManagerBinDirs(options.platform, options.env),
       ...resolveNpmPrefixDirs(options.platform, options.env, options.npmPrefix),
+      ...resolveWindowsPrivateNodeBinDirs(options.platform, options.env),
+      ...resolveWindowsPrivateOpenClawBinDirs(options.platform, options.env),
       ...resolveNodeCommonBinDirs(options.platform, options.env),
       ...resolveOpenClawCommonBinDirs(options.platform, options.env),
     ],
@@ -249,11 +305,13 @@ export function listNodeBinDirCandidates(options: RuntimePathDiscoveryOptions = 
   const runtime = normalizeRuntime(options)
   return uniqueNonEmpty(
     [
+      ...resolveWindowsActiveRuntimeSnapshotBinDirs(runtime.platform, runtime.activeRuntimeSnapshot),
       ...resolveExtraBinDirs(runtime.env, runtime.platform, [
         SHARED_EXTRA_BIN_DIRS_ENV,
         NODE_EXTRA_BIN_DIRS_ENV,
       ]),
       ...splitPathEntries(runtime.currentPath, runtime.platform),
+      ...resolveWindowsPrivateNodeBinDirs(runtime.platform, runtime.env),
       runtime.detectedNodeBinDir,
       ...resolveToolManagerBinDirs(runtime.platform, runtime.env),
       ...resolveNodeCommonBinDirs(runtime.platform, runtime.env),
@@ -266,12 +324,14 @@ export function listOpenClawBinDirCandidates(options: RuntimePathDiscoveryOption
   const runtime = normalizeRuntime(options)
   return uniqueNonEmpty(
     [
+      ...resolveWindowsActiveRuntimeSnapshotBinDirs(runtime.platform, runtime.activeRuntimeSnapshot),
       ...resolveExtraBinDirs(runtime.env, runtime.platform, [
         SHARED_EXTRA_BIN_DIRS_ENV,
         OPENCLAW_EXTRA_BIN_DIRS_ENV,
       ]),
       ...splitPathEntries(runtime.currentPath, runtime.platform),
       ...resolveNpmPrefixDirs(runtime.platform, runtime.env, runtime.npmPrefix),
+      ...resolveWindowsPrivateOpenClawBinDirs(runtime.platform, runtime.env),
       ...resolveToolManagerBinDirs(runtime.platform, runtime.env),
       ...resolveOpenClawCommonBinDirs(runtime.platform, runtime.env),
     ],
@@ -284,7 +344,7 @@ function getExecutableNames(
   platform: NodeJS.Platform
 ): string[] {
   if (target === 'node') {
-    return platform === 'win32' ? ['node.exe', 'node.cmd', 'node'] : ['node']
+    return platform === 'win32' ? ['node.exe'] : ['node']
   }
   return platform === 'win32'
     ? ['openclaw.cmd', 'openclaw.exe', 'openclaw']

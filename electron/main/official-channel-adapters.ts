@@ -2,7 +2,6 @@ import { isPluginInstalledOnDisk, runCli } from './cli'
 import { getFeishuOfficialPluginState, ensureFeishuOfficialPluginReady } from './feishu-official-plugin-state'
 import { repairDingtalkOfficialChannel } from './dingtalk-official-channel'
 import { parseJsonFromCommandResult } from './openclaw-command-output'
-import { rerunReadOnlyCommandAfterStalePluginRepair } from './openclaw-readonly-stale-plugin-repair'
 import type {
   OfficialChannelActionResult,
   OfficialChannelAdapterId,
@@ -110,9 +109,7 @@ async function detectRegisteredPlugin(params: {
   state: OfficialChannelStatusStageState
   evidence: OfficialChannelSetupEvidence
 }> {
-  const listResult = await rerunReadOnlyCommandAfterStalePluginRepair(
-    () => runCli(['plugins', 'list', '--json'], undefined, 'plugin-install')
-  ).catch(() => null)
+  const listResult = await runCli(['plugins', 'list', '--json'], undefined, 'plugin-install').catch(() => null)
   if (!listResult || !listResult.ok) {
     return {
       state: 'unknown',

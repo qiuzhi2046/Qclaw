@@ -22,6 +22,8 @@ const {
   resolveRuntimeOpenClawPathsMock: vi.fn(),
 }))
 
+const itOnWindows = process.platform === 'win32' ? it : it.skip
+
 vi.mock('../openclaw-package', () => ({
   resolveOpenClawBinaryPath: resolveOpenClawBinaryPathMock,
   readOpenClawPackageInfo: readOpenClawPackageInfoMock,
@@ -102,6 +104,7 @@ describe('discoverOpenClawInstallations', () => {
   const tempDirs: string[] = []
   const originalUserDataDir = process.env.QCLAW_USER_DATA_DIR
   const originalHome = process.env.HOME
+  const originalUserProfile = process.env.USERPROFILE
 
   function makeTempDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qclaw-openclaw-discovery-'))
@@ -125,6 +128,11 @@ describe('discoverOpenClawInstallations', () => {
       delete process.env.HOME
     } else {
       process.env.HOME = originalHome
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE
+    } else {
+      process.env.USERPROFILE = originalUserProfile
     }
 
     while (tempDirs.length > 0) {
@@ -187,6 +195,112 @@ describe('discoverOpenClawInstallations', () => {
         reason: 'runtime-state-root',
       },
     ])
+  })
+
+  itOnWindows('attaches an active runtime snapshot to discovered Windows installs', async () => {
+    const installDir = makeTempDir()
+    const stateRoot = path.join(installDir, '.openclaw')
+    const binaryPath = path.join(installDir, '.volta', 'bin', 'openclaw.cmd')
+    const nodePath = path.join(installDir, '.volta', 'bin', 'node.exe')
+
+    fs.mkdirSync(path.dirname(binaryPath), { recursive: true })
+    fs.mkdirSync(path.dirname(nodePath), { recursive: true })
+    fs.mkdirSync(stateRoot, { recursive: true })
+    fs.writeFileSync(binaryPath, '@echo off\r\n')
+    fs.writeFileSync(nodePath, '')
+
+    resolveOpenClawBinaryPathMock.mockResolvedValue(binaryPath)
+    listExecutablePathCandidatesMock.mockImplementation((target: string) => {
+      if (target === 'node') return [nodePath]
+      return [binaryPath]
+    })
+    readOpenClawPackageInfoMock.mockResolvedValue({
+      name: 'openclaw',
+      version: '2026.3.24',
+      packageRoot: path.join(installDir, 'lib', 'node_modules', 'openclaw'),
+      packageJsonPath: path.join(installDir, 'lib', 'node_modules', 'openclaw', 'package.json'),
+      binaryPath,
+      resolvedBinaryPath: binaryPath,
+    })
+    resolveRuntimeOpenClawPathsMock.mockResolvedValue({
+      homeDir: stateRoot,
+      configFile: path.join(stateRoot, 'openclaw.json'),
+      envFile: path.join(stateRoot, '.env'),
+      credentialsDir: path.join(stateRoot, 'credentials'),
+      modelCatalogCacheFile: path.join(stateRoot, 'qclaw-model-catalog-cache.json'),
+      displayHomeDir: stateRoot,
+      displayConfigFile: path.join(stateRoot, 'openclaw.json'),
+      displayEnvFile: path.join(stateRoot, '.env'),
+      displayCredentialsDir: path.join(stateRoot, 'credentials'),
+      displayModelCatalogCacheFile: path.join(stateRoot, 'qclaw-model-catalog-cache.json'),
+    })
+    getBaselineBackupStatusMock.mockResolvedValue(null)
+    getBaselineBackupBypassStatusMock.mockResolvedValue(null)
+
+    const { discoverOpenClawInstallations } = await import('../openclaw-install-discovery')
+    const result = await discoverOpenClawInstallations()
+
+    expect(result.candidates[0]?.activeRuntimeSnapshot).toMatchObject({
+      openclawPath: binaryPath,
+      nodePath,
+      npmPrefix: path.dirname(binaryPath),
+      configPath: path.join(stateRoot, 'openclaw.json'),
+      stateDir: stateRoot,
+      extensionsDir: path.join(stateRoot, 'extensions'),
+    })
+  })
+
+  itOnWindows('prefers the global Program Files node when the openclaw shim lives under %APPDATA%\\npm', async () => {
+    const installDir = makeTempDir()
+    const stateRoot = path.join(installDir, '.openclaw')
+    const binaryPath = path.join(installDir, 'AppData', 'Roaming', 'npm', 'openclaw.cmd')
+    const nodePath = path.join(installDir, 'Program Files', 'nodejs', 'node.exe')
+
+    fs.mkdirSync(path.dirname(binaryPath), { recursive: true })
+    fs.mkdirSync(path.dirname(nodePath), { recursive: true })
+    fs.mkdirSync(stateRoot, { recursive: true })
+    fs.writeFileSync(binaryPath, '@echo off\r\n')
+    fs.writeFileSync(nodePath, '')
+
+    resolveOpenClawBinaryPathMock.mockResolvedValue(binaryPath)
+    listExecutablePathCandidatesMock.mockImplementation((target: string) => {
+      if (target === 'node') return [binaryPath, nodePath]
+      return [binaryPath]
+    })
+    readOpenClawPackageInfoMock.mockResolvedValue({
+      name: 'openclaw',
+      version: '2026.3.24',
+      packageRoot: path.join(installDir, 'lib', 'node_modules', 'openclaw'),
+      packageJsonPath: path.join(installDir, 'lib', 'node_modules', 'openclaw', 'package.json'),
+      binaryPath,
+      resolvedBinaryPath: binaryPath,
+    })
+    resolveRuntimeOpenClawPathsMock.mockResolvedValue({
+      homeDir: stateRoot,
+      configFile: path.join(stateRoot, 'openclaw.json'),
+      envFile: path.join(stateRoot, '.env'),
+      credentialsDir: path.join(stateRoot, 'credentials'),
+      modelCatalogCacheFile: path.join(stateRoot, 'qclaw-model-catalog-cache.json'),
+      displayHomeDir: stateRoot,
+      displayConfigFile: path.join(stateRoot, 'openclaw.json'),
+      displayEnvFile: path.join(stateRoot, '.env'),
+      displayCredentialsDir: path.join(stateRoot, 'credentials'),
+      displayModelCatalogCacheFile: path.join(stateRoot, 'qclaw-model-catalog-cache.json'),
+    })
+    getBaselineBackupStatusMock.mockResolvedValue(null)
+    getBaselineBackupBypassStatusMock.mockResolvedValue(null)
+
+    const { discoverOpenClawInstallations } = await import('../openclaw-install-discovery')
+    const result = await discoverOpenClawInstallations()
+
+    expect(result.candidates[0]?.activeRuntimeSnapshot).toMatchObject({
+      openclawPath: binaryPath,
+      nodePath,
+      npmPrefix: path.dirname(binaryPath),
+      configPath: path.join(stateRoot, 'openclaw.json'),
+      stateDir: stateRoot,
+      extensionsDir: path.join(stateRoot, 'extensions'),
+    })
   })
 
   it('attaches persisted manual-backup bypass guidance to the discovered candidate', async () => {
@@ -302,6 +416,7 @@ describe('discoverOpenClawInstallations', () => {
   it('reports history-only when only historical state files exist', async () => {
     const homeDir = makeTempDir()
     process.env.HOME = homeDir
+    process.env.USERPROFILE = homeDir
 
     const openClawHome = path.join(homeDir, '.openclaw')
     fs.mkdirSync(openClawHome, { recursive: true })
@@ -318,7 +433,7 @@ describe('discoverOpenClawInstallations', () => {
     expect(result.historyDataCandidates).toEqual([
       {
         path: openClawHome,
-        displayPath: '~/.openclaw',
+        displayPath: process.platform === 'win32' ? '~\\.openclaw' : '~/.openclaw',
         reason: 'default-home-dir',
       },
     ])

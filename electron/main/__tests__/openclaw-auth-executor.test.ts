@@ -5,6 +5,8 @@ import { createOpenClawAuthRegistry } from '../openclaw-auth-registry'
 
 const {
   confirmRuntimeReconcileMock,
+  defaultEnsureGatewayRunningMock,
+  gatewayStatusMock,
   issueDesiredRuntimeRevisionMock,
   markRuntimeRevisionInProgressMock,
   repairAgentAuthProfilesFromOtherAgentStoresMock,
@@ -14,6 +16,8 @@ const {
   upsertApiKeyAuthProfileMock,
 } = vi.hoisted(() => ({
   confirmRuntimeReconcileMock: vi.fn(),
+  defaultEnsureGatewayRunningMock: vi.fn(),
+  gatewayStatusMock: vi.fn(),
   issueDesiredRuntimeRevisionMock: vi.fn(),
   markRuntimeRevisionInProgressMock: vi.fn(),
   repairAgentAuthProfilesFromOtherAgentStoresMock: vi.fn(),
@@ -41,6 +45,14 @@ vi.mock('../openclaw-runtime-reconcile', () => ({
   issueDesiredRuntimeRevision: issueDesiredRuntimeRevisionMock,
   markRuntimeRevisionInProgress: markRuntimeRevisionInProgressMock,
   resolveGatewayBlockingReasonFromState: resolveGatewayBlockingReasonFromStateMock,
+}))
+
+vi.mock('../openclaw-gateway-service', () => ({
+  ensureGatewayRunning: defaultEnsureGatewayRunningMock,
+}))
+
+vi.mock('../cli', () => ({
+  gatewayStatus: gatewayStatusMock,
 }))
 
 vi.mock('../local-model-probe', () => ({
@@ -126,6 +138,8 @@ const unsupportedMethod: OpenClawAuthMethodDescriptor = {
 describe('executeAuthRoute', () => {
   beforeEach(() => {
     confirmRuntimeReconcileMock.mockReset()
+    defaultEnsureGatewayRunningMock.mockReset()
+    gatewayStatusMock.mockReset()
     issueDesiredRuntimeRevisionMock.mockReset()
     markRuntimeRevisionInProgressMock.mockReset()
     repairAgentAuthProfilesFromOtherAgentStoresMock.mockReset()
@@ -138,6 +152,25 @@ describe('executeAuthRoute', () => {
       runtime: {
         desiredRevision: 1,
       },
+    })
+    defaultEnsureGatewayRunningMock.mockResolvedValue({
+      ok: true,
+      running: true,
+      stdout: '{"ok":true}',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'Gateway 已确认可用',
+      safeToRetry: true,
+      attemptedCommands: [['health', '--json']],
+    })
+    gatewayStatusMock.mockResolvedValue({
+      running: true,
+      raw: '{"running":true}',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'Gateway 已确认可用',
     })
     issueDesiredRuntimeRevisionMock.mockResolvedValue({
       runtime: {
@@ -432,6 +465,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -477,6 +511,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -644,6 +679,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1165,6 +1201,164 @@ describe('executeAuthRoute', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('ensures the gateway after onboard success when token stays the same but runtime is not running', async () => {
+    gatewayStatusMock.mockResolvedValueOnce({
+      running: false,
+      raw: '{"running":false}',
+      stderr: '',
+      code: null,
+      stateCode: 'gateway_not_running',
+      summary: 'Gateway 未运行',
+    })
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const readConfig = vi
+      .fn()
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'same-token',
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'same-token',
+          },
+        },
+      })
+    const ensureGatewayRunning = vi.fn().mockResolvedValue({
+      ok: true,
+      running: true,
+      stdout: 'Gateway ready',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'Gateway 已确认可用',
+      safeToRetry: true,
+      attemptedCommands: [['gateway', 'start']],
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: openaiApiKeyMethod,
+        providerId: 'openai',
+        methodId: 'openai-api-key',
+        secret: 'sk-live-123',
+      },
+      { runCommand, readConfig, ensureGatewayRunning } as any
+    )
+
+    expect(result.ok).toBe(true)
+    expect(ensureGatewayRunning).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not ensure the gateway after onboard success when token stays the same and runtime is already running', async () => {
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const readConfig = vi
+      .fn()
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'same-token',
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'same-token',
+          },
+        },
+      })
+    const ensureGatewayRunning = vi.fn().mockResolvedValue({
+      ok: true,
+      running: true,
+      stdout: 'Gateway ready',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'Gateway 已确认可用',
+      safeToRetry: true,
+      attemptedCommands: [['gateway', 'start']],
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: openaiApiKeyMethod,
+        providerId: 'openai',
+        methodId: 'openai-api-key',
+        secret: 'sk-live-123',
+      },
+      { runCommand, readConfig, ensureGatewayRunning } as any
+    )
+
+    expect(result.ok).toBe(true)
+    expect(gatewayStatusMock).toHaveBeenCalledTimes(1)
+    expect(ensureGatewayRunning).not.toHaveBeenCalled()
+  })
+
+  it('keeps auth successful and defers token apply when the gateway token rotates while the gateway is down', async () => {
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const readConfig = vi
+      .fn()
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'old-token',
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        gateway: {
+          auth: {
+            token: 'new-token',
+          },
+        },
+      })
+    const ensureGatewayRunning = vi.fn().mockResolvedValue({
+      ok: true,
+      running: true,
+      stdout: 'Gateway ready',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'Gateway 已确认可用',
+      safeToRetry: true,
+      attemptedCommands: [['gateway', 'start']],
+    })
+    gatewayStatusMock.mockResolvedValueOnce({
+      running: false,
+      raw: '',
+      stderr: 'connect ECONNREFUSED 127.0.0.1:18789',
+      code: 1,
+      stateCode: 'gateway_not_running',
+      summary: '网关当前未运行',
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: openaiApiKeyMethod,
+        providerId: 'openai',
+        methodId: 'openai-api-key',
+        secret: 'sk-live-123',
+      },
+      { runCommand, readConfig, ensureGatewayRunning } as any
+    )
+
+    expect(result.ok).toBe(true)
+    expect(runCommand).toHaveBeenCalledTimes(1)
+    expect(ensureGatewayRunning).not.toHaveBeenCalled()
+    expect(confirmRuntimeReconcileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        confirmed: false,
+        blockingReason: 'service_generation_stale',
+        safeToRetry: true,
+        summary: expect.stringContaining('下一次启动网关时应用'),
+      })
+    )
+  })
+
   it('restarts the gateway and retries api key onboarding when openclaw returns websocket 1006', async () => {
     const runCommand = vi
       .fn()
@@ -1213,6 +1407,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1231,6 +1426,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1248,6 +1444,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1262,6 +1459,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1321,6 +1519,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1336,6 +1535,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1389,6 +1589,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1448,6 +1649,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1463,6 +1665,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -1520,6 +1723,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -2016,6 +2220,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -2043,6 +2248,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -2134,6 +2340,7 @@ describe('executeAuthRoute', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],

@@ -72,8 +72,28 @@ describe('detectNvmWindowsDir', () => {
           ...TEST_ENV_BASE,
           NVM_HOME: 'C:\\Users\\Jason\\AppData\\Roaming\\nvm',
         },
+        access: async () => undefined,
       })
     ).resolves.toBe('C:\\Users\\Jason\\AppData\\Roaming\\nvm')
+  })
+
+  it('ignores stale NVM_HOME on Windows when the directory is inaccessible', async () => {
+    await expect(
+      detectNvmWindowsDir({
+        env: {
+          ...TEST_ENV_BASE,
+          APPDATA: 'C:\\Users\\Jason\\AppData\\Roaming',
+          NVM_HOME: 'F:\\Programs\\nvm',
+        },
+        access: async (targetPath) => {
+          if (targetPath === 'C:\\Users\\Jason\\AppData\\Roaming\\nvm') {
+            throw new Error('missing fallback')
+          }
+          throw new Error(`missing ${targetPath}`)
+        },
+        pathModule: path.win32,
+      })
+    ).resolves.toBeNull()
   })
 
   it('falls back to %APPDATA%\\nvm when NVM_HOME is absent and the directory exists', async () => {

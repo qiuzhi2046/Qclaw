@@ -410,6 +410,176 @@ describe('applyDefaultModelWithGatewayReload', () => {
     expect(reloadGatewayAfterModelChange).not.toHaveBeenCalled()
   })
 
+  it('allows creating a new config when the initial config snapshot resolves to null', async () => {
+    const applyConfigPatchGuarded = vi.fn(async ({ beforeConfig, afterConfig }) => {
+      expect(beforeConfig).toBeNull()
+      expect(afterConfig).toEqual({
+        agents: {
+          defaults: {
+            model: {
+              primary: 'openai/gpt-5.4-pro',
+            },
+          },
+        },
+      })
+      return { ok: true, wrote: true }
+    })
+
+    const result = await applyDefaultModelWithGatewayReload({
+      model: 'openai/gpt-5.4-pro',
+      readConfig: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({
+          agents: {
+            defaults: {
+              model: {
+                primary: 'openai/gpt-5.4-pro',
+              },
+            },
+          },
+        }),
+      applyConfigPatchGuarded,
+      getModelStatus: vi.fn(async () => ({
+        ok: true,
+        data: {
+          defaultModel: 'openai/gpt-5.4-pro',
+        },
+      })),
+      reloadGatewayAfterModelChange: vi.fn(async () => ({ ok: true, running: true })),
+      confirmationPolicy: {
+        timeoutMs: 20,
+        initialIntervalMs: 1,
+        maxIntervalMs: 1,
+        backoffFactor: 1,
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      modelApplied: true,
+      gatewayReloaded: false,
+    })
+    expect(applyConfigPatchGuarded).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed instead of patching config when the initial config preflight never settles', async () => {
+    vi.useFakeTimers()
+
+    const pending = () =>
+      new Promise<never>(() => {
+        // Keep the preflight read pending so the write path must fail closed.
+      })
+
+    const applyConfigPatchGuarded = vi.fn(async () => ({ ok: true, wrote: true }))
+    const reloadGatewayAfterModelChange = vi.fn(async () => ({ ok: true, running: true }))
+    const resultPromise = applyDefaultModelWithGatewayReload({
+      model: 'openai/gpt-5.4-pro',
+      readConfig: vi
+        .fn()
+        .mockImplementationOnce(pending)
+        .mockResolvedValue({
+          agents: {
+            defaults: {
+              model: {
+                primary: 'openai/gpt-5.4-pro',
+              },
+            },
+          },
+        }),
+      applyConfigPatchGuarded,
+      getModelStatus: vi
+        .fn()
+        .mockImplementationOnce(pending)
+        .mockResolvedValue({
+          ok: true,
+          data: {
+            defaultModel: 'openai/gpt-5.4-pro',
+          },
+        }),
+      reloadGatewayAfterModelChange,
+      confirmationPolicy: {
+        timeoutMs: 20,
+        initialIntervalMs: 1,
+        maxIntervalMs: 1,
+        backoffFactor: 1,
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: false,
+      modelApplied: false,
+      gatewayReloaded: false,
+    })
+    await resultPromise
+    expect(applyConfigPatchGuarded).not.toHaveBeenCalled()
+    expect(reloadGatewayAfterModelChange).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('does not hang when confirmation reads never settle after the config write', async () => {
+    vi.useFakeTimers()
+
+    const pending = () =>
+      new Promise<never>(() => {
+        // Keep the confirmation reads pending so the confirmation loop must fall back.
+      })
+
+    const reloadGatewayAfterModelChange = vi.fn(async () => ({
+      ok: false,
+      running: false,
+      stderr: 'reload failed',
+    }))
+
+    const resultPromise = applyDefaultModelWithGatewayReload({
+      model: 'openai/gpt-5.4-pro',
+      readConfig: vi
+        .fn()
+        .mockResolvedValueOnce({
+          agents: {
+            defaults: {
+              model: {
+                primary: 'openai/gpt-5',
+              },
+            },
+          },
+        })
+        .mockImplementation(pending),
+      applyConfigPatchGuarded: vi.fn(async () => ({ ok: true, wrote: true })),
+      getModelStatus: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            defaultModel: 'openai/gpt-5',
+          },
+        })
+        .mockImplementation(pending),
+      reloadGatewayAfterModelChange,
+      confirmationPolicy: {
+        timeoutMs: 20,
+        initialIntervalMs: 1,
+        maxIntervalMs: 1,
+        backoffFactor: 1,
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: false,
+      modelApplied: true,
+      gatewayReloaded: false,
+    })
+    await resultPromise
+    expect(reloadGatewayAfterModelChange).toHaveBeenCalledTimes(1)
+
+    vi.useRealTimers()
+  })
+
   it('does not hard block switching when the provider is marked missing in use', async () => {
     let currentConfig: Record<string, any> | null = {
       agents: {
@@ -788,6 +958,63 @@ describe('applyDefaultModelWithGatewayReload', () => {
 })
 
 describe('applyAgentPrimaryModelWithGatewayReload', () => {
+  it('fails closed instead of patching config when the initial config preflight never settles', async () => {
+    vi.useFakeTimers()
+
+    const pending = () =>
+      new Promise<never>(() => {
+        // Keep the preflight read pending so the write path must fail closed.
+      })
+
+    const applyConfigPatchGuarded = vi.fn(async () => ({ ok: true, wrote: true }))
+    const reloadGatewayAfterModelChange = vi.fn(async () => ({ ok: true, running: true }))
+    const resultPromise = applyAgentPrimaryModelWithGatewayReload({
+      agentId: 'feishu-work',
+      model: 'minimax/MiniMax-M2.5',
+      readConfig: vi
+        .fn()
+        .mockImplementationOnce(pending)
+        .mockResolvedValue({
+          agents: {
+            list: [
+              { id: 'main', model: 'openai/gpt-5' },
+              { id: 'feishu-work', model: 'minimax/MiniMax-M2.5' },
+            ],
+          },
+        }),
+      applyConfigPatchGuarded,
+      getModelStatus: vi
+        .fn()
+        .mockImplementationOnce(pending)
+        .mockResolvedValue({
+          ok: true,
+          data: {
+            defaultModel: 'minimax/MiniMax-M2.5',
+          },
+        }),
+      reloadGatewayAfterModelChange,
+      confirmationPolicy: {
+        timeoutMs: 20,
+        initialIntervalMs: 1,
+        maxIntervalMs: 1,
+        backoffFactor: 1,
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: false,
+      modelApplied: false,
+      gatewayReloaded: false,
+    })
+    await resultPromise
+    expect(applyConfigPatchGuarded).not.toHaveBeenCalled()
+    expect(reloadGatewayAfterModelChange).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
   it('writes the target agent model and confirms it without reloading the gateway when status catches up', async () => {
     const readConfig = vi
       .fn()

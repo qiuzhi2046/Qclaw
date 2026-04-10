@@ -56,6 +56,9 @@ export const api = {
   // Install
   installOpenClaw: () => ipcRenderer.invoke('install:openclaw'),
   discoverOpenClaw: () => ipcRenderer.invoke('openclaw:discover'),
+  discoverOpenClawForEnvCheck: () => ipcRenderer.invoke('openclaw:discover-env-check'),
+  appendEnvCheckDiagnostic: (event: string, fields?: Record<string, unknown>) =>
+    ipcRenderer.invoke('env-check:diag:append', event, fields),
   checkOpenClawLatestVersion: () => ipcRenderer.invoke('openclaw:latest:check'),
   ensureOpenClawBaselineBackup: (candidate: Record<string, any>) =>
     ipcRenderer.invoke('openclaw:baseline-backup:ensure', candidate),
@@ -100,6 +103,8 @@ export const api = {
   runOpenClawRestore: (backupId: string, scope: string) =>
     ipcRenderer.invoke('openclaw:restore:run', backupId, scope),
   checkOpenClawUpgrade: () => ipcRenderer.invoke('openclaw:upgrade:check'),
+  checkOpenClawUpgradeForEnvCheck: (discovery: Record<string, any> | null) =>
+    ipcRenderer.invoke('openclaw:upgrade:check-env', discovery),
   runOpenClawUpgrade: () => ipcRenderer.invoke('openclaw:upgrade:run'),
   getQClawUpdateStatus: () => ipcRenderer.invoke('qclaw:update:status'),
   checkQClawUpdate: () => ipcRenderer.invoke('qclaw:update:check'),
@@ -128,7 +133,7 @@ export const api = {
   getStatus: () => ipcRenderer.invoke('status:get'),
 
   // Config
-  readConfig: () => ipcRenderer.invoke('config:read'),
+  readConfig: (options?: { configPath?: string | null }) => ipcRenderer.invoke('config:read', options),
   readEnvFile: () => ipcRenderer.invoke('env:read'),
 
   // Doctor
@@ -154,6 +159,10 @@ export const api = {
     options?: { scopePluginIds?: string[]; quarantineOfficialManagedPlugins?: boolean }
   ) =>
     ipcRenderer.invoke('plugins:repair-incompatible', options),
+  scanIncompatiblePlugins: (
+    options?: { scopePluginIds?: string[]; quarantineOfficialManagedPlugins?: boolean }
+  ) =>
+    ipcRenderer.invoke('plugins:scan-incompatible', options),
   isPluginInstalledOnDisk: (pluginId: string) => ipcRenderer.invoke('plugins:installed-on-disk', pluginId),
   uninstallPlugin: (name: string) => ipcRenderer.invoke('plugins:uninstall', name),
   isFeishuOfficialPluginInstalled: () => ipcRenderer.invoke('plugins:feishu-installed'),
@@ -252,6 +261,7 @@ export const api = {
   // Models center
   getModelCapabilities: () => ipcRenderer.invoke('models:capabilities:get'),
   listModelCatalog: (query?: Record<string, any>) => ipcRenderer.invoke('models:catalog:list', query),
+  getModelSnapshot: (request?: Record<string, any>) => ipcRenderer.invoke('models:snapshot:get', request),
   getModelStatus: (options?: Record<string, any>) => ipcRenderer.invoke('models:status:get', options),
   getModelUpstreamState: () => ipcRenderer.invoke('models:upstream-state:get'),
   syncModelVerificationState: (input?: { statusData?: Record<string, any> | null }) =>

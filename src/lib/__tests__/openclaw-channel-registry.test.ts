@@ -231,7 +231,7 @@ describe('openclaw-channel-registry', () => {
     expect(isPluginAlreadyInstalledError('Plugin already exists in manifest')).toBe(true)
   })
 
-  it('applies dingtalk config with gateway token and chatCompletions enabled', () => {
+  it('applies dingtalk config without persisting gateway token and enables chatCompletions', () => {
     const nextConfig = applyChannelConfig(
       {
         gateway: {
@@ -249,8 +249,8 @@ describe('openclaw-channel-registry', () => {
       enabled: true,
       clientId: 'dingxxxxxxxxxx',
       clientSecret: 'secret123',
-      gatewayToken: 'my-gw-token-123',
     })
+    expect(nextConfig.channels['dingtalk-connector']).not.toHaveProperty('gatewayToken')
     expect(nextConfig.gateway.http.endpoints.chatCompletions.enabled).toBe(true)
     expect(nextConfig.plugins.allow).toContain('dingtalk-connector')
   })
@@ -304,6 +304,31 @@ describe('openclaw-channel-registry', () => {
           installPath: '/Users/demo/.openclaw/extensions/dingtalk-connector',
         },
       },
+    })
+  })
+
+  it('removes legacy gatewayToken from dingtalk config while preserving other channel settings', () => {
+    const nextConfig = applyDingtalkFallbackConfig(
+      {
+        channels: {
+          'dingtalk-connector': {
+            enabled: false,
+            defaultAccount: '__default__',
+            gatewayToken: 'legacy-token',
+          },
+        },
+      },
+      {
+        clientId: 'dingxxxxxxxxxx',
+        clientSecret: 'secret123',
+      }
+    )
+
+    expect(nextConfig.channels['dingtalk-connector']).toEqual({
+      enabled: true,
+      defaultAccount: '__default__',
+      clientId: 'dingxxxxxxxxxx',
+      clientSecret: 'secret123',
     })
   })
 

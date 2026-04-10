@@ -23,6 +23,7 @@ export interface OpenClawCommandResultLike {
 export interface OpenClawNpmCommandOptions {
   userConfigPath?: string | null
   globalConfigPath?: string | null
+  prefixPath?: string | null
   cachePath?: string | null
   fetchTimeoutMs?: number | null
   fetchRetries?: number | null
@@ -173,6 +174,7 @@ function appendNpmCommandOptions(
   const next = [...args]
   const userConfigPath = String(options.userConfigPath || '').trim()
   const globalConfigPath = String(options.globalConfigPath || '').trim()
+  const prefixPath = String(options.prefixPath || '').trim()
   const cachePath = String(options.cachePath || '').trim()
   const fetchTimeoutMs = Number(options.fetchTimeoutMs)
   const fetchRetries = Number(options.fetchRetries)
@@ -182,6 +184,9 @@ function appendNpmCommandOptions(
   }
   if (globalConfigPath) {
     next.push(`--globalconfig=${globalConfigPath}`)
+  }
+  if (prefixPath) {
+    next.push(`--prefix=${prefixPath}`)
   }
   if (behavior.includeRuntimeTransportFlags !== false) {
     if (cachePath) {

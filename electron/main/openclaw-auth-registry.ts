@@ -1,5 +1,6 @@
 import type { AuthMethodType } from './openclaw-capabilities'
 import { resolveOpenClawPackageRoot } from './openclaw-package'
+import { resolveWindowsActiveRuntimeSnapshotForRead } from './openclaw-runtime-readonly'
 
 const fs = process.getBuiltinModule('fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('path') as typeof import('node:path')
@@ -198,7 +199,10 @@ async function tryLoadPublicExportRegistry(): Promise<OpenClawAuthRegistry | nul
 }
 
 async function resolveInstalledOpenClawPackageRoot(): Promise<string> {
-  return resolveOpenClawPackageRoot()
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  return resolveOpenClawPackageRoot({
+    activeRuntimeSnapshot,
+  })
 }
 
 async function collectInternalMetadataSnapshot(packageRoot: string): Promise<InternalMetadataSnapshot> {

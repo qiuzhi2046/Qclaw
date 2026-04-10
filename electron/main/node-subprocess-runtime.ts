@@ -105,6 +105,15 @@ interface RunNodeEvalDependencies extends ProbeNodeRuntimeDependencies {
   execFile?: typeof childProcess.execFile
 }
 
+export function buildNodeSubprocessInstallPlanOptions(
+  platform: NodeJS.Platform
+): { skipDynamicOpenClawRequirementProbe?: boolean } {
+  if (platform === 'win32') {
+    return { skipDynamicOpenClawRequirementProbe: true }
+  }
+  return {}
+}
+
 function normalizeVersion(version: string | null | undefined): string {
   return String(version || '').trim()
 }
@@ -210,7 +219,9 @@ export async function resolveQualifiedNodeRuntime(
   const resolveRequirement =
     dependencies.resolveRequirement ||
     (async () => ({ minVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT, source: 'bundled-fallback' as const }))
-  const resolveInstallPlan = dependencies.resolveInstallPlan || resolveNodeInstallPlan
+  const resolveInstallPlan =
+    dependencies.resolveInstallPlan ||
+    (() => resolveNodeInstallPlan(buildNodeSubprocessInstallPlanOptions(platform)))
   const detectNvmDirImpl = dependencies.detectNvmDir || detectNvmDir
   const detectNvmWindowsDirImpl = dependencies.detectNvmWindowsDir || detectNvmWindowsDir
   const listInstalledNvmNodeBinDirsImpl =

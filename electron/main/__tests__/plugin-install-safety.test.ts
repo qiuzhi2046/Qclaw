@@ -10,6 +10,7 @@ const tempDirs: string[] = []
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { tmpdir } = process.getBuiltinModule('node:os') as typeof import('node:os')
 const { mkdtemp, mkdir, readFile, rm, writeFile } = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
+const itOnWindows = process.platform === 'win32' ? it : it.skip
 
 async function createTempHome(): Promise<string> {
   const homeDir = await mkdtemp(path.join(tmpdir(), 'qclaw-plugin-safety-'))
@@ -55,6 +56,28 @@ async function writePluginFile(
   await writeFile(targetPath, source)
 }
 
+async function writeHostOpenClawPackage(rootDir: string): Promise<void> {
+  await mkdir(path.join(rootDir, 'dist', 'plugin-sdk'), { recursive: true })
+  await writeFile(
+    path.join(rootDir, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'openclaw',
+        type: 'module',
+        exports: {
+          './plugin-sdk': './dist/plugin-sdk/index.js',
+        },
+      },
+      null,
+      2
+    )
+  )
+  await writeFile(
+    path.join(rootDir, 'dist', 'plugin-sdk', 'index.js'),
+    'export const pluginSdkReady = true\n'
+  )
+}
+
 afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))
@@ -62,6 +85,44 @@ afterEach(async () => {
 })
 
 describe('reconcileIncompatibleExtensionPlugins', () => {
+  itOnWindows('does not quarantine plugin-sdk plugins when a host runtime bridge can be established to the active OpenClaw package root', async () => {
+    const homeDir = await createTempHome()
+    const hostOpenClawPackageRoot = path.join(homeDir, 'global-host', 'node_modules', 'openclaw')
+    await writeHostOpenClawPackage(hostOpenClawPackageRoot)
+    await writePluginPackage(
+      homeDir,
+      'openclaw-lark',
+      '@demo/openclaw-lark',
+      'index.js',
+      'import { pluginSdkReady } from "openclaw/plugin-sdk"\nexport default { pluginSdkReady }'
+    )
+
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      hostOpenClawPackageRoot,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['openclaw-lark'],
+        },
+      }),
+      writeConfig: async () => {},
+      runNodeEval: async () => ({
+        ok: false,
+        kind: 'script-failed',
+        stdout: '',
+        stderr: "Error: Cannot find module 'openclaw/plugin-sdk'",
+        code: 1,
+      }),
+    })
+
+    expect(result).toEqual({
+      incompatiblePlugins: [],
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+    })
+    expect(await readFile(path.join(homeDir, 'node_modules', 'openclaw', 'package.json'), 'utf8')).toContain('"name": "openclaw"')
+  })
+
   it('quarantines non-official extension plugins that cannot resolve openclaw/plugin-sdk and prunes config references', async () => {
     const homeDir = await createTempHome()
     await writePluginPackage(
@@ -345,6 +406,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
 
     const result = await reconcileIncompatibleExtensionPlugins({
       homeDir,
+      platform: 'linux',
       readConfig: async () => ({
         plugins: {
           allow: ['nested-bad-plugin'],
@@ -355,6 +417,38 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
 
     expect(result.quarantinedPluginIds).toEqual(['nested-bad-plugin'])
     expect(result.incompatiblePlugins[0]?.reason).toContain('smoke test')
+  })
+
+  itOnWindows('does not prune scoped managed plugin config only because installPath is non-canonical when the canonical plugin directory still exists', async () => {
+    const homeDir = await createTempHome()
+    await mkdir(path.join(homeDir, 'extensions', 'openclaw-lark'), { recursive: true })
+
+    const result = await reconcileIncompatibleExtensionPlugins({
+      homeDir,
+      scopePluginIds: ['openclaw-lark', 'feishu'],
+      readConfig: async () => ({
+        channels: {
+          feishu: {
+            enabled: true,
+          },
+        },
+        plugins: {
+          allow: ['openclaw-lark'],
+          installs: {
+            'openclaw-lark': {
+              installPath: path.join(homeDir, 'global-host', 'node_modules', 'openclaw-lark'),
+            },
+          },
+        },
+      }),
+      writeConfig: async () => {},
+    })
+
+    expect(result).toEqual({
+      incompatiblePlugins: [],
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+    })
   })
 
   it('does not quarantine plugins for unrelated import failures', async () => {

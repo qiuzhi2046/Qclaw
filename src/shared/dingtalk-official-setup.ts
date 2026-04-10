@@ -37,16 +37,16 @@ export function applyDingtalkFallbackConfig(
   nextConfig.channels = nextConfig.channels || {}
 
   const existingChannel = (nextConfig.channels['dingtalk-connector'] || {}) as Record<string, any>
-  const gatewayToken = String(
-    nextConfig.gateway?.auth?.token || existingChannel.gatewayToken || ''
-  ).trim()
+  const {
+    gatewayToken: _legacyGatewayToken,
+    ...existingChannelWithoutLegacyGatewayToken
+  } = existingChannel
 
   nextConfig.channels['dingtalk-connector'] = {
-    ...existingChannel,
+    ...existingChannelWithoutLegacyGatewayToken,
     enabled: true,
     clientId,
     clientSecret,
-    ...(gatewayToken ? { gatewayToken } : {}),
   }
 
   nextConfig.gateway = nextConfig.gateway || {}

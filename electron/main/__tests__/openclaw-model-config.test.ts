@@ -164,6 +164,29 @@ describe('applyModelConfigAction', () => {
 })
 
 describe('getModelStatus', () => {
+  it('loads bootstrap capabilities by default for read-only status checks', async () => {
+    const loadCapabilities = vi.fn(async () => ({
+      supports: {
+        modelsStatusJson: true,
+      },
+      commandFlags: {
+        'models status': ['--json'],
+      },
+    }) as any)
+    const runCommand = vi.fn(async () =>
+      ok(
+        JSON.stringify({
+          defaultModel: 'openai/gpt-5.1-codex',
+        })
+      )
+    )
+
+    const result = await getModelStatus({}, { loadCapabilities, runCommand })
+
+    expect(loadCapabilities).toHaveBeenCalledWith({ profile: 'bootstrap' })
+    expect(result.ok).toBe(true)
+  })
+
   it('runs status through a read-only auth store env by default', async () => {
     const runCommandWithEnv = vi.fn(async () =>
       ok(
@@ -294,7 +317,7 @@ describe('getModelStatus', () => {
     expect((result.data as any).defaultModel).toBe('openai/gpt-5.1-codex')
   })
 
-  it('retries status reads once after stale plugin repair removes upstream-confirmed stale ids', async () => {
+  it('does not auto-repair stale plugin warnings during read-only status reads', async () => {
     const repairStalePluginConfigFromCommandResult = vi
       .fn()
       .mockResolvedValueOnce({
@@ -318,13 +341,13 @@ describe('getModelStatus', () => {
 
     const result = await getModelStatus({}, { runCommand, repairStalePluginConfigFromCommandResult })
 
-    expect(runCommand).toHaveBeenCalledTimes(2)
-    expect(repairStalePluginConfigFromCommandResult).toHaveBeenCalledTimes(1)
-    expect(result.ok).toBe(true)
-    expect((result.data as any).defaultModel).toBe('openai/gpt-5.1-codex')
+    expect(runCommand).toHaveBeenCalledTimes(1)
+    expect(repairStalePluginConfigFromCommandResult).not.toHaveBeenCalled()
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('parse_error')
   })
 
-  it('falls back to the original status result when stale plugin repair throws', async () => {
+  it('ignores provided stale-plugin repair callbacks during read-only status reads', async () => {
     const repairStalePluginConfigFromCommandResult = vi.fn(async () => {
       throw new Error('repair failed')
     })
@@ -335,6 +358,7 @@ describe('getModelStatus', () => {
     const result = await getModelStatus({}, { runCommand, repairStalePluginConfigFromCommandResult })
 
     expect(runCommand).toHaveBeenCalledTimes(1)
+    expect(repairStalePluginConfigFromCommandResult).not.toHaveBeenCalled()
     expect(result.ok).toBe(false)
     expect(result.errorCode).toBe('parse_error')
   })

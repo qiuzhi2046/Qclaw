@@ -58,6 +58,14 @@ export interface ApplyAgentPrimaryModelWithGatewayReloadResult {
   upstreamFallbackReason?: string
 }
 
+const DEFAULT_MODEL_CONFIG_READ_TIMEOUT_MS = 5_000
+const CONFIG_SNAPSHOT_UNAVAILABLE_MESSAGE = '当前无法读取配置快照，已停止保存以避免覆盖现有配置，请稍后重试。'
+
+interface ReadBudgetResult<T> {
+  settled: boolean
+  value: T | null
+}
+
 function describeCliFailure(result: CliLikeResult | ConfigPatchLikeResult | null | undefined, fallback: string): string {
   const explicit = String(result?.message || '').trim()
   if (explicit) return explicit
@@ -215,6 +223,42 @@ function extractConfiguredAgentModel(
   return normalizeModelValue(matchedAgent?.model)
 }
 
+function resolveModelConfigReadTimeoutMs(policy?: BackoffPollingPolicy): number {
+  const policyTimeoutMs = Number(policy?.timeoutMs || 0)
+  if (!Number.isFinite(policyTimeoutMs) || policyTimeoutMs <= 0) {
+    return DEFAULT_MODEL_CONFIG_READ_TIMEOUT_MS
+  }
+
+  return Math.max(1, Math.min(DEFAULT_MODEL_CONFIG_READ_TIMEOUT_MS, Math.round(policyTimeoutMs)))
+}
+
+async function withReadBudget<T>(load: Promise<T>, timeoutMs: number): Promise<T | null> {
+  const result = await withReadBudgetState(load, timeoutMs)
+  return result.value
+}
+
+async function withReadBudgetState<T>(load: Promise<T>, timeoutMs: number): Promise<ReadBudgetResult<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      load
+        .then((value) => ({
+          settled: true,
+          value,
+        }))
+        .catch(() => ({
+          settled: false,
+          value: null,
+        })),
+      new Promise<ReadBudgetResult<T>>((resolve) => {
+        timer = setTimeout(() => resolve({ settled: false, value: null }), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export function buildNextConfigWithDefaultModel(currentConfig: Record<string, any> | null | undefined, model: string): Record<string, any> {
   const nextConfig = cloneConfig(currentConfig)
   stripLegacyTopLevelDefaultModel(nextConfig)
@@ -281,6 +325,7 @@ async function waitForDefaultModelConfirmation(params: {
   lastConfig: Record<string, any> | null
   lastStatus: ModelStatusLikeResult | null
 }> {
+  const readTimeoutMs = resolveModelConfigReadTimeoutMs(params.confirmationPolicy)
   let lastConfig: Record<string, any> | null = null
   let lastStatus: ModelStatusLikeResult | null = null
   let lastUpstreamState: RendererUpstreamModelStateResult | null = null
@@ -288,15 +333,17 @@ async function waitForDefaultModelConfirmation(params: {
   const result = await pollWithBackoff({
     policy: params.confirmationPolicy || UI_RUNTIME_DEFAULTS.authVerification.poll,
     execute: async () => {
-      const [configResult, upstreamResult, statusResult] = await Promise.allSettled([
-        params.readConfig(),
-        params.readUpstreamState ? params.readUpstreamState() : Promise.resolve(null),
-        params.getModelStatus(),
+      const [configResult, upstreamResult, statusResult] = await Promise.all([
+        withReadBudget(params.readConfig(), readTimeoutMs),
+        params.readUpstreamState
+          ? withReadBudget(params.readUpstreamState(), readTimeoutMs)
+          : Promise.resolve(null),
+        withReadBudget(params.getModelStatus(), readTimeoutMs),
       ])
 
-      lastConfig = configResult.status === 'fulfilled' ? configResult.value : null
-      lastUpstreamState = upstreamResult.status === 'fulfilled' ? upstreamResult.value : null
-      lastStatus = statusResult.status === 'fulfilled' ? statusResult.value : null
+      lastConfig = configResult
+      lastUpstreamState = upstreamResult
+      lastStatus = statusResult
 
       return {
         configModel: extractConfiguredDefaultModel(lastConfig),
@@ -341,19 +388,20 @@ async function waitForAgentModelConfirmation(params: {
   lastConfig: Record<string, any> | null
   lastStatus: ModelStatusLikeResult | null
 }> {
+  const readTimeoutMs = resolveModelConfigReadTimeoutMs(params.confirmationPolicy)
   let lastConfig: Record<string, any> | null = null
   let lastStatus: ModelStatusLikeResult | null = null
 
   const result = await pollWithBackoff({
     policy: params.confirmationPolicy || UI_RUNTIME_DEFAULTS.authVerification.poll,
     execute: async () => {
-      const [configResult, statusResult] = await Promise.allSettled([
-        params.readConfig(),
-        params.getModelStatus(),
+      const [configResult, statusResult] = await Promise.all([
+        withReadBudget(params.readConfig(), readTimeoutMs),
+        withReadBudget(params.getModelStatus(), readTimeoutMs),
       ])
 
-      lastConfig = configResult.status === 'fulfilled' ? configResult.value : null
-      lastStatus = statusResult.status === 'fulfilled' ? statusResult.value : null
+      lastConfig = configResult
+      lastStatus = statusResult
 
       return {
         configModel: extractConfiguredAgentModel(lastConfig, params.agentId),
@@ -395,6 +443,7 @@ export async function applyDefaultModelWithGatewayReload(params: {
   confirmationPolicy?: BackoffPollingPolicy
 }): Promise<ApplyDefaultModelWithGatewayReloadResult> {
   const model = String(params.model || '').trim()
+  const readTimeoutMs = resolveModelConfigReadTimeoutMs(params.confirmationPolicy)
   if (!model) {
     return {
       ok: false,
@@ -406,17 +455,27 @@ export async function applyDefaultModelWithGatewayReload(params: {
 
   let initialStatus: ModelStatusLikeResult | null = null
   try {
-    initialStatus = await params.getModelStatus()
+    initialStatus = await withReadBudget(params.getModelStatus(), readTimeoutMs)
   } catch {
     initialStatus = null
   }
 
-  let currentConfig: Record<string, any> | null = null
-  try {
-    currentConfig = await params.readConfig()
-  } catch {
-    currentConfig = null
+  let currentConfigResult: ReadBudgetResult<Record<string, any> | null> = {
+    settled: false,
+    value: null,
   }
+  try {
+    currentConfigResult = await withReadBudgetState(
+      params.readConfig(),
+      readTimeoutMs
+    )
+  } catch {
+    currentConfigResult = {
+      settled: false,
+      value: null,
+    }
+  }
+  const currentConfig = currentConfigResult.value
 
   let upstreamWriteResult: UpstreamModelWriteLikeResult | null = null
   if (params.applyUpstreamModelWrite) {
@@ -452,8 +511,18 @@ export async function applyDefaultModelWithGatewayReload(params: {
     }
   }
 
-  const nextConfig = buildNextConfigWithDefaultModel(currentConfig, model)
   const localWriteMeta = buildLocalWriteMeta(upstreamWriteResult)
+  if (!currentConfigResult.settled) {
+    return {
+      ok: false,
+      modelApplied: false,
+      gatewayReloaded: false,
+      message: CONFIG_SNAPSHOT_UNAVAILABLE_MESSAGE,
+      ...localWriteMeta,
+    }
+  }
+
+  const nextConfig = buildNextConfigWithDefaultModel(currentConfig, model)
   const writeResult = await params.applyConfigPatchGuarded({
     beforeConfig: currentConfig,
     afterConfig: nextConfig,
@@ -540,6 +609,7 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
   confirmationPolicy?: BackoffPollingPolicy
 }): Promise<ApplyAgentPrimaryModelWithGatewayReloadResult> {
   const agentId = String(params.agentId || '').trim()
+  const readTimeoutMs = resolveModelConfigReadTimeoutMs(params.confirmationPolicy)
   if (!agentId) {
     return {
       ok: false,
@@ -561,17 +631,27 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
 
   let initialStatus: ModelStatusLikeResult | null = null
   try {
-    initialStatus = await params.getModelStatus()
+    initialStatus = await withReadBudget(params.getModelStatus(), readTimeoutMs)
   } catch {
     initialStatus = null
   }
 
-  let currentConfig: Record<string, any> | null = null
-  try {
-    currentConfig = await params.readConfig()
-  } catch {
-    currentConfig = null
+  let currentConfigResult: ReadBudgetResult<Record<string, any> | null> = {
+    settled: false,
+    value: null,
   }
+  try {
+    currentConfigResult = await withReadBudgetState(
+      params.readConfig(),
+      readTimeoutMs
+    )
+  } catch {
+    currentConfigResult = {
+      settled: false,
+      value: null,
+    }
+  }
+  const currentConfig = currentConfigResult.value
 
   let upstreamWriteResult: UpstreamModelWriteLikeResult | null = null
   if (params.applyUpstreamModelWrite) {
@@ -610,6 +690,16 @@ export async function applyAgentPrimaryModelWithGatewayReload(params: {
 
   let nextConfig: Record<string, any>
   const localWriteMeta = buildLocalWriteMeta(upstreamWriteResult)
+  if (!currentConfigResult.settled) {
+    return {
+      ok: false,
+      modelApplied: false,
+      gatewayReloaded: false,
+      message: CONFIG_SNAPSHOT_UNAVAILABLE_MESSAGE,
+      ...localWriteMeta,
+    }
+  }
+
   try {
     nextConfig = buildNextConfigWithAgentPrimaryModel(currentConfig, agentId, model)
   } catch (error) {

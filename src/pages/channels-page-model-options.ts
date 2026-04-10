@@ -30,6 +30,7 @@ interface LoadReadyModelSelectOptionsInput {
   configData?: Record<string, any> | null
   statusData?: Record<string, any> | null
   preferredModelKey?: string
+  catalogItems?: ModelCatalogItemLike[] | null
   readUpstreamState?: () => Promise<RendererUpstreamModelStateResult>
 }
 
@@ -67,10 +68,48 @@ export function ensureModelSelectOption(options: ModelSelectOption[], model: str
   return [{ value: normalizedModel, label: `${normalizedModel}（当前）` }, ...options]
 }
 
+function buildReadyModelOptionsFromCatalog(
+  catalogItems: ModelCatalogItemLike[],
+  options?: LoadReadyModelSelectOptionsInput
+): ModelSelectOption[] {
+  const normalizedItems = catalogItems.map((item) => ({
+    ...item,
+    provider: normalizeCatalogProvider(item),
+  }))
+
+  if (options?.mode === 'all') {
+    const { scopedCatalog } = resolveModelsPageCatalogState({
+      catalog: normalizedItems,
+      envVars: options?.envVars ?? null,
+      config: options?.configData ?? null,
+      statusData: options?.statusData ?? null,
+      preferredModelKey: options?.preferredModelKey,
+      mode: 'all',
+    })
+
+    return buildModelSelectOptions(scopedCatalog)
+  }
+
+  const readyItems = buildVisibleModelCatalog(
+    normalizedItems,
+    {
+      mode: 'available',
+      statusData: options?.statusData ?? null,
+      preferredModelKey: options?.preferredModelKey,
+    }
+  )
+
+  return buildModelSelectOptions(readyItems)
+}
+
 export async function loadReadyModelSelectOptions(
   listCatalog: (query?: ModelCatalogPaginationQuery) => Promise<ModelCatalogPaginationResult<ModelCatalogItemLike>>,
   options?: LoadReadyModelSelectOptionsInput
 ): Promise<ModelSelectOption[]> {
+  if (Array.isArray(options?.catalogItems)) {
+    return buildReadyModelOptionsFromCatalog(options.catalogItems, options)
+  }
+
   const upstreamState = options?.readUpstreamState
     ? await options.readUpstreamState().catch(() => null)
     : null
@@ -98,32 +137,8 @@ export async function loadReadyModelSelectOptions(
     cliItems: cliCatalog,
     upstreamItems: upstreamCatalog,
   })
-  const normalizedItems = items.map((item) => ({
-    ...item,
-    provider: normalizeCatalogProvider(item),
-  }))
-
-  if (options?.mode === 'all') {
-    const { scopedCatalog } = resolveModelsPageCatalogState({
-      catalog: normalizedItems,
-      envVars: options?.envVars ?? null,
-      config: options?.configData ?? null,
-      statusData,
-      preferredModelKey: options?.preferredModelKey,
-      mode: 'all',
-    })
-
-    return buildModelSelectOptions(scopedCatalog)
-  }
-
-  const readyItems = buildVisibleModelCatalog(
-    normalizedItems,
-    {
-      mode: 'available',
-      statusData,
-      preferredModelKey: options?.preferredModelKey,
-    }
-  )
-
-  return buildModelSelectOptions(readyItems)
+  return buildReadyModelOptionsFromCatalog(items, {
+    ...options,
+    statusData,
+  })
 }

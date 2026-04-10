@@ -221,6 +221,12 @@ describe('discoverOpenClawCapabilities', () => {
   })
 
   it('treats gateway-backed switching as supported even when agent --model is absent', async () => {
+    const loadAuthRegistry = vi.fn(async () =>
+      createOpenClawAuthRegistry({
+        source: 'openclaw-internal-registry',
+        providers: [],
+      })
+    )
     const runCommand = vi.fn(async (args: string[]) => {
       if (args[0] === '--version') {
         return ok('OpenClaw 2026.3.23-2 (7ffe7e4)')
@@ -251,7 +257,7 @@ describe('discoverOpenClawCapabilities', () => {
       return { ok: false, stdout: '', stderr: 'unknown command', code: 1 }
     })
 
-    const caps = await discoverOpenClawCapabilities({ runCommand })
+    const caps = await discoverOpenClawCapabilities({ runCommand, loadAuthRegistry })
 
     expect(caps.supports.chatAgentModelFlag).toBe(false)
     expect(caps.supports.chatGatewaySendModel).toBe(true)
@@ -420,5 +426,133 @@ describe('discoverOpenClawCapabilities', () => {
     expect(caps.supports.plugins).toBe(true)
     expect(caps.supports.pluginsEnable).toBe(true)
     expect(caps.supports.pluginsInstall).toBe(true)
+  })
+
+  it('supports a bootstrap discovery profile that skips heavy compatibility probes', async () => {
+    const invokedCommands: string[] = []
+    const loadAuthRegistry = vi.fn(async () =>
+      createOpenClawAuthRegistry({
+        source: 'openclaw-internal-registry',
+        providers: [],
+      })
+    )
+    const runCommand = vi.fn(async (args: string[]) => {
+      invokedCommands.push(args.join(' '))
+
+      if (args[0] === '--version') {
+        return ok('OpenClaw 2026.4.9 (bootstrap-profile)')
+      }
+      if (args[0] === '--help') {
+        return ok(
+          'Usage: openclaw [options] [command]\nCommands:\n  gateway *\n  onboard\n  models *\n  plugins *\n  sessions *\n'
+        )
+      }
+      if (args[0] === 'onboard') {
+        return ok(
+          'Usage: openclaw onboard [options]\nOptions:\n  --auth-choice <choice>\n  --openai-api-key <key>\n'
+        )
+      }
+      if (args[0] === 'models' && args[1] === '--help') {
+        return ok(
+          'Usage: openclaw models [options] [command]\nCommands:\n  auth\n  list\n  status\n  scan\n  aliases\n  fallbacks\n  image-fallbacks\n'
+        )
+      }
+      if (args[0] === 'models' && args[1] === 'auth' && args[2] === '--help') {
+        return ok(
+          'Usage: openclaw models auth [options] [command]\nCommands:\n  login\n  paste-token\n  setup-token\n  login-github-copilot\n  order\n'
+        )
+      }
+      if (args[0] === 'models' && args[1] === 'list' && args[2] === '--help') {
+        return ok('Usage: openclaw models list [options]\nOptions:\n  --all\n  --json\n')
+      }
+      if (args[0] === 'models' && args[1] === 'status' && args[2] === '--help') {
+        return ok('Usage: openclaw models status [options]\nOptions:\n  --json\n')
+      }
+
+      return { ok: false, stdout: '', stderr: `unexpected command: ${args.join(' ')}`, code: 1 }
+    })
+
+    const caps = await discoverOpenClawCapabilities({
+      runCommand,
+      loadAuthRegistry,
+      profile: 'bootstrap',
+    } as any)
+
+    expect(invokedCommands).toEqual([
+      '--version',
+      '--help',
+      'onboard --help',
+      'models --help',
+      'models auth --help',
+      'models list --help',
+      'models status --help',
+    ])
+    expect(caps.supports.pluginsEnable).toBe(true)
+    expect(caps.supports.modelsAuthLogin).toBe(true)
+    expect(caps.supports.modelsAuthPasteToken).toBe(true)
+    expect(caps.supports.modelsAuthSetupToken).toBe(true)
+    expect(caps.supports.modelsAuthLoginGitHubCopilot).toBe(true)
+    expect(caps.supports.modelsAuthOrder).toBe(true)
+    expect(caps.supports.chatGatewaySendModel).toBe(true)
+    expect(caps.supports.chatInThreadModelSwitch).toBe(true)
+    expect(caps.supports.aliases).toBe(true)
+    expect(caps.supports.fallbacks).toBe(true)
+    expect(caps.supports.imageFallbacks).toBe(true)
+    expect(caps.supports.modelsScan).toBe(true)
+    expect(caps.pluginsCommands).toEqual([])
+  })
+
+  it('runs CLI capability probes serially so help probes never fan out concurrently', async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+
+    const loadAuthRegistry = vi.fn(async () =>
+      createOpenClawAuthRegistry({
+        source: 'openclaw-internal-registry',
+        providers: [],
+      })
+    )
+    const runCommand = vi.fn(async (args: string[]) => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await Promise.resolve()
+
+      try {
+        if (args[0] === '--version') {
+          return ok('OpenClaw 2026.4.9 (serial-probe)')
+        }
+        if (args[0] === '--help') {
+          return ok('Usage: openclaw [options] [command]\nCommands:\n  onboard\n  models\n  plugins\n')
+        }
+        if (args[0] === 'onboard') {
+          return ok('Usage: openclaw onboard [options]\nOptions:\n  --auth-choice <choice>\n  --non-interactive\n')
+        }
+        if (args[0] === 'agent' && args[1] === '--help') {
+          return ok('Usage: openclaw agent [options]\nOptions:\n  --session-id <id>\n')
+        }
+        if (args[0] === 'models' && args[1] === '--help') {
+          return ok('Usage: openclaw models [options] [command]\nCommands:\n  auth\n  list\n')
+        }
+        if (args[0] === 'models' && args[1] === 'auth' && args[2] === '--help') {
+          return ok('Usage: openclaw models auth [options] [command]\n')
+        }
+        if (args[0] === 'models' && args[1] === 'list' && args[2] === '--help') {
+          return ok('Usage: openclaw models list [options]\nOptions:\n  --all\n  --json\n')
+        }
+        if (args[0] === 'plugins' && args[1] === '--help') {
+          return ok('Usage: openclaw plugins [options] [command]\nCommands:\n  enable\n')
+        }
+        return { ok: false, stdout: '', stderr: `unknown command: ${args.join(' ')}`, code: 1 }
+      } finally {
+        inFlight -= 1
+      }
+    })
+
+    await discoverOpenClawCapabilities({
+      runCommand,
+      loadAuthRegistry,
+    })
+
+    expect(maxInFlight).toBe(1)
   })
 })

@@ -1,4 +1,4 @@
-import type { OpenClawInstallCandidate } from '../../src/shared/openclaw-phase1'
+import type { OpenClawDiscoveryResult, OpenClawInstallCandidate } from '../../src/shared/openclaw-phase1'
 import type { OpenClawUpgradeCheckResult, OpenClawUpgradeRunResult } from '../../src/shared/openclaw-phase4'
 import type { OpenClawBackupEntry } from '../../src/shared/openclaw-phase3'
 import { compareLooseVersions } from '../../src/shared/openclaw-phase1'
@@ -38,6 +38,7 @@ import {
   runMacOpenClawElevatedLifecycleTransaction,
   type OpenClawElevatedLifecycleTransactionResult,
 } from './openclaw-elevated-lifecycle-transaction'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
@@ -688,12 +689,52 @@ async function runSourceAwareUpgrade(
 
 export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult> {
   const discovery = await discoverOpenClawInstallations()
+  return checkOpenClawUpgradeFromDiscovery(discovery)
+}
+
+export async function checkOpenClawUpgradeForEnvCheck(
+  discovery: OpenClawDiscoveryResult | null | undefined
+): Promise<OpenClawUpgradeCheckResult> {
+  await appendEnvCheckDiagnostic('main-openclaw-upgrade-check-env-start', {
+    status: discovery?.status ?? null,
+    activeCandidateId: discovery?.activeCandidateId ?? null,
+    candidateCount: Array.isArray(discovery?.candidates) ? discovery.candidates.length : 0,
+  })
+  return checkOpenClawUpgradeFromDiscovery(
+    discovery || {
+      status: 'absent',
+      candidates: [],
+      activeCandidateId: null,
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: '',
+    }
+  )
+}
+
+async function checkOpenClawUpgradeFromDiscovery(
+  discovery: OpenClawDiscoveryResult
+): Promise<OpenClawUpgradeCheckResult> {
   const activeCandidate = resolveActiveCandidate(discovery.candidates)
+  await appendEnvCheckDiagnostic('main-openclaw-upgrade-check-discovery-resolved', {
+    status: discovery.status,
+    activeCandidateId: activeCandidate?.candidateId ?? null,
+    candidateCount: discovery.candidates.length,
+  })
+  await appendEnvCheckDiagnostic('main-openclaw-upgrade-check-before-gateway-health', {
+    hasActiveCandidate: Boolean(activeCandidate),
+    candidateId: activeCandidate?.candidateId ?? null,
+  })
   const health = activeCandidate ? await gatewayHealth().catch(() => ({ running: false, raw: '' })) : { running: false, raw: '' }
+  await appendEnvCheckDiagnostic('main-openclaw-upgrade-check-after-gateway-health', {
+    running: Boolean(health.running),
+  })
   const warnings = [...(discovery.warnings || [])]
 
   if (!activeCandidate) {
-    return {
+    const result: OpenClawUpgradeCheckResult = {
       ok: false,
       activeCandidate: null,
       currentVersion: null,
@@ -710,6 +751,14 @@ export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult
       warnings,
       errorCode: 'not_installed',
     }
+    await appendEnvCheckDiagnostic('main-openclaw-upgrade-check-result', {
+      ok: result.ok,
+      currentVersion: result.currentVersion ?? null,
+      targetVersion: result.targetVersion ?? null,
+      blocksContinue: result.blocksContinue,
+      gatewayRunning: result.gatewayRunning,
+    })
+    return result
   }
 
   const policy = resolveOpenClawVersionEnforcement({
@@ -725,7 +774,7 @@ export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult
     warnings.push(manualHint)
   }
 
-  return {
+  const result: OpenClawUpgradeCheckResult = {
     ok: !policy.blocksContinue,
     activeCandidate,
     currentVersion: activeCandidate.version || null,
@@ -743,6 +792,14 @@ export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult
     manualHint,
     errorCode: policy.enforcement === 'manual_block' && policy.blocksContinue ? 'manual_only' : undefined,
   }
+  await appendEnvCheckDiagnostic('main-openclaw-upgrade-check-result', {
+    ok: result.ok,
+    currentVersion: result.currentVersion ?? null,
+    targetVersion: result.targetVersion ?? null,
+    blocksContinue: result.blocksContinue,
+    gatewayRunning: result.gatewayRunning,
+  })
+  return result
 }
 
 export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {

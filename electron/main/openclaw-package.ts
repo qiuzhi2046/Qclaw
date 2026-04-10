@@ -1,9 +1,12 @@
 const childProcess = process.getBuiltinModule('child_process') as typeof import('node:child_process')
 const fs = process.getBuiltinModule('fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('path') as typeof import('node:path')
+import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
+import { resolveWindowsPrivateOpenClawRuntimePaths } from './platforms/windows/windows-runtime-policy'
 import { getNamedCommandLookupInvocation } from './command-capabilities'
 import { listExecutablePathCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
 
 export interface OpenClawPackageInfo {
   name: string
@@ -15,8 +18,10 @@ export interface OpenClawPackageInfo {
 }
 
 interface ResolveOpenClawPackageOptions {
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
   binaryPath?: string
   commandPathResolver?: (commandName: string) => Promise<string>
+  commandLookupTimeoutMs?: number
   npmPrefixResolver?: () => Promise<string | null>
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
@@ -24,6 +29,7 @@ interface ResolveOpenClawPackageOptions {
 }
 
 interface ResolveOpenClawBinaryPathFromNpmPrefixOptions {
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
   npmPrefix: string
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
@@ -45,6 +51,8 @@ interface CommandPathLookupInvocation {
 }
 
 interface CommandLookupRuntime {
+  activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+  commandLookupTimeoutMs: number
   platform: NodeJS.Platform
   env: NodeJS.ProcessEnv
 }
@@ -58,10 +66,27 @@ function extractFirstNonEmptyLine(text: string): string {
 }
 
 function createCommandLookupRuntime(options: ResolveOpenClawPackageOptions = {}): CommandLookupRuntime {
+  const platform = options.platform || process.platform
   return {
-    platform: options.platform || process.platform,
+    activeRuntimeSnapshot:
+      options.activeRuntimeSnapshot ?? (platform === 'win32' ? getSelectedWindowsActiveRuntimeSnapshot() : null),
+    commandLookupTimeoutMs: Math.max(1, Math.floor(options.commandLookupTimeoutMs ?? 5_000)),
+    platform,
     env: options.env || process.env,
   }
+}
+
+function withCommandLookupTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | null = null
+  const timeout = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
 }
 
 function findKnownCommandCandidate(
@@ -74,6 +99,7 @@ function findKnownCommandCandidate(
     env: runtime.env,
     currentPath: runtime.env.PATH || '',
     npmPrefix,
+    activeRuntimeSnapshot: runtime.activeRuntimeSnapshot,
   })
   for (const candidate of candidates) {
     try {
@@ -85,16 +111,84 @@ function findKnownCommandCandidate(
   return null
 }
 
+function resolveWindowsSnapshotBinaryPath(
+  runtime: CommandLookupRuntime,
+  fileExists: (candidatePath: string) => boolean = fs.existsSync
+): string | null {
+  const candidate = runtime.activeRuntimeSnapshot?.openclawPath?.trim()
+  if (!candidate || runtime.platform !== 'win32') return null
+
+  try {
+    if (fileExists(candidate)) {
+      return candidate
+    }
+  } catch {
+    // Ignore invalid snapshot path checks and continue with the normal lookup flow.
+  }
+
+  return null
+}
+
+function resolveWindowsSnapshotHostPackageRoot(runtime: CommandLookupRuntime): string | null {
+  const candidate = runtime.activeRuntimeSnapshot?.hostPackageRoot?.trim()
+  if (!candidate || runtime.platform !== 'win32') return null
+  return candidate
+}
+
+function normalizeComparablePath(platform: NodeJS.Platform, value: string): string {
+  const trimmed = String(value || '').trim()
+  return platform === 'win32' ? trimmed.toLowerCase() : trimmed
+}
+
+async function resolveWindowsPrivateRuntimePackageLayout(
+  runtime: CommandLookupRuntime,
+  binaryPath: string,
+  resolvedBinaryPath: string,
+  fsPromises: typeof fs.promises
+): Promise<ResolvedOpenClawPackageLayout | null> {
+  if (runtime.platform !== 'win32') return null
+
+  const privateRuntimePaths = resolveWindowsPrivateOpenClawRuntimePaths({
+    env: runtime.env,
+  })
+  const privateExecutable = normalizeComparablePath(runtime.platform, privateRuntimePaths.openclawExecutable)
+  const candidateBinaryPaths = [
+    normalizeComparablePath(runtime.platform, binaryPath),
+    normalizeComparablePath(runtime.platform, resolvedBinaryPath),
+  ]
+  if (!candidateBinaryPaths.includes(privateExecutable)) {
+    return null
+  }
+
+  const packageLocation = await findNearestOpenClawPackageLocation(
+    privateRuntimePaths.hostPackageRoot,
+    fsPromises
+  )
+  if (!packageLocation) return null
+
+  return {
+    binaryPath,
+    resolvedBinaryPath,
+    packageRoot: packageLocation.packageRoot,
+    packageJsonPath: packageLocation.packageJsonPath,
+    packageJson: packageLocation.packageJson,
+  }
+}
+
 export function resolveOpenClawBinaryPathFromNpmPrefix(
   options: ResolveOpenClawBinaryPathFromNpmPrefixOptions
 ): string {
   const runtime = createCommandLookupRuntime(options)
+  const snapshotBinaryPath = resolveWindowsSnapshotBinaryPath(runtime, options.fileExists)
+  if (snapshotBinaryPath) return snapshotBinaryPath
+
   const npmPrefix = String(options.npmPrefix || '').trim()
   const candidate = listExecutablePathCandidates('openclaw', {
     platform: runtime.platform,
     env: runtime.env,
     currentPath: '',
     npmPrefix,
+    activeRuntimeSnapshot: runtime.activeRuntimeSnapshot,
   })[0]
   if (candidate) return candidate
   throw new Error(
@@ -143,6 +237,7 @@ function runCommandPathLookup(commandName: string, runtime: CommandLookupRuntime
       shell: invocation.shell,
       env: runtime.env,
       cwd: resolveSafeWorkingDirectory({ env: runtime.env, platform: runtime.platform }),
+      timeout: runtime.commandLookupTimeoutMs,
     })
 
     let stdout = ''
@@ -172,6 +267,7 @@ function runDirectCommand(command: string, args: string[], runtime: CommandLooku
       shell: false,
       env: runtime.env,
       cwd: resolveSafeWorkingDirectory({ env: runtime.env, platform: runtime.platform }),
+      timeout: runtime.commandLookupTimeoutMs,
     })
 
     let stdout = ''
@@ -208,6 +304,7 @@ async function resolveNpmGlobalPrefix(runtime: CommandLookupRuntime): Promise<st
 async function resolvePackageLayout(
   options: ResolveOpenClawPackageOptions = {}
 ): Promise<ResolvedOpenClawPackageLayout> {
+  const runtime = createCommandLookupRuntime(options)
   const binaryPath = options.binaryPath?.trim() || (await resolveOpenClawBinaryPath(options))
   if (!binaryPath) {
     throw new Error('Unable to resolve the openclaw binary path')
@@ -218,14 +315,34 @@ async function resolvePackageLayout(
     throw new Error('Node fs.promises is unavailable in this runtime')
   }
   const resolvedBinaryPath = await fsPromises.realpath(binaryPath)
+  const snapshotHostPackageRoot = resolveWindowsSnapshotHostPackageRoot(runtime)
+  if (snapshotHostPackageRoot) {
+    const snapshotPackageLocation = await findNearestOpenClawPackageLocation(
+      snapshotHostPackageRoot,
+      fsPromises
+    )
+    if (snapshotPackageLocation?.packageRoot === snapshotHostPackageRoot) {
+      return {
+        binaryPath,
+        resolvedBinaryPath,
+        packageRoot: snapshotPackageLocation.packageRoot,
+        packageJsonPath: snapshotPackageLocation.packageJsonPath,
+        packageJson: snapshotPackageLocation.packageJson,
+      }
+    }
+  }
+
+  const privateRuntimeLayout = await resolveWindowsPrivateRuntimePackageLayout(
+    runtime,
+    binaryPath,
+    resolvedBinaryPath,
+    fsPromises
+  )
+  if (privateRuntimeLayout) {
+    return privateRuntimeLayout
+  }
 
   let startDir = path.dirname(resolvedBinaryPath)
-
-  if (process.platform === "win32") {
-    const nodeModules = path.join(startDir, "node_modules", "openclaw")
-    startDir = fs.existsSync(nodeModules) ? nodeModules : startDir
-  }
-  
   const packageLocation = await findNearestOpenClawPackageLocation(startDir, fsPromises)
   if (!packageLocation) {
     throw new Error(
@@ -242,6 +359,20 @@ async function resolvePackageLayout(
     packageJsonPath,
     packageJson,
   }
+}
+
+function resolveOpenClawCliBinRelativePath(packageJson: Record<string, unknown>): string {
+  const rawBin = packageJson.bin
+  if (typeof rawBin === 'string') {
+    return rawBin.trim()
+  }
+  if (rawBin && typeof rawBin === 'object') {
+    const openclawBin = (rawBin as Record<string, unknown>).openclaw
+    if (typeof openclawBin === 'string') {
+      return openclawBin.trim()
+    }
+  }
+  return ''
 }
 
 async function findNearestOpenClawPackageLocation(
@@ -293,8 +424,17 @@ export async function resolveOpenClawBinaryPath(
     options.commandPathResolver ||
     ((commandName: string) => runCommandPathLookup(commandName, runtime))
 
+  const snapshotBinaryPath = resolveWindowsSnapshotBinaryPath(runtime, options.fileExists)
+  if (snapshotBinaryPath) {
+    return snapshotBinaryPath
+  }
+
   try {
-    const binaryPath = await resolveCommandPath('openclaw')
+    const binaryPath = await withCommandLookupTimeout(
+      resolveCommandPath('openclaw'),
+      runtime.commandLookupTimeoutMs,
+      'openclaw command lookup'
+    )
     const trimmed = binaryPath.trim()
     if (!trimmed) {
       throw new Error('Unable to resolve the openclaw binary path')
@@ -303,7 +443,11 @@ export async function resolveOpenClawBinaryPath(
   } catch (error) {
     const npmPrefix =
       (await options.npmPrefixResolver?.().catch(() => null)) ??
-      (await resolveNpmGlobalPrefix(runtime))
+      (await withCommandLookupTimeout(
+        resolveNpmGlobalPrefix(runtime),
+        runtime.commandLookupTimeoutMs,
+        'npm prefix lookup'
+      ).catch(() => null))
     const fallbackCandidate = findKnownCommandCandidate(runtime, npmPrefix, options.fileExists)
     if (fallbackCandidate) return fallbackCandidate
     throw toActionableCommandLookupError('openclaw', error)
@@ -315,6 +459,20 @@ export async function resolveOpenClawPackageRoot(
 ): Promise<string> {
   const layout = await resolvePackageLayout(options)
   return layout.packageRoot
+}
+
+export async function resolveOpenClawCliEntrypointPath(
+  options: ResolveOpenClawPackageOptions = {}
+): Promise<string> {
+  const layout = await resolvePackageLayout(options)
+  const relativeEntryPath = resolveOpenClawCliBinRelativePath(layout.packageJson)
+  if (!relativeEntryPath) {
+    throw new Error(
+      `Resolved OpenClaw package.json is missing a usable openclaw bin entry: ${layout.packageJsonPath}`
+    )
+  }
+
+  return path.resolve(layout.packageRoot, relativeEntryPath)
 }
 
 export async function readOpenClawPackageInfo(

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { OpenClawDiscoveryResult } from '../../../src/shared/openclaw-phase1'
+
 import { OPENCLAW_NPM_REGISTRY_MIRRORS } from '../openclaw-download-fallbacks'
 
 const TEST_HOME = process.env.HOME || '/Users/test'
@@ -100,7 +102,11 @@ vi.mock('../openclaw-elevated-lifecycle-transaction', () => ({
   runMacOpenClawElevatedLifecycleTransaction: runMacOpenClawElevatedLifecycleTransactionMock,
 }))
 
-import { checkOpenClawUpgrade, runOpenClawUpgrade } from '../openclaw-upgrade-service'
+import {
+  checkOpenClawUpgrade,
+  checkOpenClawUpgradeForEnvCheck,
+  runOpenClawUpgrade,
+} from '../openclaw-upgrade-service'
 
 const itOnDarwin = process.platform === 'darwin' ? it : it.skip
 
@@ -282,6 +288,43 @@ describe('openclaw upgrade service', () => {
     expect(result.targetAction).toBe('upgrade')
     expect(result.targetVersion).toBe('2026.3.24')
     expect(result.errorCode).toBeUndefined()
+  })
+
+  it('reuses the env-check discovery instead of rediscovering installs again', async () => {
+    const discovery: OpenClawDiscoveryResult = {
+      status: 'installed',
+      activeCandidateId: 'candidate-1',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: ['from-env-check'],
+      defaultBackupDirectory: '/Users/test/Documents/Qclaw Lite Backups',
+      candidates: [
+        {
+          candidateId: 'candidate-1',
+          binaryPath: '/private/runtime/openclaw.cmd',
+          resolvedBinaryPath: '/private/runtime/openclaw.cmd',
+          packageRoot: '/private/runtime/node_modules/openclaw',
+          version: '2026.3.24',
+          installSource: 'npm-global',
+          isPathActive: true,
+          configPath: '/Users/test/.openclaw/openclaw.json',
+          stateRoot: '/Users/test/.openclaw',
+          displayConfigPath: '~/.openclaw/openclaw.json',
+          displayStateRoot: '~/.openclaw',
+          ownershipState: 'qclaw-installed',
+          installFingerprint: 'fingerprint-1',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+    }
+
+    const result = await checkOpenClawUpgradeForEnvCheck(discovery)
+
+    expect(discoverOpenClawInstallationsMock).not.toHaveBeenCalled()
+    expect(result.activeCandidate?.candidateId).toBe('candidate-1')
+    expect(result.warnings).toContain('from-env-check')
   })
 
   it('keeps supported custom installs usable while withholding in-app upgrade execution', async () => {

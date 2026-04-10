@@ -52,5 +52,11 @@ skills-lock.json
 /index.js
 /electron-builder.local.json
 /local-tools/
+/docs/qclaw-windows-root-causes-and-nexu-reference.md
+/docs/qclaw-windows-runtime-to-dashboard-retrospective-2026-04-09.md
+/docs/qclaw-windows-stabilization-platform-strategy-plan.md
 /docs/local-audits/
 /docs/plans/
+/docs/superpowers/
+/.cache/
+/node-env-backup.txt

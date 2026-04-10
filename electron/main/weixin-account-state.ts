@@ -1,5 +1,6 @@
-import { getOpenClawPaths, readConfig } from './cli'
+import { readConfig } from './cli'
 import { resolveOpenClawEnvValue } from './openclaw-legacy-env-migration'
+import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
@@ -32,7 +33,7 @@ async function resolveOpenClawStateDir(): Promise<string> {
   const envStateDir = resolveOpenClawEnvValue(process.env, 'OPENCLAW_STATE_DIR').value
   if (envStateDir) return envStateDir
 
-  const openClawPaths = await getOpenClawPaths().catch(() => null)
+  const openClawPaths = await resolveOpenClawPathsForRead().catch(() => null)
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   if (homeDir) return homeDir
 

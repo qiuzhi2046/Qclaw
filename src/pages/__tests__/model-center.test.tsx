@@ -1660,6 +1660,12 @@ describe('formatElapsedSeconds', () => {
 })
 
 describe('capabilities loading helpers', () => {
+  it('records capability loading progress in the shared env-check diagnostics stream', () => {
+    expect(modelCenterSource).toContain("window.api.appendEnvCheckDiagnostic('renderer-model-capabilities-requested'")
+    expect(modelCenterSource).toContain("window.api.appendEnvCheckDiagnostic('renderer-model-capabilities-result'")
+    expect(modelCenterSource).toContain("window.api.appendEnvCheckDiagnostic('renderer-model-capabilities-failed'")
+  })
+
   it('uses an eased progress curve that keeps moving but does not reach 100 during loading', () => {
     expect(estimateCapabilitiesLoadingProgress(0)).toBe(6)
     expect(estimateCapabilitiesLoadingProgress(1200)).toBeGreaterThan(estimateCapabilitiesLoadingProgress(400))

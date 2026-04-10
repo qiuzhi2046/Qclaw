@@ -1,10 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resetRuntimeOpenClawPathsCache, resolveRuntimeOpenClawPaths } from '../openclaw-runtime-paths'
+import { buildWindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-runtime-policy'
 import { buildTestEnv } from './test-env'
 
 describe('resolveRuntimeOpenClawPaths', () => {
   afterEach(() => {
     resetRuntimeOpenClawPathsCache()
+  })
+
+  it('uses the active Windows runtime snapshot without probing when provided', async () => {
+    const snapshot = buildWindowsActiveRuntimeSnapshot({
+      openclawExecutable: 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd',
+      nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+      npmPrefix: 'C:\\Users\\alice\\AppData\\Roaming\\npm',
+      configPath: 'C:\\Users\\alice\\.openclaw\\config.json',
+      stateDir: 'C:\\Users\\alice\\.openclaw',
+      extensionsDir: 'C:\\Users\\alice\\.openclaw\\extensions',
+    })
+    const runCommand = vi.fn(async () => {
+      throw new Error('should not probe when snapshot is available')
+    })
+
+    const paths = await resolveRuntimeOpenClawPaths({
+      activeRuntimeSnapshot: snapshot,
+      platform: 'win32',
+      env: buildTestEnv({
+        USERPROFILE: 'C:\\Users\\alice',
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+      }),
+      runCommand,
+    })
+
+    expect(paths.homeDir).toBe('C:\\Users\\alice\\.openclaw')
+    expect(paths.configFile).toBe('C:\\Users\\alice\\.openclaw\\config.json')
+    expect(paths.displayHomeDir).toBe('~\\.openclaw')
+    expect(runCommand).not.toHaveBeenCalled()
   })
 
   it('prefers CLI-reported config and state paths over the default ~/.openclaw layout', async () => {

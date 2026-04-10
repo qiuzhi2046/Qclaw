@@ -277,6 +277,7 @@ export function buildOnboardCommand(
     args.push('--skip-channels')
     usedFlags.add('--skip-channels')
   }
+  pushBooleanFlag(args, usedFlags, input.skipHealth, '--skip-health')
   if (input.skipSkills !== false) {
     args.push('--skip-skills')
     usedFlags.add('--skip-skills')
@@ -285,8 +286,6 @@ export function buildOnboardCommand(
     args.push('--skip-ui')
     usedFlags.add('--skip-ui')
   }
-
-  pushBooleanFlag(args, usedFlags, input.skipHealth, '--skip-health')
   pushStringFlag(args, usedFlags, '--mode', input.mode)
   pushStringFlag(args, usedFlags, '--gateway-bind', input.gatewayBind)
   pushStringFlag(args, usedFlags, '--gateway-port', input.gatewayPort)
@@ -941,6 +940,7 @@ export function buildOnboardRouteCommand(
       acceptRisk: true,
       installDaemon: false,
       skipChannels: true,
+      skipHealth: true,
       skipSkills: true,
       skipUi: true,
       valueFlags: cliFlag && normalizedSecret ? [{ flag: cliFlag, value: normalizedSecret }] : [],
@@ -1017,6 +1017,7 @@ export function buildCustomProviderOnboardRouteCommand(
       acceptRisk: true,
       installDaemon: false,
       skipChannels: true,
+      skipHealth: true,
       skipSkills: true,
       skipUi: true,
       valueFlags,

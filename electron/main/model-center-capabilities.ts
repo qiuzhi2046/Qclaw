@@ -3,17 +3,24 @@ import {
   loadOpenClawCapabilities,
   resetOpenClawCapabilitiesCache,
   type OpenClawCapabilities,
+  type OpenClawCapabilitiesProfile,
 } from './openclaw-capabilities'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import type { ModelCatalogQuery, ModelCatalogResult } from './openclaw-model-catalog'
 import type { ModelConfigCommandResult, ModelStatusOptions } from './openclaw-model-config'
 
 interface GetModelCenterCapabilitiesOptions {
   forceRefresh?: boolean
+  timeoutMs?: number
 }
 
 interface GetModelCenterCapabilitiesDeps {
-  loadCapabilities?: () => Promise<OpenClawCapabilities>
-  discoverCapabilities?: (options?: { refreshAuthRegistry?: boolean }) => Promise<OpenClawCapabilities>
+  loadCapabilities?: (options?: { profile?: OpenClawCapabilitiesProfile }) => Promise<OpenClawCapabilities>
+  discoverCapabilities?: (options?: {
+    refreshAuthRegistry?: boolean
+    profile?: OpenClawCapabilitiesProfile
+  }) => Promise<OpenClawCapabilities>
+  resetCapabilitiesCache?: () => void
 }
 
 interface ModelCenterCapabilitiesInvalidationDeps {
@@ -80,17 +87,78 @@ interface RefreshModelDataDeps extends GetModelCenterCapabilitiesDeps {
   ) => Promise<ModelCommandResult>
 }
 
+const DEFAULT_MODEL_CAPABILITIES_TIMEOUT_MS = 45_000
+const MODEL_CENTER_CAPABILITIES_PROFILE: OpenClawCapabilitiesProfile = 'bootstrap'
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export async function getModelCenterCapabilities(
   options: GetModelCenterCapabilitiesOptions = {},
   deps: GetModelCenterCapabilitiesDeps = {}
 ): Promise<OpenClawCapabilities> {
-  if (options.forceRefresh) {
-    return (deps.discoverCapabilities ?? discoverOpenClawCapabilities)({
-      refreshAuthRegistry: true,
-    })
-  }
+  const timeoutMs = Math.max(1, Number(options.timeoutMs || DEFAULT_MODEL_CAPABILITIES_TIMEOUT_MS))
+  void appendEnvCheckDiagnostic('main-model-capabilities-start', {
+    forceRefresh: options.forceRefresh === true,
+    timeoutMs,
+  })
+  try {
+    if (options.forceRefresh) {
+      const discovered = await withTimeout(
+        (deps.discoverCapabilities ?? discoverOpenClawCapabilities)({
+          refreshAuthRegistry: true,
+          profile: MODEL_CENTER_CAPABILITIES_PROFILE,
+        }),
+        timeoutMs,
+        'Model capabilities discovery'
+      )
+      void appendEnvCheckDiagnostic('main-model-capabilities-result', {
+        forceRefresh: true,
+        providerCount: Array.isArray(discovered.authRegistry?.providers)
+          ? discovered.authRegistry.providers.length
+          : 0,
+        authRegistryOk: discovered.authRegistry?.ok !== false,
+      })
+      return discovered
+    }
 
-  return (deps.loadCapabilities ?? loadOpenClawCapabilities)()
+    const loaded = await withTimeout(
+      (deps.loadCapabilities ?? loadOpenClawCapabilities)({
+        profile: MODEL_CENTER_CAPABILITIES_PROFILE,
+      }),
+      timeoutMs,
+      'Model capabilities load'
+    )
+    void appendEnvCheckDiagnostic('main-model-capabilities-result', {
+      forceRefresh: false,
+      providerCount: Array.isArray(loaded.authRegistry?.providers)
+        ? loaded.authRegistry.providers.length
+        : 0,
+      authRegistryOk: loaded.authRegistry?.ok !== false,
+    })
+    return loaded
+  } catch (error) {
+    ;(deps.resetCapabilitiesCache ?? resetOpenClawCapabilitiesCache)()
+    void appendEnvCheckDiagnostic('main-model-capabilities-failed', {
+      forceRefresh: options.forceRefresh === true,
+      timeoutMs,
+      message: error instanceof Error ? error.message : String(error || ''),
+    })
+    throw error
+  }
 }
 
 export function invalidateModelCenterCapabilitiesCache(

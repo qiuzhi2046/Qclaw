@@ -22,6 +22,7 @@ import {
   type OpenClawAuthProviderDescriptor,
   type OpenClawAuthRegistrySource,
 } from './openclaw-auth-registry'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import { normalizeAuthChoice } from './openclaw-spawn'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { canonicalizeModelProviderId } from '../../src/lib/model-provider-aliases'
@@ -67,13 +68,34 @@ export interface OpenClawCapabilities {
   }
 }
 
+export type OpenClawCapabilitiesProfile = 'bootstrap' | 'full'
+
 interface DiscoverCapabilitiesOptions {
   runCommand?: (args: string[], timeout?: number) => Promise<CliCommandResult>
   loadAuthRegistry?: (options?: { forceRefresh?: boolean }) => Promise<OpenClawAuthRegistry>
   now?: () => Date
   refreshAuthRegistry?: boolean
   forceRefresh?: boolean
+  profile?: OpenClawCapabilitiesProfile
   discoverCapabilities?: (options?: DiscoverCapabilitiesOptions) => Promise<OpenClawCapabilities>
+}
+
+async function trackCapabilitiesProbe<T>(
+  probe: string,
+  run: () => Promise<T>
+): Promise<T> {
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-probe-start', { probe })
+  try {
+    const result = await run()
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-probe-result', { probe })
+    return result
+  } catch (error) {
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-probe-failed', {
+      probe,
+      message: error instanceof Error ? error.message : String(error || ''),
+    })
+    throw error
+  }
 }
 
 function uniqueKeepOrder(items: string[]): string[] {
@@ -354,13 +376,35 @@ async function discoverFlags(
   }
 }
 
-let cachedCapabilities: OpenClawCapabilities | null = null
-let cachedCapabilitiesPromise: Promise<OpenClawCapabilities> | null = null
+const DEFAULT_CAPABILITIES_PROFILE: OpenClawCapabilitiesProfile = 'full'
+const cachedCapabilities: Record<OpenClawCapabilitiesProfile, OpenClawCapabilities | null> = {
+  bootstrap: null,
+  full: null,
+}
+const cachedCapabilitiesPromise: Record<OpenClawCapabilitiesProfile, Promise<OpenClawCapabilities> | null> = {
+  bootstrap: null,
+  full: null,
+}
 let capabilitiesCacheEpoch = 0
+
+function resolveCapabilitiesProfile(profile?: OpenClawCapabilitiesProfile): OpenClawCapabilitiesProfile {
+  return profile === 'bootstrap' ? 'bootstrap' : DEFAULT_CAPABILITIES_PROFILE
+}
+
+function resolveSharedCachedCapabilities(profile: OpenClawCapabilitiesProfile): OpenClawCapabilities | null {
+  if (profile === 'bootstrap') {
+    return cachedCapabilities.full || cachedCapabilities.bootstrap
+  }
+  return cachedCapabilities.full
+}
 
 export async function discoverOpenClawCapabilities(
   options: DiscoverCapabilitiesOptions = {}
 ): Promise<OpenClawCapabilities> {
+  const profile = resolveCapabilitiesProfile(options.profile)
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-discover-start', {
+    profile,
+  })
   const runCommand =
     options.runCommand ??
     (async (args: string[], timeout?: number) => {
@@ -372,18 +416,34 @@ export async function discoverOpenClawCapabilities(
     ((loadOptions?: { forceRefresh?: boolean }) => loadOpenClawAuthRegistry(loadOptions))
   const now = options.now ?? (() => new Date())
 
-  const [versionResult, rootHelpResult, onboardHelpResult, modelsHelpResult, authRegistry] = await Promise.all([
-    runCommand(['--version'], MAIN_RUNTIME_POLICY.capabilities.versionProbeTimeoutMs),
-    runCommand(['--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs),
-    runCommand(['onboard', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs),
-    runCommand(['models', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs),
+  // Keep CLI help/version probes strictly serialized so Windows hosts never fan
+  // out multiple openclaw child processes at once. The auth registry loader is
+  // metadata-only and can still overlap with the CLI probe chain.
+  const authRegistryPromise = trackCapabilitiesProbe('auth-registry', () =>
     loadAuthRegistry({
       forceRefresh: options.refreshAuthRegistry,
-    }),
-  ])
+    })
+  )
+  const versionResult = await trackCapabilitiesProbe('version', () =>
+    runCommand(['--version'], MAIN_RUNTIME_POLICY.capabilities.versionProbeTimeoutMs)
+  )
+  const rootHelpResult = await trackCapabilitiesProbe('root-help', () =>
+    runCommand(['--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
+  )
+  const onboardHelpResult = await trackCapabilitiesProbe('onboard-help', () =>
+    runCommand(['onboard', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
+  )
+  const modelsHelpResult = await trackCapabilitiesProbe('models-help', () =>
+    runCommand(['models', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
+  )
+  const authRegistry = await authRegistryPromise
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-discover-phase1-complete', {})
 
   const onboardHelpText = mergeOutput(onboardHelpResult)
   const recoveredAuthRegistry = recoverAuthRegistryFromOnboardHelp(authRegistry, onboardHelpText)
+  const hasPluginBackedAuthMethod = recoveredAuthRegistry.providers.some((provider) =>
+    provider.methods.some((method) => Boolean(method.route.pluginId))
+  )
   const authChoices = deriveCompatAuthChoices(recoveredAuthRegistry)
 
   const rootCommands = parseModelsCommands(mergeOutput(rootHelpResult))
@@ -392,33 +452,40 @@ export async function discoverOpenClawCapabilities(
   const commandFlags: Record<string, string[]> = {
     onboard: onboardFlags,
   }
-  const [
-    modelsAuthHelpResult,
-    pluginsHelpResult,
-    agentFlags,
-    modelsListFlags,
-    modelsStatusFlags,
-    modelsScanFlags,
-    aliasesFlags,
-    fallbacksFlags,
-    imageFallbacksFlags,
-  ] = await Promise.all([
-    runCommand(['models', 'auth', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs).catch(() => null),
-    runCommand(['plugins', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs).catch(() => null),
-    discoverFlags(runCommand, ['agent']),
-    modelsCommands.includes('list') ? discoverFlags(runCommand, ['models', 'list']) : Promise.resolve([]),
-    modelsCommands.includes('status') ? discoverFlags(runCommand, ['models', 'status']) : Promise.resolve([]),
-    modelsCommands.includes('scan') ? discoverFlags(runCommand, ['models', 'scan']) : Promise.resolve([]),
-    modelsCommands.includes('aliases')
-      ? discoverFlags(runCommand, ['models', 'aliases', 'list'])
-      : Promise.resolve([]),
-    modelsCommands.includes('fallbacks')
-      ? discoverFlags(runCommand, ['models', 'fallbacks', 'list'])
-      : Promise.resolve([]),
-    modelsCommands.includes('image-fallbacks')
-      ? discoverFlags(runCommand, ['models', 'image-fallbacks', 'list'])
-      : Promise.resolve([]),
-  ])
+  const modelsAuthHelpResult = modelsCommands.includes('auth')
+    ? await trackCapabilitiesProbe('models-auth-help', () =>
+        runCommand(['models', 'auth', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs).catch(() => null)
+      )
+    : null
+  const pluginsHelpResult = profile === 'full'
+    ? await trackCapabilitiesProbe('plugins-help', () =>
+        runCommand(['plugins', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs).catch(() => null)
+      )
+    : null
+  const agentFlags = profile === 'full'
+    ? await trackCapabilitiesProbe('agent-flags', () => discoverFlags(runCommand, ['agent']))
+    : []
+  const modelsListFlags = modelsCommands.includes('list')
+    ? await trackCapabilitiesProbe('models-list-flags', () => discoverFlags(runCommand, ['models', 'list']))
+    : []
+  const modelsStatusFlags = modelsCommands.includes('status')
+    ? await trackCapabilitiesProbe('models-status-flags', () => discoverFlags(runCommand, ['models', 'status']))
+    : []
+  const modelsScanFlags = profile === 'full' && modelsCommands.includes('scan')
+    ? await trackCapabilitiesProbe('models-scan-flags', () => discoverFlags(runCommand, ['models', 'scan']))
+    : []
+  const aliasesFlags = profile === 'full' && modelsCommands.includes('aliases')
+    ? await trackCapabilitiesProbe('models-aliases-flags', () => discoverFlags(runCommand, ['models', 'aliases', 'list']))
+    : []
+  const fallbacksFlags = profile === 'full' && modelsCommands.includes('fallbacks')
+    ? await trackCapabilitiesProbe('models-fallbacks-flags', () => discoverFlags(runCommand, ['models', 'fallbacks', 'list']))
+    : []
+  const imageFallbacksFlags = profile === 'full' && modelsCommands.includes('image-fallbacks')
+    ? await trackCapabilitiesProbe('models-image-fallbacks-flags', () =>
+        discoverFlags(runCommand, ['models', 'image-fallbacks', 'list'])
+      )
+    : []
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-discover-phase2-complete', {})
 
   let modelsAuthCommands: string[] = []
   if (modelsAuthHelpResult) {
@@ -452,29 +519,24 @@ export async function discoverOpenClawCapabilities(
     commandFlags['models image-fallbacks list'] = imageFallbacksFlags
   }
 
-  const [
-    loginFlags,
-    pasteTokenFlags,
-    setupTokenFlags,
-    loginGitHubCopilotFlags,
-    modelsAuthOrderHelpResult,
-  ] = await Promise.all([
-    modelsAuthCommands.includes('login') ? discoverFlags(runCommand, ['models', 'auth', 'login']) : Promise.resolve([]),
-    modelsAuthCommands.includes('paste-token')
-      ? discoverFlags(runCommand, ['models', 'auth', 'paste-token'])
-      : Promise.resolve([]),
-    modelsAuthCommands.includes('setup-token')
-      ? discoverFlags(runCommand, ['models', 'auth', 'setup-token'])
-      : Promise.resolve([]),
-    modelsAuthCommands.includes('login-github-copilot')
-      ? discoverFlags(runCommand, ['models', 'auth', 'login-github-copilot'])
-      : Promise.resolve([]),
-    modelsAuthCommands.includes('order')
-      ? runCommand(['models', 'auth', 'order', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs).catch(
-          () => null
-        )
-      : Promise.resolve(null),
-  ])
+  const loginFlags = profile === 'full' && modelsAuthCommands.includes('login')
+    ? await discoverFlags(runCommand, ['models', 'auth', 'login'])
+    : []
+  const pasteTokenFlags = profile === 'full' && modelsAuthCommands.includes('paste-token')
+    ? await discoverFlags(runCommand, ['models', 'auth', 'paste-token'])
+    : []
+  const setupTokenFlags = profile === 'full' && modelsAuthCommands.includes('setup-token')
+    ? await discoverFlags(runCommand, ['models', 'auth', 'setup-token'])
+    : []
+  const loginGitHubCopilotFlags = profile === 'full' && modelsAuthCommands.includes('login-github-copilot')
+    ? await discoverFlags(runCommand, ['models', 'auth', 'login-github-copilot'])
+    : []
+  const modelsAuthOrderHelpResult = profile === 'full' && modelsAuthCommands.includes('order')
+    ? await runCommand(['models', 'auth', 'order', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs).catch(
+        () => null
+      )
+    : null
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-discover-phase3-complete', {})
 
   if (modelsAuthCommands.includes('login')) {
     commandFlags['models auth login'] = loginFlags
@@ -491,17 +553,15 @@ export async function discoverOpenClawCapabilities(
 
   if (modelsAuthOrderHelpResult) {
     const modelsAuthOrderCommands = parseModelsCommands(mergeOutput(modelsAuthOrderHelpResult))
-    const [orderGetFlags, orderSetFlags, orderClearFlags] = await Promise.all([
-      modelsAuthOrderCommands.includes('get')
-        ? discoverFlags(runCommand, ['models', 'auth', 'order', 'get'])
-        : Promise.resolve([]),
-      modelsAuthOrderCommands.includes('set')
-        ? discoverFlags(runCommand, ['models', 'auth', 'order', 'set'])
-        : Promise.resolve([]),
-      modelsAuthOrderCommands.includes('clear')
-        ? discoverFlags(runCommand, ['models', 'auth', 'order', 'clear'])
-        : Promise.resolve([]),
-    ])
+    const orderGetFlags = modelsAuthOrderCommands.includes('get')
+      ? await discoverFlags(runCommand, ['models', 'auth', 'order', 'get'])
+      : []
+    const orderSetFlags = modelsAuthOrderCommands.includes('set')
+      ? await discoverFlags(runCommand, ['models', 'auth', 'order', 'set'])
+      : []
+    const orderClearFlags = modelsAuthOrderCommands.includes('clear')
+      ? await discoverFlags(runCommand, ['models', 'auth', 'order', 'clear'])
+      : []
 
     if (modelsAuthOrderCommands.includes('get')) {
       commandFlags['models auth order get'] = orderGetFlags
@@ -514,7 +574,7 @@ export async function discoverOpenClawCapabilities(
     }
   }
 
-  return {
+  const capabilities = {
     version: extractVersion(versionResult),
     discoveredAt: now().toISOString(),
     authRegistry: recoveredAuthRegistry,
@@ -528,9 +588,15 @@ export async function discoverOpenClawCapabilities(
     commandFlags,
     supports: {
       onboard: rootCommands.includes('onboard') || onboardFlags.length > 0,
-      plugins: rootCommands.includes('plugins') || pluginsCommands.length > 0,
-      pluginsInstall: pluginsCommands.includes('install'),
-      pluginsEnable: pluginsCommands.includes('enable'),
+      plugins: rootCommands.includes('plugins') || pluginsCommands.length > 0 || hasPluginBackedAuthMethod,
+      pluginsInstall:
+        profile === 'bootstrap'
+          ? rootCommands.includes('plugins') || hasPluginBackedAuthMethod
+          : pluginsCommands.includes('install'),
+      pluginsEnable:
+        profile === 'bootstrap'
+          ? rootCommands.includes('plugins') || hasPluginBackedAuthMethod
+          : pluginsCommands.includes('enable'),
       chatAgentModelFlag: agentFlags.includes('--model'),
       // Modern OpenClaw routes chat model control through gateway RPCs even when
       // `openclaw agent --help` no longer exposes a `--model` flag.
@@ -542,27 +608,42 @@ export async function discoverOpenClawCapabilities(
       modelsStatusJson:
         modelsCommands.includes('status') && hasRequiredFlags(commandFlags, 'models status', ['--json']),
       modelsAuthLogin:
-        modelsAuthCommands.includes('login') && hasRequiredFlags(commandFlags, 'models auth login', ['--provider']),
+        profile === 'bootstrap'
+          ? modelsAuthCommands.includes('login')
+          : modelsAuthCommands.includes('login') && hasRequiredFlags(commandFlags, 'models auth login', ['--provider']),
       modelsAuthAdd: modelsAuthCommands.includes('add'),
       modelsAuthPasteToken:
-        modelsAuthCommands.includes('paste-token') &&
-        hasRequiredFlags(commandFlags, 'models auth paste-token', ['--provider']),
+        profile === 'bootstrap'
+          ? modelsAuthCommands.includes('paste-token')
+          : modelsAuthCommands.includes('paste-token') &&
+            hasRequiredFlags(commandFlags, 'models auth paste-token', ['--provider']),
       modelsAuthSetupToken:
-        modelsAuthCommands.includes('setup-token') &&
-        hasRequiredFlags(commandFlags, 'models auth setup-token', ['--provider']),
+        profile === 'bootstrap'
+          ? modelsAuthCommands.includes('setup-token')
+          : modelsAuthCommands.includes('setup-token') &&
+            hasRequiredFlags(commandFlags, 'models auth setup-token', ['--provider']),
       modelsAuthOrder: modelsAuthCommands.includes('order'),
-      modelsAuthLoginGitHubCopilot: modelsAuthCommands.includes('login-github-copilot'),
+      modelsAuthLoginGitHubCopilot:
+        profile === 'bootstrap'
+          ? modelsAuthCommands.includes('login-github-copilot')
+          : modelsAuthCommands.includes('login-github-copilot'),
       aliases: modelsCommands.includes('aliases'),
       fallbacks: modelsCommands.includes('fallbacks'),
       imageFallbacks: modelsCommands.includes('image-fallbacks'),
       modelsScan: modelsCommands.includes('scan'),
     },
   }
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-discover-result', {
+    providerCount: Array.isArray(capabilities.authRegistry?.providers) ? capabilities.authRegistry.providers.length : 0,
+    authRegistryOk: capabilities.authRegistry?.ok !== false,
+  })
+  return capabilities
 }
 
 export async function loadOpenClawCapabilities(
   options: DiscoverCapabilitiesOptions = {}
 ): Promise<OpenClawCapabilities> {
+  const profile = resolveCapabilitiesProfile(options.profile)
   const shouldUseSharedCache =
     !options.forceRefresh &&
     !options.refreshAuthRegistry &&
@@ -570,12 +651,22 @@ export async function loadOpenClawCapabilities(
     !options.loadAuthRegistry &&
     !options.now
 
-  if (shouldUseSharedCache && cachedCapabilities) {
-    return cachedCapabilities
+  void appendEnvCheckDiagnostic('main-openclaw-capabilities-load-start', {
+    profile,
+    shouldUseSharedCache,
+    forceRefresh: options.forceRefresh === true,
+    refreshAuthRegistry: options.refreshAuthRegistry === true,
+  })
+
+  const sharedCachedCapability = shouldUseSharedCache ? resolveSharedCachedCapabilities(profile) : null
+  if (sharedCachedCapability) {
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-load-cache-hit', {})
+    return sharedCachedCapability
   }
 
-  if (shouldUseSharedCache && cachedCapabilitiesPromise) {
-    return cachedCapabilitiesPromise
+  if (shouldUseSharedCache && cachedCapabilitiesPromise[profile]) {
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-load-pending-hit', {})
+    return cachedCapabilitiesPromise[profile] as Promise<OpenClawCapabilities>
   }
 
   const shouldPopulateSharedCache = !options.runCommand && !options.loadAuthRegistry && !options.now
@@ -584,28 +675,49 @@ export async function loadOpenClawCapabilities(
     capabilitiesCacheEpoch = discoveryEpoch
   }
 
-  const discoveryPromise = (options.discoverCapabilities ?? discoverOpenClawCapabilities)(options)
+  const discoveryPromise = (options.discoverCapabilities ?? discoverOpenClawCapabilities)({
+    ...options,
+    profile,
+  })
   if (shouldUseSharedCache) {
-    cachedCapabilitiesPromise = discoveryPromise
+    cachedCapabilitiesPromise[profile] = discoveryPromise
   }
 
   try {
     const discovered = await discoveryPromise
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-load-result', {
+      profile,
+      providerCount: Array.isArray(discovered.authRegistry?.providers)
+        ? discovered.authRegistry.providers.length
+        : 0,
+      authRegistryOk: discovered.authRegistry?.ok !== false,
+    })
     if (shouldPopulateSharedCache && capabilitiesCacheEpoch === discoveryEpoch) {
-      cachedCapabilities = discovered
+      cachedCapabilities[profile] = discovered
+      if (profile === 'full') {
+        cachedCapabilities.bootstrap = discovered
+      }
     }
     return discovered
+  } catch (error) {
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-load-failed', {
+      profile,
+      message: error instanceof Error ? error.message : String(error || ''),
+    })
+    throw error
   } finally {
-    if (shouldUseSharedCache && cachedCapabilitiesPromise === discoveryPromise) {
-      cachedCapabilitiesPromise = null
+    if (shouldUseSharedCache && cachedCapabilitiesPromise[profile] === discoveryPromise) {
+      cachedCapabilitiesPromise[profile] = null
     }
   }
 }
 
 export function resetOpenClawCapabilitiesCache(): void {
   capabilitiesCacheEpoch += 1
-  cachedCapabilities = null
-  cachedCapabilitiesPromise = null
+  cachedCapabilities.bootstrap = null
+  cachedCapabilities.full = null
+  cachedCapabilitiesPromise.bootstrap = null
+  cachedCapabilitiesPromise.full = null
 }
 
 export function resetOpenClawCapabilitiesCacheForTests(): void {

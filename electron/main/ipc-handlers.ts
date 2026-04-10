@@ -6,8 +6,10 @@ import {
   checkNode,
   checkOpenClaw,
   type CliResult,
+  discoverOpenClawForEnvCheck,
   type RepairIncompatibleExtensionPluginsOptions,
   getOpenClawPaths,
+  getOpenClawPathsForRead,
   installOpenClaw,
   installNode,
   downloadNodeInstaller,
@@ -34,6 +36,7 @@ import {
   installPlugin,
   installPluginNpx,
   repairIncompatibleExtensionPlugins,
+  scanIncompatibleExtensionPlugins,
   isPluginInstalledOnDisk,
   uninstallPlugin,
   channelsAdd,
@@ -61,6 +64,7 @@ import {
   type LocalModelScanInput,
   type ValidateProviderCredentialInput,
 } from './openclaw-model-config'
+import { getModelUiSnapshot } from './model-ui-snapshot'
 import {
   testLocalConnection,
   ensureLocalAuthProfile,
@@ -114,7 +118,7 @@ import { buildOpenClawCleanupPreview } from './openclaw-cleanup-planner'
 import { prepareQClawUninstall, runOpenClawCleanup } from './openclaw-cleanup-service'
 import { runOpenClawDataCleanup } from './openclaw-data-cleanup-service'
 import { previewOpenClawRestore, runOpenClawRestore } from './openclaw-restore-service'
-import { checkOpenClawUpgrade, runOpenClawUpgrade } from './openclaw-upgrade-service'
+import { checkOpenClawUpgrade, checkOpenClawUpgradeForEnvCheck, runOpenClawUpgrade } from './openclaw-upgrade-service'
 import { readOpenClawRuntimeReconcileStore } from './openclaw-runtime-reconcile'
 import { withManagedOperationLock } from './managed-operation-lock'
 import { buildAppleScriptDoShellScript } from './node-runtime'
@@ -132,6 +136,7 @@ import {
   ensureGatewayReady,
   reloadGatewayForConfigChange,
 } from './gateway-lifecycle-controller'
+import { reconcileGatewayRuntimeMutation } from './gateway-runtime-owner'
 import {
   answerFeishuInstallerSessionPrompt,
   getFeishuInstallerSessionSnapshot,
@@ -168,6 +173,7 @@ import {
   prepareManagedChannelPluginForSetup,
   repairManagedChannelPlugin,
 } from './managed-channel-plugin-lifecycle'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import {
   clearChatTranscript,
   createChatSession,
@@ -498,11 +504,26 @@ export function registerIpcHandlers() {
     return true
   })
 
-  ipcMain.handle('paths:openclaw:get', () => getOpenClawPaths())
+  ipcMain.handle('paths:openclaw:get', () => getOpenClawPathsForRead())
 
   // Environment checks
   ipcMain.handle('env:checkNode', () => checkNode())
-  ipcMain.handle('env:checkOpenClaw', () => checkOpenClaw())
+  ipcMain.handle('env:checkOpenClaw', async () => {
+    await appendEnvCheckDiagnostic('ipc-check-openclaw-requested', {})
+    try {
+      const result = await checkOpenClaw()
+      await appendEnvCheckDiagnostic('ipc-check-openclaw-result', {
+        installed: result.installed,
+        version: result.version || null,
+      })
+      return result
+    } catch (error) {
+      await appendEnvCheckDiagnostic('ipc-check-openclaw-failed', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+  })
   ipcMain.handle('env:prepareMacGitTools', () => prepareMacGitTools())
   ipcMain.handle('env:installNode', () => installNode())
   ipcMain.handle('env:resolveNodeInstallPlan', () => resolveNodeInstallPlan())
@@ -552,15 +573,36 @@ export function registerIpcHandlers() {
     withModelCenterCapabilitiesInvalidatedOnSuccess(() => installOpenClaw())
   )
   ipcMain.handle('openclaw:discover', () => discoverOpenClawInstallations())
+  ipcMain.handle('openclaw:discover-env-check', () => discoverOpenClawForEnvCheck())
+  ipcMain.handle('env-check:diag:append', (_e, event: string, fields?: Record<string, unknown>) =>
+    appendEnvCheckDiagnostic(event, fields || {})
+  )
   ipcMain.handle('openclaw:latest:check', () => checkOpenClawLatestVersion())
   ipcMain.handle('openclaw:baseline-backup:ensure', (_e, candidate) => ensureBaselineBackup(candidate))
   ipcMain.handle('openclaw:baseline-backup:skip', (_e, candidate) => skipBaselineBackup(candidate))
   ipcMain.handle('openclaw:baseline-backup:get-status', (_e, installFingerprint: string) =>
     getBaselineBackupStatus(installFingerprint)
   )
-  ipcMain.handle('openclaw:managed:mark', (_e, installFingerprint: string) =>
-    markManagedOpenClawInstall(installFingerprint)
-  )
+  ipcMain.handle('openclaw:managed:mark', async (_e, installFingerprint: string) => {
+    await appendEnvCheckDiagnostic('ipc-managed-mark-requested', {
+      installFingerprint,
+      userDataDir: process.env.QCLAW_USER_DATA_DIR || '',
+    })
+    try {
+      const marked = await markManagedOpenClawInstall(installFingerprint)
+      await appendEnvCheckDiagnostic('ipc-managed-mark-result', {
+        installFingerprint,
+        marked,
+      })
+      return marked
+    } catch (error) {
+      await appendEnvCheckDiagnostic('ipc-managed-mark-failed', {
+        installFingerprint,
+        error: error instanceof Error ? error.message : String(error || 'unknown'),
+      })
+      throw error
+    }
+  })
   ipcMain.handle('openclaw:data-guard:get', (_e, candidate) => getDataGuardSummary(candidate))
   ipcMain.handle('openclaw:config:prepare', (_e, candidate) => prepareManagedConfigWrite(candidate))
   ipcMain.handle('openclaw:config:guarded-write', (_e, request, candidate) =>
@@ -611,6 +653,29 @@ export function registerIpcHandlers() {
   ipcMain.handle('openclaw:restore:preview', (_e, backupId: string) => previewOpenClawRestore(backupId))
   ipcMain.handle('openclaw:restore:run', (_e, backupId: string, scope) => runOpenClawRestore(backupId, scope))
   ipcMain.handle('openclaw:upgrade:check', () => checkOpenClawUpgrade())
+  ipcMain.handle('openclaw:upgrade:check-env', async (_e, discovery) => {
+    await appendEnvCheckDiagnostic('ipc-openclaw-upgrade-check-env-requested', {
+      status: discovery?.status ?? null,
+      activeCandidateId: discovery?.activeCandidateId ?? null,
+      candidateCount: Array.isArray(discovery?.candidates) ? discovery.candidates.length : 0,
+    })
+    try {
+      const result = await checkOpenClawUpgradeForEnvCheck(discovery)
+      await appendEnvCheckDiagnostic('ipc-openclaw-upgrade-check-env-result', {
+        ok: result.ok,
+        currentVersion: result.currentVersion ?? null,
+        targetVersion: result.targetVersion ?? null,
+        blocksContinue: result.blocksContinue,
+        gatewayRunning: result.gatewayRunning,
+      })
+      return result
+    } catch (error) {
+      await appendEnvCheckDiagnostic('ipc-openclaw-upgrade-check-env-failed', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+  })
   ipcMain.handle('openclaw:upgrade:run', () =>
     withModelCenterCapabilitiesInvalidatedOnSuccess(() => runOpenClawUpgrade())
   )
@@ -632,10 +697,18 @@ export function registerIpcHandlers() {
   ipcMain.handle('gateway:runtime-reconcile:state:get', () => readOpenClawRuntimeReconcileStore())
   ipcMain.handle('gateway:force-restart', () => gatewayForceRestart())
   ipcMain.handle('gateway:reload-after-model-change', () =>
-    reloadGatewayForConfigChange('model-change', { preferEnsureWhenNotRunning: true })
+    reconcileGatewayRuntimeMutation({
+      kind: 'model-change',
+      reason: 'model-change',
+      preferEnsureWhenNotRunning: true,
+    })
   )
   ipcMain.handle('gateway:reload-after-channel-change', () =>
-    reloadGatewayForConfigChange('channel-change', { preferEnsureWhenNotRunning: true })
+    reconcileGatewayRuntimeMutation({
+      kind: 'channel-change',
+      reason: 'channel-change',
+      preferEnsureWhenNotRunning: true,
+    })
   )
   ipcMain.handle('gateway:reload-manual', () =>
     reloadGatewayForConfigChange('manual-reload', { preferEnsureWhenNotRunning: true })
@@ -667,7 +740,18 @@ export function registerIpcHandlers() {
   ipcMain.handle('status:get', () => getStatus())
 
   // Config
-  ipcMain.handle('config:read', () => readConfig())
+  ipcMain.handle('config:read', async (_event, options?: { configPath?: string | null }) => {
+    await appendEnvCheckDiagnostic('ipc-config-read-requested', {
+      configPath: String(options?.configPath || '').trim() || null,
+    })
+    const config = await readConfig(options)
+    await appendEnvCheckDiagnostic('ipc-config-read-result', {
+      configPath: String(options?.configPath || '').trim() || null,
+      isNull: !config,
+      topLevelKeys: config && typeof config === 'object' ? Object.keys(config).length : 0,
+    })
+    return config
+  })
 
   // Env file
   ipcMain.handle('env:read', () => readEnvFile())
@@ -697,6 +781,9 @@ export function registerIpcHandlers() {
   ipcMain.handle('plugins:installNpx', (_e, url: string, expectedPluginIds?: string[]) => installPluginNpx(url, expectedPluginIds))
   ipcMain.handle('plugins:repair-incompatible', (_e, options?: RepairIncompatibleExtensionPluginsOptions) =>
     repairIncompatibleExtensionPlugins(options || {})
+  )
+  ipcMain.handle('plugins:scan-incompatible', (_e, options?: RepairIncompatibleExtensionPluginsOptions) =>
+    scanIncompatibleExtensionPlugins(options || {})
   )
   ipcMain.handle('plugins:installed-on-disk', (_e, pluginId: string) => isPluginInstalledOnDisk(pluginId))
   ipcMain.handle('plugins:uninstall', (_e, name: string) => uninstallPlugin(name))
@@ -795,8 +882,26 @@ export function registerIpcHandlers() {
   )
 
   // Models center
-  ipcMain.handle('models:capabilities:get', () => getModelCenterCapabilities())
+  ipcMain.handle('models:capabilities:get', async () => {
+    await appendEnvCheckDiagnostic('ipc-model-capabilities-requested', {})
+    try {
+      const capabilities = await getModelCenterCapabilities()
+      await appendEnvCheckDiagnostic('ipc-model-capabilities-result', {
+        providerCount: Array.isArray(capabilities.authRegistry?.providers)
+          ? capabilities.authRegistry.providers.length
+          : 0,
+        authRegistryOk: capabilities.authRegistry?.ok !== false,
+      })
+      return capabilities
+    } catch (error) {
+      await appendEnvCheckDiagnostic('ipc-model-capabilities-failed', {
+        message: error instanceof Error ? error.message : String(error || ''),
+      })
+      throw error
+    }
+  })
   ipcMain.handle('models:catalog:list', (_e, query?: ModelCatalogQuery) => getModelCatalog({ query }))
+  ipcMain.handle('models:snapshot:get', (_e, request) => getModelUiSnapshot(request || {}))
   ipcMain.handle('models:status:get', (_e, options?: ModelStatusOptions) => getModelStatus(options || {}))
   ipcMain.handle('models:upstream-state:get', () => getOpenClawUpstreamModelState())
   ipcMain.handle('models:verification:sync', (_e, input?: { statusData?: Record<string, any> | null }) =>

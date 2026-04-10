@@ -1,3 +1,38 @@
+export interface WindowsSelectedRuntimeView {
+  readonly hostPackageRoot: string
+  readonly nodePath: string
+  readonly openclawPath: string
+  readonly stateDir: string
+}
+
+export interface WindowsGatewayOwnerSnapshotView {
+  readonly ownerKind: string
+  readonly ownerLauncherPath: string
+  readonly ownerTaskName: string
+}
+
+export interface WindowsManagedPluginSnapshotView {
+  readonly allowedInConfig: boolean
+  readonly configured: boolean
+  readonly installedOnDisk: boolean
+  readonly loaded: boolean
+  readonly ready: boolean
+  readonly registered: boolean
+}
+
+export interface WindowsResolvedChannelBindingView {
+  readonly accountId: string
+  readonly agentId: string
+  readonly channelId: string
+  readonly source: string
+}
+
+export interface WindowsChannelRuntimeSnapshotView extends WindowsSelectedRuntimeView {
+  readonly gatewayOwner: WindowsGatewayOwnerSnapshotView
+  readonly managedPlugin: WindowsManagedPluginSnapshotView
+  readonly resolvedBinding: WindowsResolvedChannelBindingView
+}
+
 export type OpenClawInstallSource =
   | 'npm-global'
   | 'homebrew'
@@ -60,6 +95,12 @@ export interface OpenClawHistoryDataCandidate {
   reason: 'default-home-dir' | 'runtime-state-root'
 }
 
+export type WindowsGatewayOwnerState =
+  | 'healthy'
+  | 'service-missing'
+  | 'launcher-missing'
+  | 'unknown'
+
 export interface OpenClawDiscoveryResult {
   status: 'installed' | 'history-only' | 'absent'
   candidates: OpenClawInstallCandidate[]
@@ -69,6 +110,7 @@ export interface OpenClawDiscoveryResult {
   errors: string[]
   warnings: string[]
   defaultBackupDirectory: string
+  windowsGatewayOwnerState?: WindowsGatewayOwnerState | null
 }
 
 export interface OpenClawLatestVersionCheckResult {

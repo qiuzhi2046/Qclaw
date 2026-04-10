@@ -1,4 +1,5 @@
 import { resolveOpenClawPackageRoot } from './openclaw-package'
+import { resolveWindowsActiveRuntimeSnapshotForRead } from './openclaw-runtime-readonly'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
@@ -105,7 +106,12 @@ async function loadGatewayRuntimeModule(packageRoot: string): Promise<OpenClawGa
 }
 
 export async function loadOpenClawGatewayRuntime(packageRoot?: string): Promise<OpenClawGatewayRuntimeModule | null> {
-  const resolvedPackageRoot = String(packageRoot || '').trim() || (await resolveOpenClawPackageRoot())
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead()
+  const resolvedPackageRoot =
+    String(packageRoot || '').trim() ||
+    (await resolveOpenClawPackageRoot({
+      activeRuntimeSnapshot,
+    }))
   const cached = runtimeModuleCache.get(resolvedPackageRoot)
   if (cached) return cached
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildCliPathWithCandidates, listExecutablePathCandidates } from '../runtime-path-discovery'
+import { buildWindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-runtime-policy'
 import { buildTestEnv } from './test-env'
 
 describe('buildCliPathWithCandidates', () => {
@@ -70,6 +71,27 @@ describe('listExecutablePathCandidates', () => {
     expect(candidates).toContain('/opt/homebrew/bin/node')
   })
 
+  it('prefers the Windows private Node runtime before system Node fallbacks', () => {
+    const candidates = listExecutablePathCandidates('node', {
+      platform: 'win32',
+      currentPath: 'C:\\Windows\\System32',
+      env: buildTestEnv({
+        LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+        ProgramFiles: 'C:\\Program Files',
+        'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      }),
+    })
+
+    const privateNode =
+      'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe'
+    const systemNode = 'C:\\Program Files\\nodejs\\node.exe'
+    expect(candidates).toContain(privateNode)
+    expect(candidates).toContain(systemNode)
+    expect(candidates.indexOf(privateNode)).toBeLessThan(candidates.indexOf(systemNode))
+    expect(candidates.every((candidate) => !candidate.endsWith('\\node.cmd'))).toBe(true)
+    expect(candidates.every((candidate) => !candidate.endsWith('\\node'))).toBe(true)
+  })
+
   it('includes openclaw override and npm-prefix bins before Windows roaming fallbacks', () => {
     const candidates = listExecutablePathCandidates('openclaw', {
       platform: 'win32',
@@ -96,6 +118,26 @@ describe('listExecutablePathCandidates', () => {
     expect(candidates).toContain('C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd')
   })
 
+  it('includes the Windows private runtime openclaw shim before roaming fallbacks', () => {
+    const candidates = listExecutablePathCandidates('openclaw', {
+      platform: 'win32',
+      currentPath: 'C:\\Windows\\System32',
+      env: buildTestEnv({
+        LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        USERPROFILE: 'C:\\Users\\alice',
+      }),
+    })
+
+    const privateOpenClaw =
+      'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd'
+    const roamingOpenClaw = 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd'
+
+    expect(candidates).toContain(privateOpenClaw)
+    expect(candidates).toContain(roamingOpenClaw)
+    expect(candidates.indexOf(privateOpenClaw)).toBeLessThan(candidates.indexOf(roamingOpenClaw))
+  })
+
   it('includes the user Homebrew bin in macOS openclaw fallback candidates', () => {
     const candidates = listExecutablePathCandidates('openclaw', {
       platform: 'darwin',
@@ -108,5 +150,32 @@ describe('listExecutablePathCandidates', () => {
     expect(candidates).toContain('/Users/alice/homebrew/bin/openclaw')
     expect(candidates).toContain('/opt/homebrew/bin/openclaw')
     expect(candidates).toContain('/usr/local/bin/openclaw')
+  })
+
+  it('prefers the active Windows runtime snapshot openclaw bin before command-path fallbacks', () => {
+    const snapshot = buildWindowsActiveRuntimeSnapshot({
+      openclawExecutable: 'C:\\Users\\qiuzh\\AppData\\Roaming\\npm\\openclaw.cmd',
+      nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+      npmPrefix: 'C:\\Users\\qiuzh\\AppData\\Roaming\\npm',
+      configPath: 'C:\\Users\\qiuzh\\.openclaw\\config.json',
+      stateDir: 'C:\\Users\\qiuzh\\.openclaw',
+      extensionsDir: 'C:\\Users\\qiuzh\\.openclaw\\extensions',
+    })
+
+    const candidates = listExecutablePathCandidates('openclaw', {
+      platform: 'win32',
+      currentPath: 'C:\\Windows\\System32',
+      activeRuntimeSnapshot: snapshot,
+      env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        USERPROFILE: 'C:\\Users\\alice',
+      }),
+    })
+
+    expect(candidates.slice(0, 3)).toEqual([
+      'C:\\Users\\qiuzh\\AppData\\Roaming\\npm\\openclaw.cmd',
+      'C:\\Users\\qiuzh\\AppData\\Roaming\\npm\\openclaw.exe',
+      'C:\\Users\\qiuzh\\AppData\\Roaming\\npm\\openclaw',
+    ])
   })
 })

@@ -276,6 +276,7 @@ describe('runAuthAction', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -314,6 +315,7 @@ describe('runAuthAction', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -401,6 +403,37 @@ describe('runAuthAction', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
+        '--skip-skills',
+        '--skip-ui',
+      ],
+      expect.any(Number)
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it('forces onboard fallback actions to skip OpenClaw health gating', async () => {
+    const runCommand = vi.fn(async () => ok('configured'))
+    const action: AuthAction = {
+      kind: 'onboard-fallback',
+      authChoice: 'openai-api-key',
+      secret: 'sk-live-123',
+      cliFlag: '--openai-api-key',
+    }
+
+    const result = await runAuthAction(action, { runCommand })
+
+    expect(runCommand).toHaveBeenCalledWith(
+      [
+        'onboard',
+        '--non-interactive',
+        '--auth-choice',
+        'openai-api-key',
+        '--openai-api-key',
+        'sk-live-123',
+        '--accept-risk',
+        '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],

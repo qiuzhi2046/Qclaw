@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CommandCapabilityProbeResult } from '../command-capabilities'
 import type { NodeInstallPlan } from '../node-installation-policy'
 import {
+  buildNodeSubprocessInstallPlanOptions,
   resolveQualifiedNodeRuntime,
   runNodeEvalWithQualifiedRuntime,
 } from '../node-subprocess-runtime'
@@ -38,6 +39,7 @@ function makeInstallPlan(overrides: Partial<NodeInstallPlan> = {}): NodeInstallP
     platform: 'darwin',
     detectedArch: 'arm64',
     installerArch: 'arm64',
+    artifactKind: 'pkg',
     distBaseUrl: 'https://nodejs.org/dist',
     url: 'https://nodejs.org/dist/v24.14.0/node-v24.14.0.pkg',
     filename: 'node-v24.14.0.pkg',
@@ -53,6 +55,13 @@ afterEach(() => {
 })
 
 describe('resolveQualifiedNodeRuntime', () => {
+  it('uses a bounded install plan lookup for Windows subprocess runtime probing', () => {
+    expect(buildNodeSubprocessInstallPlanOptions('win32')).toEqual({
+      skipDynamicOpenClawRequirementProbe: true,
+    })
+    expect(buildNodeSubprocessInstallPlanOptions('darwin')).toEqual({})
+  })
+
   it('prefers a healthy nvm runtime over an older shell node', async () => {
     const result = await resolveQualifiedNodeRuntime(
       {

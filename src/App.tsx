@@ -63,6 +63,7 @@ const OPENCLAW_322_NOTICE_ID = 'openclaw-3-22-main-control'
 const PLUGIN_REPAIR_NOTICE_MESSAGE = '修复损坏插件并清理相关配置，不会清空其他用户数据。'
 type OpenClawCapabilitiesSnapshot = Awaited<ReturnType<typeof window.api.getModelCapabilities>>
 type PluginRepairOptions = Parameters<typeof window.api.repairIncompatiblePlugins>[0]
+type PluginQuarantineOptions = Parameters<typeof window.api.scanIncompatiblePlugins>[0]
 type PluginRepairResult = Awaited<ReturnType<typeof window.api.repairIncompatiblePlugins>>
 
 const GLOBAL_PLUGIN_REPAIR_OPTIONS: PluginRepairOptions = {
@@ -70,6 +71,10 @@ const GLOBAL_PLUGIN_REPAIR_OPTIONS: PluginRepairOptions = {
   restoreConfiguredManagedChannels: true,
 }
 const GLOBAL_PLUGIN_REPAIR_REQUEST_KEY = buildPluginRepairRequestKey(GLOBAL_PLUGIN_REPAIR_OPTIONS)
+const GLOBAL_PLUGIN_QUARANTINE_OPTIONS: PluginQuarantineOptions = {
+  quarantineOfficialManagedPlugins: true,
+}
+const GLOBAL_PLUGIN_QUARANTINE_REQUEST_KEY = `scan:${buildPluginRepairRequestKey(GLOBAL_PLUGIN_QUARANTINE_OPTIONS)}`
 
 interface ActivePluginRepairTask {
   requestKey: string
@@ -311,6 +316,13 @@ function App() {
   }
 
   const handleEnvReady = (summary: EnvCheckReadyPayload) => {
+    void window.api.appendEnvCheckDiagnostic('app-env-ready', {
+      sharedConfigInitialized: summary.sharedConfigInitialized,
+      hadOpenClawInstalled: summary.hadOpenClawInstalled,
+      installedOpenClawDuringCheck: summary.installedOpenClawDuringCheck,
+      discoveryStatus: summary.discoveryResult?.status || null,
+      activeCandidateId: summary.discoveryResult?.activeCandidateId || null,
+    }).catch(() => undefined)
     setDashboardEntrySnapshot(null)
     setEnvSummary(summary)
     setUpdateCenterOpen(false)
@@ -337,6 +349,13 @@ function App() {
     if (activeCandidate) {
       const nextState = resolveAppStateForPhase1Target(nextTarget)
       if (nextState === 'setup') {
+        void window.api.appendEnvCheckDiagnostic('app-state-transition', {
+          from: 'env-check',
+          to: 'setup',
+          target: nextTarget,
+          reason: 'handleEnvReady',
+          hasActiveCandidate: true,
+        }).catch(() => undefined)
         setSetupStep('api-keys')
         setSelectedPairingAccountId(undefined)
         setSelectedPairingAccountName(undefined)
@@ -345,12 +364,26 @@ function App() {
         return
       }
 
+      void window.api.appendEnvCheckDiagnostic('app-state-transition', {
+        from: 'env-check',
+        to: nextState,
+        target: nextTarget,
+        reason: 'handleEnvReady',
+        hasActiveCandidate: true,
+      }).catch(() => undefined)
       setAppState(nextState)
       return
     }
 
     const nextState = resolveAppStateForPhase1Target(nextTarget)
     if (nextState === 'setup') {
+      void window.api.appendEnvCheckDiagnostic('app-state-transition', {
+        from: 'env-check',
+        to: 'setup',
+        target: nextTarget,
+        reason: 'handleEnvReady',
+        hasActiveCandidate: false,
+      }).catch(() => undefined)
       setSetupStep('api-keys')
       setSelectedPairingAccountId(undefined)
       setSelectedPairingAccountName(undefined)
@@ -359,6 +392,13 @@ function App() {
       return
     }
 
+    void window.api.appendEnvCheckDiagnostic('app-state-transition', {
+      from: 'env-check',
+      to: nextState,
+      target: nextTarget,
+      reason: 'handleEnvReady',
+      hasActiveCandidate: false,
+    }).catch(() => undefined)
     setAppState(nextState)
   }
 
@@ -438,8 +478,112 @@ function App() {
       })
     }
 
+    void window.api.appendEnvCheckDiagnostic('renderer-plugin-repair-requested', {
+      trigger,
+      requestKey,
+      restoreConfiguredManagedChannels: normalizedOptions.restoreConfiguredManagedChannels === true,
+      scopePluginIds: normalizedOptions.scopePluginIds || [],
+    }).catch(() => undefined)
     setPluginRepairRunning(true)
     const task = window.api.repairIncompatiblePlugins(normalizedOptions)
+      .then((result) => {
+        void window.api.appendEnvCheckDiagnostic('renderer-plugin-repair-result', {
+          trigger,
+          requestKey,
+          ok: result.ok,
+          repaired: result.repaired,
+          summary: String(result.summary || '').trim() || null,
+        }).catch(() => undefined)
+        setPluginRepairResult(result)
+        if (loadingNotificationId) {
+          notifications.hide(loadingNotificationId)
+        }
+
+        if (result.ok && result.repaired) {
+          notifications.show({
+            color: 'yellow',
+            title: trigger === 'startup' ? '已自动修复损坏插件环境' : '损坏插件环境已修复',
+            message: result.summary,
+            autoClose: 6000,
+          })
+        } else if (!result.ok) {
+          notifications.show({
+            color: 'red',
+            title: trigger === 'startup' ? '启动时插件环境修复失败' : '插件环境修复失败',
+            message: result.summary || result.stderr || '损坏插件环境修复失败，请稍后重试。',
+            autoClose: 6000,
+          })
+        }
+
+        return result
+      })
+      .catch((error) => {
+        if (loadingNotificationId) {
+          notifications.hide(loadingNotificationId)
+        }
+        throw error
+      })
+      .finally(() => {
+        if (pluginRepairPromiseRef.current?.promise === task) {
+          pluginRepairPromiseRef.current = null
+          setPluginRepairRunning(false)
+        }
+      })
+
+    pluginRepairPromiseRef.current = {
+      requestKey,
+      promise: task,
+    }
+    return task
+  }, [pluginRepairResult])
+
+  const runPluginQuarantine = useCallback(async (
+    trigger: 'startup' | 'manual' = 'manual',
+    options?: PluginQuarantineOptions
+  ): Promise<PluginRepairResult | null> => {
+    if (!window.api?.scanIncompatiblePlugins) return null
+    const normalizedOptions =
+      options?.scopePluginIds && options.scopePluginIds.length > 0
+        ? options
+        : {
+            ...GLOBAL_PLUGIN_QUARANTINE_OPTIONS,
+            ...options,
+          }
+    const requestKey = `scan:${buildPluginRepairRequestKey(normalizedOptions)}`
+
+    if (trigger === 'startup' && requestKey === GLOBAL_PLUGIN_QUARANTINE_REQUEST_KEY && pluginRepairResult?.ok) {
+      return pluginRepairResult
+    }
+
+    const activeTask = pluginRepairPromiseRef.current
+    if (activeTask) {
+      if (activeTask.requestKey === requestKey) {
+        return activeTask.promise
+      }
+      await activeTask.promise.catch(() => null)
+    }
+
+    const loadingNotificationId = trigger === 'manual'
+      ? notifications.show({
+          loading: true,
+          autoClose: false,
+          withCloseButton: false,
+          title: '插件修复说明',
+          message: PLUGIN_REPAIR_NOTICE_MESSAGE,
+        })
+      : null
+
+    if (trigger === 'startup') {
+      notifications.show({
+        color: 'blue',
+        title: '插件修复说明',
+        message: PLUGIN_REPAIR_NOTICE_MESSAGE,
+        autoClose: 4000,
+      })
+    }
+
+    setPluginRepairRunning(true)
+    const task = window.api.scanIncompatiblePlugins(normalizedOptions)
       .then((result) => {
         setPluginRepairResult(result)
         if (loadingNotificationId) {
@@ -465,6 +609,11 @@ function App() {
         return result
       })
       .catch((error) => {
+        void window.api.appendEnvCheckDiagnostic('renderer-plugin-repair-failed', {
+          trigger,
+          requestKey,
+          message: error instanceof Error ? error.message : String(error),
+        }).catch(() => undefined)
         if (loadingNotificationId) {
           notifications.hide(loadingNotificationId)
         }
@@ -562,9 +711,10 @@ function App() {
 
   useEffect(() => {
     if (startupRepairAttemptedRef.current) return
+    if (appState === 'welcome' || appState === 'env-check') return
     startupRepairAttemptedRef.current = true
     void runPluginRepair('startup')
-  }, [runPluginRepair])
+  }, [appState, runPluginRepair])
 
   useEffect(() => {
     return window.api.onOpenModelsPage(() => {
@@ -688,8 +838,11 @@ function App() {
           onReady={handleEnvReady}
           pluginRepairRunning={pluginRepairRunning}
           pluginRepairResult={pluginRepairResult}
-          onRepairPlugins={() => runPluginRepair('manual')}
-          onEnsurePluginRepairReady={() => runPluginRepair('startup')}
+          onRepairPlugins={() => (
+            window.api.platform === 'win32'
+              ? runPluginQuarantine('manual')
+              : runPluginRepair('manual')
+          )}
         />
       </div>
     ))

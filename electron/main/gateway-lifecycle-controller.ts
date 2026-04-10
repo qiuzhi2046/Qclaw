@@ -1,13 +1,14 @@
 import { pollWithBackoff } from '../../src/shared/polling'
 import { UI_RUNTIME_DEFAULTS } from '../../src/shared/runtime-policies'
 import { classifyGatewayRuntimeState } from '../../src/shared/gateway-runtime-diagnostics'
-import type { CliResult, GatewayHealthCheckResult } from './cli'
+import type { CliResult, GatewayStatusCheckResult } from './cli'
 import {
-  gatewayHealth,
   gatewayRestart,
   gatewayStart,
+  gatewayStatus,
   gatewayStop,
 } from './cli'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import type {
   GatewayBootstrapProgressState,
   GatewayEnsureRunningResult,
@@ -114,7 +115,7 @@ async function ensureGatewayRunningDirect(
 async function waitForGatewayHealthyAfterReload(
   restartResult: CliResult
 ): Promise<GatewayReloadResult> {
-  let lastHealth: GatewayHealthCheckResult = {
+  let lastStatus: GatewayStatusCheckResult = {
     running: false,
     raw: '',
     stderr: '',
@@ -126,7 +127,7 @@ async function waitForGatewayHealthyAfterReload(
   const readiness = await pollWithBackoff({
     policy: UI_RUNTIME_DEFAULTS.gatewayReadiness.poll,
     execute: async () => {
-      lastHealth = await gatewayHealth().catch(() => ({
+      lastStatus = await gatewayStatus().catch(() => ({
         running: false,
         raw: '',
         stderr: '',
@@ -134,7 +135,7 @@ async function waitForGatewayHealthyAfterReload(
         stateCode: 'gateway_not_running',
         summary: '网关重载后尚未恢复可用',
       }))
-      return lastHealth
+      return lastStatus
     },
     isSuccess: (value) => Boolean(value.running),
   })
@@ -152,24 +153,24 @@ async function waitForGatewayHealthyAfterReload(
     }
   }
 
-  const failedHealth = readiness.value || lastHealth
+  const failedStatus = readiness.value || lastStatus
   const classification = classifyGatewayRuntimeState({
     ok: false,
     running: false,
-    stdout: failedHealth.raw || restartResult.stdout,
-    stderr: failedHealth.stderr || restartResult.stderr || '网关重载后健康检查未通过',
+    stdout: failedStatus.raw || restartResult.stdout,
+    stderr: failedStatus.stderr || restartResult.stderr || '网关重载后健康检查未通过',
     diagnostics: {
-      lastHealth: failedHealth,
+      lastHealth: failedStatus,
     },
-    stateCode: failedHealth.stateCode,
-    summary: failedHealth.summary,
+    stateCode: failedStatus.stateCode,
+    summary: failedStatus.summary,
   })
 
   return {
     ok: false,
-    code: failedHealth.code ?? 1,
-    stdout: failedHealth.raw || restartResult.stdout,
-    stderr: failedHealth.stderr || restartResult.stderr || classification.summary,
+    code: failedStatus.code ?? 1,
+    stdout: failedStatus.raw || restartResult.stdout,
+    stderr: failedStatus.stderr || restartResult.stderr || classification.summary,
     running: false,
     stateCode: classification.stateCode,
     summary: classification.summary,
@@ -196,9 +197,23 @@ export async function ensureGatewayReady(
   reason = 'ensure-ready'
 ): Promise<GatewayEnsureRunningResult> {
   const key = options.skipRuntimePrecheck ? 'ensure:skip-runtime-precheck' : 'ensure:strict'
-  return runSharedLifecycleMutation(key, 'ensure', reason, () =>
-    ensureGatewayRunningDirect(options)
-  )
+  await appendEnvCheckDiagnostic('gateway-lifecycle-ensure-requested', {
+    key,
+    reason,
+    skipRuntimePrecheck: Boolean(options.skipRuntimePrecheck),
+  })
+  return runSharedLifecycleMutation(key, 'ensure', reason, async () => {
+    const result = await ensureGatewayRunningDirect(options)
+    await appendEnvCheckDiagnostic('gateway-lifecycle-ensure-result', {
+      key,
+      reason,
+      ok: result.ok,
+      running: result.running,
+      summary: result.summary || result.stderr || result.stdout || '',
+      stateCode: result.stateCode || null,
+    })
+    return result
+  })
 }
 
 export async function startGatewayLifecycle(reason = 'start'): Promise<CliResult> {
@@ -216,8 +231,8 @@ export async function reloadGatewayForConfigChange(
   return runSharedLifecycleMutation('reload', 'reload', reason, async () => {
     const preferEnsureWhenNotRunning = options.preferEnsureWhenNotRunning !== false
     if (preferEnsureWhenNotRunning) {
-      const health = await gatewayHealth().catch(() => ({ running: false }))
-      if (!health?.running) {
+      const status = await gatewayStatus().catch(() => ({ running: false }))
+      if (!status?.running) {
         return ensureGatewayRunningDirect(options.ensureOptions)
       }
     }

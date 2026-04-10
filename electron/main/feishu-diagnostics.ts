@@ -18,6 +18,7 @@ import {
   sanitizeStoreKey,
   sendFeishuDiagnosticMessage as sendFeishuDiagnosticMessageCore,
 } from './feishu-diagnostics-core'
+import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
@@ -205,9 +206,8 @@ async function snapshotPairingStore(paths: string[]): Promise<{ exists: boolean;
 }
 
 async function buildDefaultActivitySnapshot(accountId: string): Promise<FeishuDiagnosticActivitySnapshot> {
-  const { getOpenClawPaths } = await loadCliModule()
   const normalizedAccountId = normalizeAccountId(accountId)
-  const openClawPaths = await getOpenClawPaths()
+  const openClawPaths = await resolveOpenClawPathsForRead()
   const openClawHome = String(openClawPaths.homeDir || '').trim() || path.join(os.homedir(), '.openclaw')
   const credentialsDir = String(openClawPaths.credentialsDir || '').trim() || path.join(openClawHome, 'credentials')
   const safeAccountId = normalizedAccountId === DEFAULT_ACCOUNT_ID ? DEFAULT_ACCOUNT_ID : sanitizeStoreKey(normalizedAccountId)

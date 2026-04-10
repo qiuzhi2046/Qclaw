@@ -15,6 +15,7 @@ import {
 import type { OfficialChannelActionResult, OfficialChannelAdapterId } from '../../src/shared/official-channel-integration'
 import { isPluginAlreadyInstalledError } from '../../src/shared/openclaw-cli-errors'
 import type { CliResult, RepairIncompatibleExtensionPluginsOptions } from './cli'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import { withManagedOperationLock } from './managed-operation-lock'
 import type { RepairIncompatibleExtensionsResult } from './plugin-install-safety'
 
@@ -440,6 +441,9 @@ export function createManagedChannelPluginLifecycleService(
   }
 
   async function inspectManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginInspectResult> {
+    await appendEnvCheckDiagnostic('main-managed-channel-inspect-start', {
+      channelId,
+    })
     const spec = getManagedChannelLifecycleSpec(channelId)
     if (!spec) {
       return {
@@ -460,13 +464,22 @@ export function createManagedChannelPluginLifecycleService(
           }
         : await buildGenericStatus(spec, resolvedDependencies)
 
-      return buildInspectResult({
+      const result = buildInspectResult({
         spec,
         status,
         capabilities: createCapabilities(spec),
         configNeedsSync,
       })
+      await appendEnvCheckDiagnostic('main-managed-channel-inspect-result', {
+        channelId: spec.channelId,
+        kind: result.kind,
+      })
+      return result
     } catch (error) {
+      await appendEnvCheckDiagnostic('main-managed-channel-inspect-failed', {
+        channelId: spec.channelId,
+        message: error instanceof Error ? error.message : String(error),
+      })
       return {
         kind: 'inspection-failed',
         channelId: spec.channelId,
@@ -565,6 +578,9 @@ export function createManagedChannelPluginLifecycleService(
   }
 
   async function repairManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginRepairResult> {
+    await appendEnvCheckDiagnostic('main-managed-channel-repair-start', {
+      channelId,
+    })
     const spec = getManagedChannelLifecycleSpec(channelId)
     if (!spec) {
       return {
@@ -655,6 +671,12 @@ export function createManagedChannelPluginLifecycleService(
       }
 
       const repairResult = await repairManagedPluginScope(spec)
+      await appendEnvCheckDiagnostic('main-managed-channel-repair-after-scope-repair', {
+        channelId: spec.channelId,
+        ok: repairResult.ok,
+        repaired: repairResult.repaired,
+        summary: String(repairResult.summary || '').trim() || null,
+      })
       if (!repairResult.ok) {
         if (repairResult.failureKind && repairResult.failedPluginIds && repairResult.failedPaths) {
           recordFailure(spec.channelId, repairResult.failureKind)
@@ -728,6 +750,12 @@ export function createManagedChannelPluginLifecycleService(
         'managed-channel-plugin-repair',
         { preferEnsureWhenNotRunning: true }
       )
+      await appendEnvCheckDiagnostic('main-managed-channel-repair-after-gateway-reload', {
+        channelId: spec.channelId,
+        ok: reloadResult.ok,
+        running: reloadResult.running === true,
+        summary: String(reloadResult.summary || reloadResult.stderr || '').trim() || null,
+      })
       if (!reloadResult.ok || reloadResult.running !== true) {
         recordFailure(spec.channelId, 'gateway-reload-failed')
         return {

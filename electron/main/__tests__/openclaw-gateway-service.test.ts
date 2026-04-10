@@ -7,9 +7,12 @@ const { tmpdir } = os
 const { join } = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 const {
+  applyConfigPatchGuardedMock,
   checkNodeMock,
   checkOpenClawMock,
+  detectGatewayDeviceRequiredEvidenceMock,
   confirmRuntimeReconcileMock,
+  detectGatewayPluginLoadFailureEvidenceMock,
   findAvailableLoopbackPortMock,
   gatewayRestartMock,
   gatewayHealthMock,
@@ -20,6 +23,7 @@ const {
   inspectControlUiAppViaBrowserMock,
   isPluginInstalledOnDiskMock,
   getOpenClawPathsMock,
+  readAuthoritativeWindowsChannelRuntimeSnapshotMock,
   issueDesiredRuntimeRevisionMock,
   markRuntimeRevisionInProgressMock,
   probeGatewayPortOwnerMock,
@@ -39,9 +43,12 @@ const {
   pollWithBackoffMock,
   writeConfigMock,
 } = vi.hoisted(() => ({
+  applyConfigPatchGuardedMock: vi.fn(),
   checkNodeMock: vi.fn(),
   checkOpenClawMock: vi.fn(),
+  detectGatewayDeviceRequiredEvidenceMock: vi.fn(),
   confirmRuntimeReconcileMock: vi.fn(),
+  detectGatewayPluginLoadFailureEvidenceMock: vi.fn(),
   findAvailableLoopbackPortMock: vi.fn(),
   gatewayRestartMock: vi.fn(),
   gatewayHealthMock: vi.fn(),
@@ -52,6 +59,7 @@ const {
   inspectControlUiAppViaBrowserMock: vi.fn(),
   isPluginInstalledOnDiskMock: vi.fn(),
   getOpenClawPathsMock: vi.fn(),
+  readAuthoritativeWindowsChannelRuntimeSnapshotMock: vi.fn(),
   issueDesiredRuntimeRevisionMock: vi.fn(),
   markRuntimeRevisionInProgressMock: vi.fn(),
   probeGatewayPortOwnerMock: vi.fn(),
@@ -95,6 +103,7 @@ vi.mock('../cli', () => ({
   gatewayRestart: gatewayRestartMock,
   gatewayStop: gatewayStopMock,
   getOpenClawPaths: getOpenClawPathsMock,
+  readAuthoritativeWindowsChannelRuntimeSnapshot: readAuthoritativeWindowsChannelRuntimeSnapshotMock,
   gatewayStart: gatewayStartMock,
   installEnv: installEnvMock,
   installPlugin: installPluginMock,
@@ -108,6 +117,15 @@ vi.mock('../cli', () => ({
   runShell: runShellMock,
   uninstallPlugin: uninstallPluginMock,
   writeConfig: writeConfigMock,
+}))
+
+vi.mock('../openclaw-config-coordinator', () => ({
+  applyConfigPatchGuarded: applyConfigPatchGuardedMock,
+}))
+
+vi.mock('../gateway-startup-log-diagnostics', () => ({
+  detectGatewayDeviceRequiredEvidence: detectGatewayDeviceRequiredEvidenceMock,
+  detectGatewayPluginLoadFailureEvidence: detectGatewayPluginLoadFailureEvidenceMock,
 }))
 
 vi.mock('../openclaw-config-guard', () => ({
@@ -146,6 +164,7 @@ vi.mock('../../../src/shared/polling', () => ({
 import { ensureGatewayRunning } from '../openclaw-gateway-service'
 
 describe('openclaw gateway service', () => {
+  const itOnWindows = process.platform === 'win32' ? it : it.skip
   const tempDirs: string[] = []
 
   function createDeferred<T>() {
@@ -162,10 +181,46 @@ describe('openclaw gateway service', () => {
     return homeDir
   }
 
+  function createAuthoritativeWindowsChannelRuntimeSnapshot(input: {
+    homeDir: string
+    ownerKind?: string
+    ownerLauncherPath?: string
+    ownerTaskName?: string
+  }) {
+    return {
+      hostPackageRoot: 'C:\\runtime\\node_modules\\openclaw',
+      nodePath: 'C:\\runtime\\node.exe',
+      openclawPath: 'C:\\runtime\\openclaw.cmd',
+      stateDir: input.homeDir,
+      gatewayOwner: {
+        ownerKind: input.ownerKind || 'scheduled-task',
+        ownerLauncherPath: input.ownerLauncherPath || '',
+        ownerTaskName: input.ownerTaskName || '',
+      },
+      managedPlugin: {
+        allowedInConfig: false,
+        configured: false,
+        installedOnDisk: false,
+        loaded: false,
+        ready: false,
+        registered: false,
+      },
+      resolvedBinding: {
+        accountId: '',
+        agentId: '',
+        channelId: '',
+        source: '',
+      },
+    }
+  }
+
   beforeEach(async () => {
     checkNodeMock.mockReset()
     checkOpenClawMock.mockReset()
+    applyConfigPatchGuardedMock.mockReset()
     confirmRuntimeReconcileMock.mockReset()
+    detectGatewayDeviceRequiredEvidenceMock.mockReset()
+    detectGatewayPluginLoadFailureEvidenceMock.mockReset()
     findAvailableLoopbackPortMock.mockReset()
     gatewayRestartMock.mockReset()
     gatewayHealthMock.mockReset()
@@ -176,6 +231,7 @@ describe('openclaw gateway service', () => {
     inspectControlUiAppViaBrowserMock.mockReset()
     isPluginInstalledOnDiskMock.mockReset()
     getOpenClawPathsMock.mockReset()
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReset()
     issueDesiredRuntimeRevisionMock.mockReset()
     markRuntimeRevisionInProgressMock.mockReset()
     probeGatewayPortOwnerMock.mockReset()
@@ -208,6 +264,7 @@ describe('openclaw gateway service', () => {
     })
     checkOpenClawMock.mockResolvedValue({
       installed: true,
+      selectedRuntimeComplete: true,
       version: 'OpenClaw 2026.3.12',
     })
     confirmRuntimeReconcileMock.mockResolvedValue({
@@ -251,6 +308,18 @@ describe('openclaw gateway service', () => {
     getOpenClawPathsMock.mockResolvedValue({
       homeDir: defaultHomeDir,
     })
+    applyConfigPatchGuardedMock.mockResolvedValue({
+      ok: true,
+      blocked: false,
+      wrote: true,
+      target: 'config',
+      snapshotCreated: false,
+      snapshot: null,
+      changedJsonPaths: ['gateway.mode'],
+      ownershipSummary: null,
+      message: 'patched',
+    })
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReturnValue(null)
     issueDesiredRuntimeRevisionMock.mockResolvedValue({
       runtime: {
         desiredRevision: 1,
@@ -526,6 +595,34 @@ describe('openclaw gateway service', () => {
     expect(result.autoInstalledOpenClaw).toBe(true)
   })
 
+  it('uses authoritative selected runtime completeness instead of a global host illusion', async () => {
+    checkOpenClawMock
+      .mockResolvedValueOnce({
+        installed: true,
+        selectedRuntimeComplete: false,
+        version: 'OpenClaw 2026.3.12',
+      })
+      .mockResolvedValueOnce({
+        installed: true,
+        selectedRuntimeComplete: true,
+        version: 'OpenClaw 2026.3.12',
+      })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '' })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}' })
+
+    const result = await ensureGatewayRunning()
+
+    expect(installEnvMock).toHaveBeenCalledWith({
+      needNode: false,
+      needOpenClaw: true,
+    })
+    expect(refreshEnvironmentMock).toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.autoInstalledNode).toBe(false)
+    expect(result.autoInstalledOpenClaw).toBe(true)
+  })
+
   it('blocks gateway startup when Node.js is installed but below the minimum supported version', async () => {
     checkNodeMock.mockResolvedValueOnce({
       installed: true,
@@ -696,8 +793,25 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
-    expect(guardedWriteConfigMock).toHaveBeenCalledWith({
-      config: {
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith({
+      beforeConfig: {
+        gateway: {
+          mode: 'local',
+        },
+        plugins: {
+          allow: [],
+          entries: {
+            'minimax-portal-auth': { enabled: true },
+            'openclaw-lark': { enabled: true },
+          },
+          installs: {
+            'openclaw-lark': {
+              spec: '@larksuite/openclaw-lark',
+            },
+          },
+        },
+      },
+      afterConfig: {
         gateway: {
           mode: 'local',
         },
@@ -716,7 +830,7 @@ describe('openclaw gateway service', () => {
         },
       },
       reason: 'unknown',
-    }, undefined)
+    }, undefined, { applyGatewayPolicy: false })
     expect(result.ok).toBe(true)
     expect(result.running).toBe(true)
   })
@@ -1428,6 +1542,69 @@ describe('openclaw gateway service', () => {
     expect(result.running).toBe(true)
   })
 
+  it('quarantines incompatible plugins when websocket 1006 is backed by plugin failure log evidence', async () => {
+    gatewayHealthMock
+      .mockResolvedValueOnce({
+        running: false,
+        raw: '',
+        stderr: 'Error: gateway closed (1006 abnormal closure (no close frame)): no close reason',
+        code: 1,
+        summary: 'Gateway handshake failed',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        raw: '{"ok":true}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'Gateway 已确认可用',
+      })
+
+    detectGatewayPluginLoadFailureEvidenceMock.mockResolvedValueOnce({
+      source: 'service',
+      message: '网关日志显示扩展插件加载失败',
+      detail:
+        '[plugins] openai failed to load from C:/Users/test/.openclaw/extensions/openclaw-lark/index.js: TypeError: Cannot read properties of undefined (reading "add")',
+    })
+
+    repairIncompatibleExtensionPluginsMock.mockResolvedValueOnce({
+      ok: true,
+      repaired: true,
+      incompatiblePlugins: [
+        {
+          pluginId: 'openclaw-lark',
+          packageName: '@larksuite/openclaw-lark',
+          installPath: '/tmp/openclaw-lark',
+          displayInstallPath: '/tmp/openclaw-lark',
+          reason: 'nested openclaw runtime mismatch',
+        },
+      ],
+      quarantinedPluginIds: ['openclaw-lark'],
+      prunedPluginIds: [],
+      summary: '已隔离 openclaw-lark',
+      stderr: '',
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(detectGatewayPluginLoadFailureEvidenceMock).toHaveBeenCalledTimes(1)
+    expect(repairIncompatibleExtensionPluginsMock).toHaveBeenCalledWith({
+      quarantineOfficialManagedPlugins: true,
+    })
+    expect(gatewayHealthMock).toHaveBeenCalledTimes(2)
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+    expect(result.stateCode).toBe('healthy')
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'service',
+          message: '网关日志显示扩展插件加载失败',
+        }),
+      ])
+    )
+  })
+
   it('rolls back to the pre-repair config snapshot when the official doctor fix fails at runtime', async () => {
     const preRepairConfig = {
       gateway: {
@@ -1561,32 +1738,216 @@ describe('openclaw gateway service', () => {
     expect(result.repairActionsTried).toContain('restart-gateway')
   })
 
+  it('treats device-required websocket 1006 as a startup transition and waits a bit longer before repairing', async () => {
+    let readinessPollCount = 0
+    pollWithBackoffMock.mockImplementation(async ({ execute, isSuccess }) => {
+      readinessPollCount += 1
+
+      if (readinessPollCount === 1) {
+        const value = await execute({ attempt: 1, elapsedMs: 0 })
+        expect(value).toEqual(
+          expect.objectContaining({
+            running: false,
+            stateCode: 'websocket_1006',
+          })
+        )
+        return {
+          ok: isSuccess(value, { attempt: 1, elapsedMs: 0 }),
+          attempts: 1,
+          elapsedMs: 0,
+          value,
+          aborted: false,
+        }
+      }
+
+      const value = await execute({ attempt: 2, elapsedMs: 8_000 })
+      expect(value).toEqual(
+        expect.objectContaining({
+          running: true,
+          stateCode: 'healthy',
+        })
+      )
+      return {
+        ok: isSuccess(value, { attempt: 2, elapsedMs: 8_000 }),
+        attempts: 2,
+        elapsedMs: 8_000,
+        value,
+        aborted: false,
+      }
+    })
+
+    gatewayStartMock.mockResolvedValue({
+      ok: true,
+      stdout: 'started',
+      stderr: '',
+      code: 0,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '' })
+      .mockResolvedValueOnce({
+        running: false,
+        raw: '',
+        stderr: 'gateway closed (1006 abnormal closure (no close frame))',
+        code: 1,
+        stateCode: 'websocket_1006',
+        summary: 'Gateway handshake failed',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        raw: '{"ok":true}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'Gateway 已确认可用',
+      })
+    detectGatewayDeviceRequiredEvidenceMock.mockResolvedValueOnce({
+      source: 'service',
+      message: '网关日志显示本地设备身份仍在配对，握手尚未就绪',
+      detail: 'cause=device-required',
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(detectGatewayDeviceRequiredEvidenceMock).toHaveBeenCalledTimes(1)
+    expect(gatewayRestartMock).not.toHaveBeenCalled()
+    expect(runDoctorMock).not.toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: '网关日志显示本地设备身份仍在配对，握手尚未就绪',
+        }),
+      ])
+    )
+  })
+
+  it('still falls back to restart repair when the device-required grace window does not recover', async () => {
+    let readinessPollCount = 0
+    pollWithBackoffMock.mockImplementation(async ({ execute, isSuccess }) => {
+      readinessPollCount += 1
+
+      if (readinessPollCount <= 2) {
+        const value = await execute({ attempt: readinessPollCount, elapsedMs: readinessPollCount * 4_000 })
+        expect(value).toEqual(
+          expect.objectContaining({
+            running: false,
+            stateCode: 'websocket_1006',
+          })
+        )
+        return {
+          ok: isSuccess(value, { attempt: readinessPollCount, elapsedMs: readinessPollCount * 4_000 }),
+          attempts: readinessPollCount,
+          elapsedMs: readinessPollCount * 4_000,
+          value,
+          aborted: false,
+        }
+      }
+
+      const value = await execute({ attempt: 3, elapsedMs: 12_000 })
+      expect(value).toEqual(
+        expect.objectContaining({
+          running: true,
+          stateCode: 'healthy',
+        })
+      )
+      return {
+        ok: isSuccess(value, { attempt: 3, elapsedMs: 12_000 }),
+        attempts: 3,
+        elapsedMs: 12_000,
+        value,
+        aborted: false,
+      }
+    })
+
+    gatewayStartMock.mockResolvedValue({
+      ok: true,
+      stdout: 'started',
+      stderr: '',
+      code: 0,
+    })
+    gatewayRestartMock.mockResolvedValue({
+      ok: true,
+      stdout: 'restarted',
+      stderr: '',
+      code: 0,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '' })
+      .mockResolvedValueOnce({
+        running: false,
+        raw: '',
+        stderr: 'gateway closed (1006 abnormal closure (no close frame))',
+        code: 1,
+        stateCode: 'websocket_1006',
+        summary: 'Gateway handshake failed',
+      })
+      .mockResolvedValueOnce({
+        running: false,
+        raw: '',
+        stderr: 'gateway closed (1006 abnormal closure (no close frame))',
+        code: 1,
+        stateCode: 'websocket_1006',
+        summary: 'Gateway handshake failed',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        raw: '{"ok":true}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'Gateway 已确认可用',
+      })
+    detectGatewayDeviceRequiredEvidenceMock.mockResolvedValueOnce({
+      source: 'service',
+      message: '网关日志显示本地设备身份仍在配对，握手尚未就绪',
+      detail: 'cause=device-required',
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(detectGatewayDeviceRequiredEvidenceMock).toHaveBeenCalledTimes(1)
+    expect(gatewayRestartMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+    expect(result.repairActionsTried).toContain('restart-gateway')
+  })
+
   it('auto-migrates the managed gateway port when a foreign process owns the default port', async () => {
     readConfigMock.mockResolvedValue({
       gateway: {
         port: 18789,
       },
     })
-    gatewayStartMock
-      .mockResolvedValueOnce({
-        ok: false,
-        stdout: '',
-        stderr: 'Port 18789 is already in use',
-        code: 1,
-      })
-      .mockResolvedValueOnce({
+    if (process.platform === 'win32') {
+      gatewayStartMock.mockResolvedValue({
         ok: true,
         stdout: 'started on migrated port',
         stderr: '',
         code: 0,
       })
+    } else {
+      gatewayStartMock
+        .mockResolvedValueOnce({
+          ok: false,
+          stdout: '',
+          stderr: 'Port 18789 is already in use',
+          code: 1,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          stdout: 'started on migrated port',
+          stderr: '',
+          code: 0,
+        })
+    }
     probeGatewayPortOwnerMock.mockResolvedValue({
       kind: 'foreign',
       port: 18789,
       processName: 'python3',
       pid: 2451,
       command: 'python3 -m http.server',
-      source: 'lsof',
+      source: process.platform === 'win32' ? 'powershell' : 'lsof',
     })
     gatewayHealthMock
       .mockResolvedValueOnce({ running: false, raw: '' })
@@ -1606,6 +1967,243 @@ describe('openclaw gateway service', () => {
     expect(result.autoPortMigrated).toBe(true)
     expect(result.effectivePort).toBe(19876)
     expect(result.repairActionsTried).toContain('migrate-port')
+  })
+
+  itOnWindows('recovers a Windows port conflict before the first gateway start attempt', async () => {
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+    probeGatewayPortOwnerMock.mockResolvedValue({
+      kind: 'foreign',
+      port: 18789,
+      processName: 'python.exe',
+      pid: 2451,
+      command: 'python.exe -m http.server',
+      source: 'powershell',
+    })
+    gatewayStartMock.mockResolvedValue({
+      ok: true,
+      stdout: 'started on migrated port',
+      stderr: '',
+      code: 0,
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(guardedWriteConfigMock).toHaveBeenCalledWith({
+      config: {
+        gateway: {
+          mode: 'local',
+          port: 19876,
+        },
+      },
+      reason: 'gateway-port-recovery',
+    })
+    expect(gatewayStartMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(result.autoPortMigrated).toBe(true)
+    expect(result.effectivePort).toBe(19876)
+  })
+
+  itOnWindows('authoritative snapshot attaches to the existing scheduled-task owner without starting a second owner', async () => {
+    const homeDir = await createOpenClawHome()
+    const launcherPath = join(homeDir, 'gateway.cmd')
+    await fs.promises.writeFile(launcherPath, '@echo off\r\n')
+
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReturnValue(
+      createAuthoritativeWindowsChannelRuntimeSnapshot({
+        homeDir,
+        ownerKind: 'scheduled-task',
+        ownerLauncherPath: launcherPath,
+        ownerTaskName: '\\OpenClaw Gateway',
+      })
+    )
+    runShellMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: [
+        'TaskName: \\OpenClaw Gateway',
+        `Task To Run: ${launcherPath}`,
+      ].join('\n'),
+      stderr: '',
+      code: 0,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+
+    const result = await ensureGatewayRunning()
+
+    expect(gatewayStartMock).not.toHaveBeenCalled()
+    expect(runCliMock).not.toHaveBeenCalledWith(['gateway', 'install', '--force'], undefined, 'gateway')
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+  })
+
+  itOnWindows('authoritative snapshot marks a stale launcher for reinstall before startup', async () => {
+    const homeDir = await createOpenClawHome()
+    const missingLauncherPath = join(homeDir, 'missing-gateway.cmd')
+
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReturnValue(
+      createAuthoritativeWindowsChannelRuntimeSnapshot({
+        homeDir,
+        ownerKind: 'scheduled-task',
+        ownerLauncherPath: missingLauncherPath,
+        ownerTaskName: '\\OpenClaw Gateway',
+      })
+    )
+    runShellMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: [
+        'TaskName: \\OpenClaw Gateway',
+        `Task To Run: ${missingLauncherPath}`,
+      ].join('\n'),
+      stderr: '',
+      code: 0,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+    gatewayStartMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: 'started after authoritative reinstall',
+      stderr: '',
+      code: 0,
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(runCliMock).toHaveBeenCalledWith(['gateway', 'install', '--force'], undefined, 'gateway')
+    expect(gatewayStartMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+    expect(result.autoInstalledGatewayService).toBe(true)
+  })
+
+  itOnWindows('reinstalls the gateway service before the first start when the scheduled task launcher is missing', async () => {
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    runShellMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: [
+        'Folder: \\',
+        'TaskName: \\OpenClaw Gateway',
+        'Task To Run: C:\\missing\\gateway.cmd',
+      ].join('\n'),
+      stderr: '',
+      code: 0,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+    gatewayStartMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: 'started after launcher repair',
+      stderr: '',
+      code: 0,
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(runCliMock).toHaveBeenCalledWith(['gateway', 'install', '--force'], undefined, 'gateway')
+    expect(gatewayStopMock).toHaveBeenCalledTimes(1)
+    expect(gatewayStartMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+    expect(result.autoInstalledGatewayService).toBe(true)
+    expect(result.attemptedCommands).toEqual([
+      ['gateway', 'install', '--force'],
+      ['gateway', 'start'],
+    ])
+  })
+
+  itOnWindows('repairs missing gateway.mode via explicit config-path read without runtime-path ensure', async () => {
+    readConfigMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        auth: {
+          profiles: {
+            'zai:default': {
+              provider: 'zai',
+            },
+          },
+        },
+        models: {
+          providers: {
+            zai: {
+              api: 'openai-completions',
+            },
+          },
+        },
+      })
+    gatewayHealthMock
+      .mockResolvedValueOnce({
+        running: false,
+        raw: '',
+        stderr: 'not running',
+        code: 1,
+        stateCode: 'gateway_not_running',
+        summary: 'gateway not running',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        raw: '{"ok":true}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'gateway ready',
+      })
+
+    const result = await ensureGatewayRunning({ skipRuntimePrecheck: true })
+
+    expect(readConfigMock).toHaveBeenNthCalledWith(1)
+    expect(readConfigMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        configPath: expect.stringContaining('.openclaw'),
+      })
+    )
+    expect(getOpenClawPathsMock).not.toHaveBeenCalled()
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        beforeConfig: expect.objectContaining({
+          auth: expect.any(Object),
+          models: expect.any(Object),
+        }),
+        afterConfig: expect.objectContaining({
+          auth: expect.any(Object),
+          models: expect.any(Object),
+          gateway: expect.objectContaining({
+            mode: 'local',
+          }),
+        }),
+      }),
+      undefined,
+      { applyGatewayPolicy: false }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
   })
 
   it('reuses in-flight ensure and fan-outs progress updates to late subscribers', async () => {

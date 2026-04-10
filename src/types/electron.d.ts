@@ -21,10 +21,18 @@ import type {
 } from '../shared/feishu-installer-session'
 import type { OpenClawBackupRootInfo } from '../shared/openclaw-phase3'
 import type {
+  OpenClawInstallCandidate as SharedOpenClawInstallCandidate,
+  WindowsActiveRuntimeSnapshot as SharedWindowsActiveRuntimeSnapshot,
+} from '../shared/openclaw-phase1'
+import type {
   OpenClawVersionEnforcement,
   OpenClawVersionPolicyState,
   OpenClawVersionTargetAction,
 } from '../shared/openclaw-version-policy'
+import type {
+  ModelUiSnapshotRequest,
+  ModelUiSnapshotResult,
+} from '../shared/model-ui-snapshot'
 
 interface CliResult {
   ok: boolean
@@ -66,6 +74,11 @@ interface RepairIncompatiblePluginsOptions {
   scopePluginIds?: string[]
   quarantineOfficialManagedPlugins?: boolean
   restoreConfiguredManagedChannels?: boolean
+}
+
+interface ScanIncompatiblePluginsOptions {
+  scopePluginIds?: string[]
+  quarantineOfficialManagedPlugins?: boolean
 }
 
 type GatewayRuntimeStateCode =
@@ -781,6 +794,7 @@ interface NodeInstallPlan {
   platform: 'darwin' | 'win32'
   detectedArch: 'x64' | 'arm64' | 'x86'
   installerArch: 'x64' | 'arm64' | 'x86' | 'universal'
+  artifactKind: 'pkg' | 'zip'
   distBaseUrl: string
   url: string
   filename: string
@@ -821,6 +835,8 @@ interface OpenClawPaths {
   displayModelCatalogCacheFile: string
 }
 
+type WindowsActiveRuntimeSnapshot = SharedWindowsActiveRuntimeSnapshot
+
 type OpenClawInstallSource =
   | 'npm-global'
   | 'homebrew'
@@ -858,29 +874,19 @@ interface OpenClawBaselineBackupBypassRecord extends OpenClawBaselineBackupManua
   reason: 'manual-backup-required'
 }
 
-interface OpenClawInstallCandidate {
-  candidateId: string
-  binaryPath: string
-  resolvedBinaryPath: string
-  packageRoot: string
-  version: string
-  installSource: OpenClawInstallSource
-  isPathActive: boolean
-  configPath: string
-  stateRoot: string
-  displayConfigPath: string
-  displayStateRoot: string
-  ownershipState: OpenClawOwnershipState
-  installFingerprint: string
-  baselineBackup: OpenClawBaselineBackupRecord | null
-  baselineBackupBypass: OpenClawBaselineBackupBypassRecord | null
-}
+type OpenClawInstallCandidate = SharedOpenClawInstallCandidate
 
 interface OpenClawHistoryDataCandidate {
   path: string
   displayPath: string
   reason: 'default-home-dir' | 'runtime-state-root'
 }
+
+type WindowsGatewayOwnerState =
+  | 'healthy'
+  | 'service-missing'
+  | 'launcher-missing'
+  | 'unknown'
 
 interface OpenClawDiscoveryResult {
   status: 'installed' | 'history-only' | 'absent'
@@ -891,6 +897,7 @@ interface OpenClawDiscoveryResult {
   errors: string[]
   warnings: string[]
   defaultBackupDirectory: string
+  windowsGatewayOwnerState?: WindowsGatewayOwnerState | null
 }
 
 interface OpenClawLatestVersionCheckResult {
@@ -1620,6 +1627,8 @@ interface ElectronApi {
   inspectNodeInstaller: (installerPath: string) => Promise<NodeInstallerReadinessResult>
   installEnv: (opts: { needNode: boolean; needOpenClaw: boolean; nodeInstallerPath?: string; nodeInstallPlan?: NodeInstallPlan }) => Promise<CliResultExtended>
   discoverOpenClaw: () => Promise<OpenClawDiscoveryResult>
+  discoverOpenClawForEnvCheck: () => Promise<OpenClawDiscoveryResult>
+  appendEnvCheckDiagnostic: (event: string, fields?: Record<string, unknown>) => Promise<void>
   checkOpenClawLatestVersion: () => Promise<OpenClawLatestVersionCheckResult>
   ensureOpenClawBaselineBackup: (candidate: OpenClawInstallCandidate) => Promise<OpenClawBaselineBackupEnsureResult>
   skipOpenClawBaselineBackup: (candidate: OpenClawInstallCandidate) => Promise<OpenClawBaselineBackupSkipResult>
@@ -1656,6 +1665,9 @@ interface ElectronApi {
   previewOpenClawRestore: (backupId: string) => Promise<OpenClawRestorePreviewResult>
   runOpenClawRestore: (backupId: string, scope: OpenClawRestoreScope) => Promise<OpenClawRestoreRunResult>
   checkOpenClawUpgrade: () => Promise<OpenClawUpgradeCheckResult>
+  checkOpenClawUpgradeForEnvCheck: (
+    discovery: OpenClawDiscoveryResult | null
+  ) => Promise<OpenClawUpgradeCheckResult>
   runOpenClawUpgrade: () => Promise<OpenClawUpgradeRunResult>
   getQClawUpdateStatus: () => Promise<QClawUpdateStatus>
   checkQClawUpdate: () => Promise<QClawUpdateStatus>
@@ -1695,7 +1707,7 @@ interface ElectronApi {
   getStatus: () => Promise<CliResult>
 
   // Config
-  readConfig: () => Promise<Record<string, any> | null>
+  readConfig: (options?: { configPath?: string | null }) => Promise<Record<string, any> | null>
 
   // Env file
   readEnvFile: () => Promise<Record<string, string>>
@@ -1716,6 +1728,7 @@ interface ElectronApi {
   installPlugin: (name: string, expectedPluginIds?: string[]) => Promise<CliResult>
   installPluginNpx: (url: string, expectedPluginIds?: string[]) => Promise<CliResult>
   repairIncompatiblePlugins: (options?: RepairIncompatiblePluginsOptions) => Promise<RepairIncompatiblePluginsResult>
+  scanIncompatiblePlugins: (options?: ScanIncompatiblePluginsOptions) => Promise<RepairIncompatiblePluginsResult>
   isPluginInstalledOnDisk: (pluginId: string) => Promise<boolean>
   uninstallPlugin: (name: string) => Promise<CliResult>
   isFeishuOfficialPluginInstalled: () => Promise<boolean>
@@ -1847,6 +1860,7 @@ interface ElectronApi {
   // Models center
   getModelCapabilities: () => Promise<OpenClawCapabilities>
   listModelCatalog: (query?: ModelCatalogQuery) => Promise<ModelCatalogResult>
+  getModelSnapshot: (request?: ModelUiSnapshotRequest) => Promise<ModelUiSnapshotResult>
   getModelStatus: (options?: ModelStatusOptions) => Promise<ModelConfigCommandResult<Record<string, any>>>
   getModelUpstreamState: () => Promise<{
     ok: boolean

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   loadOpenClawCapabilities,
   resetOpenClawCapabilitiesCache,
@@ -65,6 +65,39 @@ function createCapabilities(version: string): OpenClawCapabilities {
 }
 
 describe('loadOpenClawCapabilities cache invalidation', () => {
+  it('keeps bootstrap and full capability cache entries separate', async () => {
+    resetOpenClawCapabilitiesCache()
+
+    const discoverCapabilities = vi.fn(async (options?: { profile?: string }) =>
+      createCapabilities(options?.profile === 'bootstrap' ? 'OpenClaw bootstrap-build' : 'OpenClaw full-build')
+    )
+
+    const bootstrapResult = await loadOpenClawCapabilities({
+      profile: 'bootstrap',
+      discoverCapabilities,
+    } as any)
+    const fullResult = await loadOpenClawCapabilities({
+      profile: 'full',
+      discoverCapabilities,
+    } as any)
+
+    expect(bootstrapResult.version).toBe('OpenClaw bootstrap-build')
+    expect(fullResult.version).toBe('OpenClaw full-build')
+    expect(discoverCapabilities).toHaveBeenCalledTimes(2)
+    expect(discoverCapabilities).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        profile: 'bootstrap',
+      })
+    )
+    expect(discoverCapabilities).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        profile: 'full',
+      })
+    )
+  })
+
   it('does not let an older in-flight discovery repopulate the shared cache after reset', async () => {
     resetOpenClawCapabilitiesCache()
 

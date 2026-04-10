@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   gatewayHealthMock,
+  gatewayStatusMock,
   gatewayStartMock,
   gatewayRestartMock,
   gatewayStopMock,
   ensureGatewayRunningMock,
 } = vi.hoisted(() => ({
   gatewayHealthMock: vi.fn(),
+  gatewayStatusMock: vi.fn(),
   gatewayStartMock: vi.fn(),
   gatewayRestartMock: vi.fn(),
   gatewayStopMock: vi.fn(),
@@ -16,6 +18,7 @@ const {
 
 vi.mock('../cli', () => ({
   gatewayHealth: gatewayHealthMock,
+  gatewayStatus: gatewayStatusMock,
   gatewayStart: gatewayStartMock,
   gatewayRestart: gatewayRestartMock,
   gatewayStop: gatewayStopMock,
@@ -63,6 +66,7 @@ function createCliOkResult() {
 describe('gateway lifecycle controller', () => {
   beforeEach(() => {
     gatewayHealthMock.mockReset()
+    gatewayStatusMock.mockReset()
     gatewayStartMock.mockReset()
     gatewayRestartMock.mockReset()
     gatewayStopMock.mockReset()
@@ -70,6 +74,16 @@ describe('gateway lifecycle controller', () => {
 
     gatewayHealthMock.mockResolvedValue({
       running: true,
+      raw: '{}',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'ok',
+    })
+    gatewayStatusMock.mockResolvedValue({
+      ok: true,
+      running: true,
+      rpcReachable: true,
       raw: '{}',
       stderr: '',
       code: 0,
@@ -158,7 +172,7 @@ describe('gateway lifecycle controller', () => {
   })
 
   it('reloads via ensure when gateway is not running', async () => {
-    gatewayHealthMock.mockResolvedValueOnce({
+    gatewayStatusMock.mockResolvedValueOnce({
       running: false,
     })
 
@@ -182,7 +196,7 @@ describe('gateway lifecycle controller', () => {
   })
 
   it('reloads via restart and waits until gateway health is confirmed again', async () => {
-    gatewayHealthMock
+    gatewayStatusMock
       .mockResolvedValueOnce({
         running: true,
         raw: '{}',
@@ -210,6 +224,67 @@ describe('gateway lifecycle controller', () => {
     })
     expect(gatewayRestartMock).toHaveBeenCalledTimes(1)
     expect(ensureGatewayRunningMock).toHaveBeenCalledTimes(0)
-    expect(gatewayHealthMock).toHaveBeenCalledTimes(2)
+    expect(gatewayStatusMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a reload as ready when service status is healthy even if the follow-up rpc probe fails', async () => {
+    vi.useFakeTimers()
+    gatewayHealthMock.mockReset()
+    gatewayHealthMock
+      .mockResolvedValueOnce({
+        running: true,
+        raw: '{}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'ok',
+      })
+      .mockResolvedValue({
+        running: false,
+        raw: '',
+        stderr: "gateway connect failed: Error: EPERM: operation not permitted, open 'C:\\Users\\qiuzh\\.openclaw\\identity\\device-auth.json'",
+        code: 1,
+        stateCode: 'unknown_runtime_failure',
+        summary: '当前机器没有足够权限访问 OpenClaw 配置或运行目录',
+      })
+
+    gatewayStatusMock
+      .mockResolvedValueOnce({
+        ok: true,
+        running: true,
+        rpcReachable: true,
+        raw: '{}',
+        stderr: '',
+        code: 0,
+        stateCode: 'healthy',
+        summary: 'ok',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        running: true,
+        rpcReachable: false,
+        raw: '{"service":{"runtime":{"status":"running"}},"health":{"healthy":true},"rpc":{"ok":false}}',
+        stderr: "gateway connect failed: Error: EPERM: operation not permitted, open 'C:\\Users\\qiuzh\\.openclaw\\identity\\device-auth.json'",
+        code: 0,
+        stateCode: 'healthy',
+        summary: '网关服务已重载并确认正在运行；本地 RPC 探测未通过',
+      })
+
+    try {
+      const resultPromise = reloadGatewayForConfigChange('config-change')
+      await vi.advanceTimersByTimeAsync(50_000)
+      const result = await resultPromise
+
+      expect(result).toMatchObject({
+        ok: true,
+        running: true,
+        stateCode: 'healthy',
+        summary: '网关服务已重载并确认正在运行；本地 RPC 探测未通过',
+      })
+      expect(gatewayRestartMock).toHaveBeenCalledTimes(1)
+      expect(gatewayStatusMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

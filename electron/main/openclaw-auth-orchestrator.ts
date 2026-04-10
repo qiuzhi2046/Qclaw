@@ -473,6 +473,7 @@ export async function runAuthAction(
           acceptRisk: action.acceptRisk !== false,
           installDaemon: action.installDaemon,
           skipChannels: action.skipChannels,
+          skipHealth: true,
           skipSkills: action.skipSkills,
           skipUi: action.skipUi,
           valueFlags,

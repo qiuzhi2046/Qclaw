@@ -1,4 +1,8 @@
-import type { CliCommandResult, OpenClawCapabilities } from './openclaw-capabilities'
+import type {
+  CliCommandResult,
+  OpenClawCapabilities,
+  OpenClawCapabilitiesProfile,
+} from './openclaw-capabilities'
 import { atomicWriteJson } from './atomic-write'
 import { buildModelsListAllCommand } from './openclaw-command-builder'
 import { getCliFailureMessage, parseJsonFromOutput } from './openclaw-command-output'
@@ -11,6 +15,7 @@ const DEFAULT_CATALOG_TIMEOUT_MS = MAIN_RUNTIME_POLICY.modelCatalog.fetchTimeout
 const DEFAULT_TTL_MS = MAIN_RUNTIME_POLICY.modelCatalog.cacheTtlMs
 const DEFAULT_PAGE_SIZE = MODEL_CATALOG_LIMITS.backendDefaultPageSize
 const MAX_PAGE_SIZE = MODEL_CATALOG_LIMITS.maxPageSize
+const MODEL_CATALOG_CAPABILITIES_PROFILE: OpenClawCapabilitiesProfile = 'bootstrap'
 
 export interface ModelCatalogItem {
   key: string
@@ -53,7 +58,7 @@ interface GetModelCatalogOptions {
   ttlMs?: number
   runCommand?: (args: string[], timeout?: number) => Promise<CliCommandResult>
   capabilities?: OpenClawCapabilities
-  loadCapabilities?: () => Promise<OpenClawCapabilities>
+  loadCapabilities?: (options?: { profile?: OpenClawCapabilitiesProfile }) => Promise<OpenClawCapabilities>
   readCache?: () => Promise<ModelCatalogCache | null>
   writeCache?: (cache: ModelCatalogCache) => Promise<void>
   now?: () => Date
@@ -162,11 +167,13 @@ async function resolveCapabilities(
   options: GetModelCatalogOptions
 ): Promise<OpenClawCapabilities | undefined> {
   if (options.capabilities) return options.capabilities
-  if (options.loadCapabilities) return options.loadCapabilities()
+  if (options.loadCapabilities) {
+    return options.loadCapabilities({ profile: MODEL_CATALOG_CAPABILITIES_PROFILE })
+  }
   if (options.runCommand) return undefined
 
   const { loadOpenClawCapabilities } = await import('./openclaw-capabilities')
-  return loadOpenClawCapabilities()
+  return loadOpenClawCapabilities({ profile: MODEL_CATALOG_CAPABILITIES_PROFILE })
 }
 
 async function defaultReadCache(): Promise<ModelCatalogCache | null> {

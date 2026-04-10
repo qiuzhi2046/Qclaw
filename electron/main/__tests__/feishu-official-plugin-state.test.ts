@@ -224,7 +224,7 @@ describe('getFeishuOfficialPluginState', () => {
         expect.objectContaining({
           source: 'npm',
           spec: '@larksuite/openclaw-lark',
-          installPath: '/Users/alice/.openclaw/extensions/openclaw-lark',
+          installPath: expect.stringMatching(/[\\/]openclaw-lark$/),
         })
       )
       expect(result.normalizedConfig.session.dmScope).toBe('per-account-channel-peer')
@@ -300,7 +300,10 @@ describe('getFeishuOfficialPluginState', () => {
 
       expect(result.ok).toBe(true)
       expect(result.installedThisRun).toBe(true)
-      expect(installPluginNpxMock).toHaveBeenCalledWith('@larksuite/openclaw-lark-tools', ['openclaw-lark'])
+      expect(installPluginNpxMock).toHaveBeenCalledWith(
+        '@larksuite/openclaw-lark-tools',
+        ['openclaw-lark']
+      )
       expect(result.state.installedOnDisk).toBe(true)
       expect(applyConfigPatchGuardedMock).toHaveBeenCalled()
       expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('feishu-official-plugin-install')
@@ -412,7 +415,10 @@ describe('getFeishuOfficialPluginState', () => {
         scopePluginIds: ['openclaw-lark', 'feishu', 'feishu-openclaw-plugin'],
         quarantineOfficialManagedPlugins: true,
       })
-      expect(installPluginNpxMock).toHaveBeenCalledWith('@larksuite/openclaw-lark-tools', ['openclaw-lark'])
+      expect(installPluginNpxMock).toHaveBeenCalledWith(
+        '@larksuite/openclaw-lark-tools',
+        ['openclaw-lark']
+      )
       expect(result.ok).toBe(true)
       expect(result.installedThisRun).toBe(true)
       expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('feishu-official-plugin-install')

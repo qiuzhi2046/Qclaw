@@ -111,10 +111,13 @@ describe('channels page state helpers', () => {
       'utf8'
     )
 
-    expect(channelsPageSource).toContain('window.api.readEnvFile()')
+    expect(channelsPageSource).toContain('window.api.getModelSnapshot')
+    expect(channelsPageSource).toContain('includeEnv: true')
+    expect(channelsPageSource).toContain('includeCatalog: true')
     expect(channelsPageSource).toContain("mode: 'all'")
     expect(channelsPageSource).toContain('envVars')
     expect(channelsPageSource).toContain('configData')
+    expect(channelsPageSource).toContain('catalogItems')
   })
 
   it('does not keep redundant channel-card subtitle, identifiers, or unknown plugin badges in the page source', () => {

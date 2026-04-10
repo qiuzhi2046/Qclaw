@@ -1,4 +1,5 @@
 import { parseJsonFromOutput } from './openclaw-command-output'
+import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
 import { resolveOpenClawBinaryPath } from './openclaw-package'
 import {
   expandDisplayPath,
@@ -8,6 +9,7 @@ import {
   type OpenClawPaths,
 } from './openclaw-paths'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
 
 const childProcess = process.getBuiltinModule('node:child_process') as typeof import('node:child_process')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
@@ -31,6 +33,7 @@ interface RuntimeBackupPlan {
 }
 
 interface ResolveRuntimeOpenClawPathsOptions {
+  activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
   binaryPath?: string
   env?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
@@ -183,11 +186,27 @@ export async function resolveRuntimeOpenClawPaths(
 ): Promise<OpenClawPaths> {
   const platform = options.platform || process.platform
   const env = options.env || process.env
+  const activeRuntimeSnapshot =
+    options.activeRuntimeSnapshot ?? (platform === 'win32' ? getSelectedWindowsActiveRuntimeSnapshot() : null)
   const userHomeDir = resolveRuntimeHomeDir(platform, env)
   const fallback = resolveFallbackPaths(platform, env)
 
+  if (platform === 'win32' && activeRuntimeSnapshot) {
+    return resolveOpenClawPathsFromStateRoot({
+      stateRoot: activeRuntimeSnapshot.stateDir,
+      configFile: activeRuntimeSnapshot.configPath,
+      homeDir: userHomeDir,
+      platform,
+    })
+  }
+
   const resolvedBinaryPath = String(
-    options.binaryPath || (await resolveOpenClawBinaryPath({ env, platform }).catch(() => ''))
+    options.binaryPath ||
+      (await resolveOpenClawBinaryPath({
+        activeRuntimeSnapshot,
+        env,
+        platform,
+      }).catch(() => ''))
   ).trim()
   if (!resolvedBinaryPath) return fallback
   const cacheKey = `${resolvedBinaryPath}\n${userHomeDir}\n${platform}`

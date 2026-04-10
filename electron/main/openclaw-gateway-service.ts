@@ -22,10 +22,10 @@ import {
   isPluginInstalledOnDisk,
   gatewayRestart,
   gatewayStop,
-  getOpenClawPaths,
   gatewayStart,
   installEnv,
   repairIncompatibleExtensionPlugins,
+  readAuthoritativeWindowsChannelRuntimeSnapshot,
   readConfig,
   readEnvFile,
   refreshEnvironment,
@@ -39,8 +39,22 @@ import {
 import { guardedWriteConfig } from './openclaw-config-guard'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { findAvailableLoopbackPort, probeGatewayPortOwner } from './openclaw-gateway-probes'
+import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
+import { resolveOpenClawPaths, resolveOpenClawPathsFromStateRoot } from './openclaw-paths'
+import {
+  buildWindowsActiveRuntimeSnapshot,
+  type WindowsActiveRuntimeSnapshot,
+} from './platforms/windows/windows-runtime-policy'
+import {
+  buildWindowsGatewayPreflight,
+  inspectWindowsGatewayLauncherIntegrity,
+} from './platforms/windows/windows-platform-ops'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 import { reconcileTrustedPluginAllowlist, sanitizeManagedPluginConfig } from './openclaw-plugin-config'
+import {
+  detectGatewayDeviceRequiredEvidence,
+  detectGatewayPluginLoadFailureEvidence,
+} from './gateway-startup-log-diagnostics'
 import {
   getManagedChannelPluginByChannelId,
   listManagedChannelPluginRecords,
@@ -54,6 +68,7 @@ import {
   recordObservedOpenClawVersion,
   resolveGatewayBlockingReasonFromState,
 } from './openclaw-runtime-reconcile'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 
 export type GatewayBootstrapPhase =
   | 'runtime-check'
@@ -66,6 +81,16 @@ export type GatewayBootstrapPhase =
   | 'doctor-check'
   | 'blocked'
   | 'done'
+
+function isOpenClawReadyForSelectedRuntime(result: {
+  installed: boolean
+  selectedRuntimeComplete?: boolean
+}): boolean {
+  if (typeof result.selectedRuntimeComplete === 'boolean') {
+    return result.installed && result.selectedRuntimeComplete
+  }
+  return result.installed
+}
 
 export interface GatewayBootstrapProgressState {
   phase: GatewayBootstrapPhase
@@ -827,6 +852,29 @@ function isGatewayServiceNotLoaded(result: Partial<CliResult> | null | undefined
   return GATEWAY_SERVICE_NOT_LOADED_PATTERN.test(combineCliOutput(result))
 }
 
+async function installGatewayServiceDuringBootstrap(
+  options: EnsureGatewayRunningOptions,
+  context: GatewayRecoveryContext,
+  detail: string,
+  force = false
+): Promise<CliResult> {
+  const installCommand = force ? ['gateway', 'install', '--force'] : ['gateway', 'install']
+  emitGatewayBootstrapState(options, {
+    phase: 'service-install',
+    title: '正在补装网关服务',
+    detail,
+    progress: 48,
+  })
+  recordGatewayAction(context, 'install-service', installCommand)
+  await gatewayStop().catch(() => undefined)
+  const installGatewayResult = await runCli(installCommand, undefined, 'gateway')
+  if (installGatewayResult.ok) {
+    const postInstallConfig = await readConfig().catch(() => null)
+    await ensureGatewayModeConfig(postInstallConfig)
+  }
+  return installGatewayResult
+}
+
 function emitGatewayBootstrapState(
   options: EnsureGatewayRunningOptions,
   state: GatewayBootstrapProgressState
@@ -895,6 +943,50 @@ async function waitForGatewayReady(
   }
 }
 
+const GATEWAY_DEVICE_REQUIRED_GRACE_POLL = {
+  timeoutMs: 15_000,
+  initialIntervalMs: 1_500,
+  maxIntervalMs: 3_000,
+  backoffFactor: 1.5,
+} as const
+
+async function waitForGatewayReadyDuringDevicePairing(
+  options: EnsureGatewayRunningOptions
+): Promise<{
+  running: boolean
+  health: GatewayHealthCheckResult
+  attempts: number
+  elapsedMs: number
+}> {
+  let lastHealth = createEmptyHealthCheck()
+  const readiness = await pollWithBackoff({
+    policy: GATEWAY_DEVICE_REQUIRED_GRACE_POLL,
+    execute: async (context) => {
+      emitGatewayBootstrapState(options, {
+        phase: 'waiting-ready',
+        title: '正在等待网关完成设备配对',
+        detail:
+          context.attempt > 1
+            ? `检测到本地设备身份仍在完成配对，正在进行第 ${context.attempt} 次额外就绪确认。`
+            : '检测到本地设备身份仍在完成配对，系统将稍作等待后再次确认网关可用性。',
+        progress: Math.min(94, 72 + context.attempt * 4),
+        attempt: context.attempt,
+        elapsedMs: context.elapsedMs,
+      })
+      lastHealth = await safeGatewayHealth()
+      return lastHealth
+    },
+    isSuccess: (value) => Boolean(value.running),
+  })
+
+  return {
+    running: readiness.ok && Boolean(readiness.value?.running),
+    health: readiness.value || lastHealth,
+    attempts: readiness.attempts,
+    elapsedMs: readiness.elapsedMs,
+  }
+}
+
 function normalizeGatewayPortOwner(port: number, owner?: GatewayPortOwner | null): GatewayPortOwner {
   if (owner) return owner
   return {
@@ -944,7 +1036,8 @@ async function restartGatewayAndWait(
 
 async function tryRecoverPortConflict(
   options: EnsureGatewayRunningOptions,
-  context: GatewayRecoveryContext
+  context: GatewayRecoveryContext,
+  knownPortOwner?: GatewayPortOwner | null
 ): Promise<{
   recovered: boolean
   startResult?: CliResult
@@ -956,7 +1049,7 @@ async function tryRecoverPortConflict(
 
   const portOwner = normalizeGatewayPortOwner(
     currentPort,
-    await probeGatewayPortOwner(currentPort).catch(() => null)
+    knownPortOwner || (await probeGatewayPortOwner(currentPort).catch(() => null))
   )
   context.portOwner = portOwner
   appendGatewayEvidence(context, {
@@ -1110,7 +1203,7 @@ async function ensureRuntimeReady(
   const nodeResult = await checkNode()
   const openclawResult = await checkOpenClaw()
   const needNode = !nodeResult.installed
-  const needOpenClaw = !openclawResult.installed
+  const needOpenClaw = !isOpenClawReadyForSelectedRuntime(openclawResult)
   const autoInstalledNode = needNode
   const autoInstalledOpenClaw = needOpenClaw
   const observeVersion = async (version: string | null | undefined): Promise<string | null> => {
@@ -1226,7 +1319,7 @@ async function ensureRuntimeReady(
   }
 
   const refreshedOpenClaw = await checkOpenClaw()
-  if (needOpenClaw && !refreshedOpenClaw.installed) {
+  if (needOpenClaw && !isOpenClawReadyForSelectedRuntime(refreshedOpenClaw)) {
     return {
       ok: false,
       result: buildGatewayEnsureResult(
@@ -1267,7 +1360,14 @@ async function ensureRuntimeReady(
 async function ensureGatewayModeConfig(
   existingConfig: Record<string, any> | null
 ): Promise<boolean> {
-  const openClawPaths = await getOpenClawPaths()
+  const authoritativeRuntimeSnapshot =
+    process.platform === 'win32' ? readAuthoritativeWindowsChannelRuntimeSnapshot() : null
+  const openClawPaths =
+    authoritativeRuntimeSnapshot?.stateDir
+      ? resolveOpenClawPathsFromStateRoot({
+          stateRoot: authoritativeRuntimeSnapshot.stateDir,
+        })
+      : resolveOpenClawPaths()
   const homeDir = openClawPaths.homeDir
 
   // Ensure home dir and session dir exist with correct permissions
@@ -1277,17 +1377,20 @@ async function ensureGatewayModeConfig(
     await fs.promises.chmod(homeDir, 0o700).catch(() => undefined)
   }
 
+  const resolvedConfig =
+    existingConfig || await readConfig({ configPath: openClawPaths.configFile }).catch(() => null)
+
   // Ensure gateway.mode is set
-  const gatewayMode = existingConfig?.gateway?.mode
+  const gatewayMode = resolvedConfig?.gateway?.mode
   if (gatewayMode) return false
 
-  const config: Record<string, any> = existingConfig ? { ...existingConfig } : {}
+  const config: Record<string, any> = resolvedConfig ? { ...resolvedConfig } : {}
   if (!config.gateway || typeof config.gateway !== 'object') {
     config.gateway = {}
   }
   config.gateway = { ...config.gateway, mode: 'local' }
   const writeResult = await applyConfigPatchGuarded({
-    beforeConfig: existingConfig,
+    beforeConfig: resolvedConfig,
     afterConfig: config,
     reason: 'unknown',
   }, undefined, { applyGatewayPolicy: false })
@@ -1300,7 +1403,14 @@ async function ensureGatewayModeConfig(
 async function ensureGatewayRunningImpl(
   options: EnsureGatewayRunningOptions = {}
 ): Promise<GatewayEnsureRunningResult> {
+  await appendEnvCheckDiagnostic('gateway-ensure-impl-start', {
+    skipRuntimePrecheck: Boolean(options.skipRuntimePrecheck),
+  })
   const existingConfig = await readConfig().catch(() => null)
+  await appendEnvCheckDiagnostic('gateway-ensure-after-read-config', {
+    hasConfig: Boolean(existingConfig),
+    configuredPort: resolveGatewayConfiguredPort(existingConfig),
+  })
   const context = createGatewayRecoveryContext(resolveGatewayConfiguredPort(existingConfig))
   const installedFlags = {
     autoInstalledNode: false,
@@ -1314,6 +1424,10 @@ async function ensureGatewayRunningImpl(
     summary: string
   ): Promise<number> => {
     if (reconcileRevision !== null) return reconcileRevision
+    await appendEnvCheckDiagnostic('gateway-ensure-before-runtime-revision', {
+      pendingReason,
+      summary,
+    })
     const pendingStore = await issueDesiredRuntimeRevision('gateway-bootstrap', pendingReason, {
       actions: [
         {
@@ -1325,9 +1439,18 @@ async function ensureGatewayRunningImpl(
       ],
     })
     reconcileRevision = pendingStore.runtime.desiredRevision
+    await appendEnvCheckDiagnostic('gateway-ensure-after-issue-runtime-revision', {
+      pendingReason,
+      reconcileRevision,
+      desiredRevision: pendingStore.runtime.desiredRevision,
+    })
     await markRuntimeRevisionInProgress(reconcileRevision, {
       summary,
       actions: pendingStore.runtime.lastActions,
+    })
+    await appendEnvCheckDiagnostic('gateway-ensure-after-mark-runtime-revision', {
+      reconcileRevision,
+      pendingReason,
     })
     return reconcileRevision
   }
@@ -1420,7 +1543,14 @@ async function ensureGatewayRunningImpl(
     detail: '如果网关已经在运行，会直接放行到控制面板。',
     progress: 18,
   })
+  await appendEnvCheckDiagnostic('gateway-ensure-before-initial-health', {})
   const initialHealth = await safeGatewayHealth()
+  await appendEnvCheckDiagnostic('gateway-ensure-after-initial-health', {
+    running: Boolean(initialHealth.running),
+    code: initialHealth.code,
+    stateCode: initialHealth.stateCode,
+    summary: initialHealth.summary,
+  })
   appendGatewayEvidence(context, {
     source: 'health',
     message: String(initialHealth.summary || '网关初始健康检查未通过'),
@@ -1437,6 +1567,25 @@ async function ensureGatewayRunningImpl(
   })
   let startupProbeHealth = initialHealth
   let startupProbeClassification = initialClassification
+  if (!initialHealth.running && startupProbeClassification.stateCode === 'websocket_1006') {
+    await appendEnvCheckDiagnostic('gateway-ensure-before-startup-log-evidence', {
+      stateCode: startupProbeClassification.stateCode,
+    })
+    const startupLogEvidence = await detectGatewayPluginLoadFailureEvidence()
+    await appendEnvCheckDiagnostic('gateway-ensure-after-startup-log-evidence', {
+      foundEvidence: Boolean(startupLogEvidence),
+    })
+    if (startupLogEvidence) {
+      appendGatewayEvidence(context, startupLogEvidence)
+      startupProbeClassification = {
+        stateCode: 'plugin_load_failure',
+        summary: '网关依赖的插件没有正常加载',
+        safeToRetry: false,
+        evidence: [startupLogEvidence],
+        reasonDetail: null,
+      }
+    }
+  }
   if (initialHealth.running) {
     if (configRuntimeApplyRequired) {
       const restartAfterConfigPatch = await restartGatewayAndWait(
@@ -1789,22 +1938,219 @@ async function ensureGatewayRunningImpl(
     detail: '如果后台服务尚未安装，系统会先自动补装。',
     progress: 36,
   })
-  recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
-  let startResult = await gatewayStart()
+  await appendEnvCheckDiagnostic('gateway-ensure-before-start-command', {
+    stateCode: startupProbeClassification.stateCode,
+    configRuntimeApplyRequired,
+  })
+  let startResult: CliResult
+  let gatewayStartRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null = null
+  let gatewayStartPreflightHomeDir: string | null = null
+  if (process.platform === 'win32') {
+    // Windows gateway owner repair/provision is intentionally centralized here.
+    // Upper layers may request "make the gateway usable", but they must not install
+    // or repair gateway.cmd / Startup entries / scheduled tasks directly.
+    const currentPort = resolveGatewayConfiguredPort(existingConfig)
+    const authoritativeRuntimeSnapshot = readAuthoritativeWindowsChannelRuntimeSnapshot()
+    const authoritativeOpenClawPaths = authoritativeRuntimeSnapshot?.stateDir
+      ? resolveOpenClawPathsFromStateRoot({
+          stateRoot: authoritativeRuntimeSnapshot.stateDir,
+        })
+      : null
+    const windowsGatewayStartRuntimeSnapshot =
+      authoritativeRuntimeSnapshot && authoritativeOpenClawPaths
+        ? buildWindowsActiveRuntimeSnapshot({
+            configPath: authoritativeOpenClawPaths.configFile,
+            extensionsDir: path.win32.join(authoritativeOpenClawPaths.homeDir, 'extensions'),
+            hostPackageRoot: authoritativeRuntimeSnapshot.hostPackageRoot,
+            nodeExecutable: authoritativeRuntimeSnapshot.nodePath,
+            npmPrefix: path.win32.dirname(authoritativeRuntimeSnapshot.nodePath || ''),
+            openclawExecutable: authoritativeRuntimeSnapshot.openclawPath,
+            stateDir: authoritativeRuntimeSnapshot.stateDir,
+          })
+        : null
+    gatewayStartRuntimeSnapshot = windowsGatewayStartRuntimeSnapshot
+    const preflightHomeDir =
+      normalizeText(authoritativeRuntimeSnapshot?.stateDir)
+      || normalizeText((await resolveOpenClawPathsForRead().catch(() => null))?.homeDir)
+      || normalizeText(resolveOpenClawPaths().homeDir)
+    gatewayStartPreflightHomeDir = preflightHomeDir
+    const preflightPortOwner = normalizeGatewayPortOwner(
+      currentPort,
+      await probeGatewayPortOwner(currentPort).catch(() => null)
+    )
+    const launcherIntegrity = await inspectWindowsGatewayLauncherIntegrity({
+      homeDir: preflightHomeDir,
+    }).catch(() => null)
+    const preflight = buildWindowsGatewayPreflight({
+      gatewayOwner: authoritativeRuntimeSnapshot?.gatewayOwner || null,
+      launcherIntegrity,
+      portOwner: preflightPortOwner,
+    })
+    await appendEnvCheckDiagnostic('gateway-ensure-start-command-preflight', {
+      portOwnerKind: preflightPortOwner.kind,
+      shouldAttemptPortRecovery: preflight.shouldAttemptPortRecovery,
+      shouldAttachToExistingOwner: preflight.shouldAttachToExistingOwner,
+      shouldReinstallService: preflight.shouldReinstallService,
+      launcherStatus: launcherIntegrity?.status || null,
+      launcherPath: launcherIntegrity?.launcherPath || null,
+    })
+    context.portOwner = preflightPortOwner
+
+    if (preflight.shouldAttemptPortRecovery) {
+      await appendEnvCheckDiagnostic('gateway-ensure-start-command-branch', {
+        branch: 'port-recovery',
+      })
+      const recovered = await tryRecoverPortConflict(options, context, preflightPortOwner)
+      rollbackConfig = recovered.rollbackConfig
+      if (recovered.recovered && recovered.startResult) {
+        startResult = recovered.startResult
+      } else {
+        const preflightClassification = classifyGatewayRuntimeState({
+          stderr: 'Windows preflight detected a blocking gateway port owner',
+          portOwner: context.portOwner,
+          evidence: context.evidence,
+        })
+        const blockedResult = buildGatewayEnsureResult(
+          recovered.startResult || {
+            ok: false,
+            stdout: '',
+            stderr: preflightClassification.summary,
+            code: 1,
+          },
+          {
+            running: false,
+            autoInstalledGatewayService,
+            ...installedFlags,
+          },
+          context,
+          {
+            stateCode: preflightClassification.stateCode,
+            summary: preflightClassification.summary,
+            repairOutcome: 'blocked',
+            safeToRetry: preflightClassification.safeToRetry,
+            reasonDetail: preflightClassification.reasonDetail,
+            diagnostics: {
+              lastHealth: startupProbeHealth,
+              doctor: null,
+              portOwner: context.portOwner,
+            },
+          }
+        )
+        await persistGatewayRuntimeReconcile({ result: blockedResult })
+        return blockedResult
+      }
+    } else if (preflight.shouldAttachToExistingOwner) {
+      await appendEnvCheckDiagnostic('gateway-ensure-start-command-branch', {
+        branch: 'attach-existing-owner',
+      })
+      startResult = {
+        ok: true,
+        stdout: 'attached to existing gateway owner',
+        stderr: '',
+        code: 0,
+      }
+    } else if (preflight.shouldReinstallService) {
+      await appendEnvCheckDiagnostic('gateway-ensure-start-command-branch', {
+        branch: 'reinstall-service',
+      })
+      const installGatewayResult = await installGatewayServiceDuringBootstrap(
+        options,
+        context,
+        '检测到 Windows 网关启动器已经缺失或损坏，正在自动重建后台服务。',
+        true
+      )
+      await appendEnvCheckDiagnostic('gateway-ensure-start-command-install-result', {
+        ok: installGatewayResult.ok,
+        code: installGatewayResult.code,
+        stderr: String(installGatewayResult.stderr || '').slice(0, 400),
+      })
+      if (!installGatewayResult.ok) {
+        appendGatewayEvidence(context, {
+          source: 'service',
+          message: '网关服务重建失败',
+          detail: combineCliOutput(installGatewayResult),
+        })
+        const result = buildGatewayEnsureResult(
+          installGatewayResult,
+          {
+            running: false,
+            autoInstalledGatewayService,
+            ...installedFlags,
+          },
+          context,
+          {
+            stateCode: 'service_install_failed',
+            summary: '网关后台服务重建失败',
+          }
+        )
+        await persistGatewayRuntimeReconcile({ result })
+        return result
+      }
+
+      autoInstalledGatewayService = true
+      emitGatewayBootstrapState(options, {
+        phase: 'start-command',
+        title: '正在重新启动网关',
+        detail: '网关后台服务已重建完成，正在再次启动网关。',
+        progress: 56,
+      })
+      recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
+      await appendEnvCheckDiagnostic('gateway-ensure-before-gateway-start', {
+        branch: 'reinstall-service',
+      })
+      startResult = await gatewayStart({
+        activeRuntimeSnapshot: gatewayStartRuntimeSnapshot,
+        configRepairPreflightHomeDir: preflightHomeDir,
+      })
+    } else {
+      await appendEnvCheckDiagnostic('gateway-ensure-start-command-branch', {
+        branch: 'direct-start',
+      })
+      recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
+      await appendEnvCheckDiagnostic('gateway-ensure-before-gateway-start', {
+        branch: 'direct-start',
+      })
+      startResult = await gatewayStart({
+        activeRuntimeSnapshot: gatewayStartRuntimeSnapshot,
+        configRepairPreflightHomeDir: preflightHomeDir,
+      })
+    }
+  } else {
+    recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
+    await appendEnvCheckDiagnostic('gateway-ensure-before-gateway-start', {
+      branch: 'direct-start-non-windows',
+    })
+    startResult = await gatewayStart()
+  }
+  await appendEnvCheckDiagnostic('gateway-ensure-after-gateway-start', {
+    ok: startResult.ok,
+    code: startResult.code,
+    stdout: String(startResult.stdout || '').slice(0, 400),
+    stderr: String(startResult.stderr || '').slice(0, 400),
+  })
   // The CLI may exit 0 even when the service is not loaded (it prints a hint instead of failing).
   // Check the output text regardless of exit code.
   if (isGatewayServiceNotLoaded(startResult)) {
+    await appendEnvCheckDiagnostic('gateway-ensure-start-command-service-not-loaded', {
+      code: startResult.code,
+      stderr: String(startResult.stderr || '').slice(0, 400),
+    })
     emitGatewayBootstrapState(options, {
       phase: 'service-install',
       title: '正在补装网关服务',
       detail: '检测到当前机器还没加载后台服务，正在自动补装。',
       progress: 48,
     })
-    recordGatewayAction(context, 'install-service', ['gateway', 'install'])
-    // Stop any stale gateway processes before reinstalling the daemon service.
-    // Multiple residual processes cause bonjour name conflicts and port races.
-    await gatewayStop().catch(() => undefined)
-    const installGatewayResult = await runCli(['gateway', 'install'], undefined, 'gateway')
+    const installGatewayResult = await installGatewayServiceDuringBootstrap(
+      options,
+      context,
+      '检测到当前机器还没有加载后台服务，正在自动补装。'
+    )
+    await appendEnvCheckDiagnostic('gateway-ensure-start-command-install-result', {
+      ok: installGatewayResult.ok,
+      code: installGatewayResult.code,
+      stderr: String(installGatewayResult.stderr || '').slice(0, 400),
+    })
     if (!installGatewayResult.ok) {
       appendGatewayEvidence(context, {
         source: 'service',
@@ -1829,10 +2175,6 @@ async function ensureGatewayRunningImpl(
     }
 
     autoInstalledGatewayService = true
-    // gateway install may overwrite config (regenerate auth token, reset fields).
-    // Re-ensure gateway.mode survives the overwrite.
-    const postInstallConfig = await readConfig().catch(() => null)
-    await ensureGatewayModeConfig(postInstallConfig)
     emitGatewayBootstrapState(options, {
       phase: 'start-command',
       title: '正在重新启动网关',
@@ -1840,7 +2182,19 @@ async function ensureGatewayRunningImpl(
       progress: 56,
     })
     recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
-    startResult = await gatewayStart()
+    await appendEnvCheckDiagnostic('gateway-ensure-before-gateway-start', {
+      branch: 'service-not-loaded-restart',
+    })
+    startResult = await gatewayStart({
+      activeRuntimeSnapshot: gatewayStartRuntimeSnapshot,
+      configRepairPreflightHomeDir: gatewayStartPreflightHomeDir,
+    })
+    await appendEnvCheckDiagnostic('gateway-ensure-after-gateway-start', {
+      ok: startResult.ok,
+      code: startResult.code,
+      stdout: String(startResult.stdout || '').slice(0, 400),
+      stderr: String(startResult.stderr || '').slice(0, 400),
+    })
   }
 
   if (!startResult.ok) {
@@ -2052,6 +2406,55 @@ async function ensureGatewayRunningImpl(
       })
     }
     appendGatewayEvidence(context, readyClassification.evidence)
+
+    if (readyClassification.stateCode === 'websocket_1006') {
+      const deviceRequiredEvidence = await detectGatewayDeviceRequiredEvidence()
+      if (deviceRequiredEvidence) {
+        appendGatewayEvidence(context, deviceRequiredEvidence)
+        ready = await waitForGatewayReadyDuringDevicePairing(options)
+        if (ready.running) {
+          emitGatewayBootstrapState(options, {
+            phase: 'done',
+            title: '网关已确认可用',
+            detail: '本地设备配对已完成，网关已经准备完成，正在进入控制面板。',
+            progress: 100,
+            elapsedMs: ready.elapsedMs,
+          })
+          const result = buildGatewayEnsureResult(
+            {
+              ok: true,
+              stdout: ready.health.raw || startResult.stdout,
+              stderr: ready.health.stderr || startResult.stderr,
+              code: 0,
+            },
+            {
+              running: true,
+              autoInstalledGatewayService,
+              ...installedFlags,
+            },
+            context
+          )
+          await persistGatewayRuntimeReconcile({
+            result,
+            summary: '网关已在本地设备配对完成后确认消费当前配置并完成就绪。',
+          })
+          return result
+        }
+
+        readyDiagnosticsBase.lastHealth = ready.health
+        readyClassification = classifyGatewayRuntimeState({
+          stderr: '网关启动命令已执行，但系统仍未确认网关已经准备完成',
+          stdout: combineCliOutput(startResult),
+          diagnostics: {
+            lastHealth: ready.health,
+            doctor: readyDiagnosticsBase.doctor,
+          },
+          portOwner: context.portOwner,
+          evidence: context.evidence,
+        })
+        appendGatewayEvidence(context, readyClassification.evidence)
+      }
+    }
 
     if (
       !restartRepairAttempted &&

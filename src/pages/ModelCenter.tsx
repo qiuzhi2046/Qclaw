@@ -1819,12 +1819,22 @@ export default function ModelCenter({
     ;(async () => {
       setPhase('loading')
       setError('')
+      await window.api.appendEnvCheckDiagnostic('renderer-model-capabilities-requested', {
+        providerNameCount: Object.keys(providerNames || {}).length,
+      }).catch(() => undefined)
       try {
         const loaded = await window.api.getModelCapabilities()
         if (cancelled) return
+        await window.api.appendEnvCheckDiagnostic('renderer-model-capabilities-result', {
+          providerCount: Array.isArray(loaded.authRegistry?.providers) ? loaded.authRegistry.providers.length : 0,
+          authRegistryOk: loaded.authRegistry?.ok !== false,
+        }).catch(() => undefined)
         applyLoadedCapabilities(loaded)
       } catch (e: any) {
         if (cancelled) return
+        await window.api.appendEnvCheckDiagnostic('renderer-model-capabilities-failed', {
+          message: e instanceof Error ? e.message : String(e || ''),
+        }).catch(() => undefined)
         setPhase('error')
         setError(toUserFacingUnknownErrorMessage(e, '读取模型能力失败'))
       }

@@ -77,6 +77,7 @@ describe('openclaw-download-fallbacks', () => {
       buildOpenClawInstallArgs('2026.3.19', 'https://registry.npmmirror.com', {
         userConfigPath: '/tmp/openclaw-installer/npm/user.npmrc',
         globalConfigPath: '/tmp/openclaw-installer/npm/global.npmrc',
+        prefixPath: '/tmp/qclaw-private-node',
         cachePath: '/tmp/openclaw-installer/npm/cache',
         fetchTimeoutMs: 30000,
         fetchRetries: 2,
@@ -90,6 +91,7 @@ describe('openclaw-download-fallbacks', () => {
       '--registry=https://registry.npmmirror.com',
       '--userconfig=/tmp/openclaw-installer/npm/user.npmrc',
       '--globalconfig=/tmp/openclaw-installer/npm/global.npmrc',
+      '--prefix=/tmp/qclaw-private-node',
       '--cache=/tmp/openclaw-installer/npm/cache',
       '--fetch-timeout=30000',
       '--fetch-retries=2',
@@ -103,6 +105,7 @@ describe('openclaw-download-fallbacks', () => {
       buildOpenClawConfigGetPrefixArgs({
         userConfigPath: '/tmp/openclaw-installer/npm/user.npmrc',
         globalConfigPath: '/tmp/openclaw-installer/npm/global.npmrc',
+        prefixPath: '/tmp/qclaw-private-node',
         cachePath: '/tmp/openclaw-installer/npm/cache',
         fetchTimeoutMs: 30000,
         fetchRetries: 2,
@@ -115,6 +118,7 @@ describe('openclaw-download-fallbacks', () => {
       'prefix',
       '--userconfig=/tmp/openclaw-installer/npm/user.npmrc',
       '--globalconfig=/tmp/openclaw-installer/npm/global.npmrc',
+      '--prefix=/tmp/qclaw-private-node',
     ])
   })
 
@@ -123,6 +127,7 @@ describe('openclaw-download-fallbacks', () => {
       buildOpenClawUninstallArgs({
         userConfigPath: '/tmp/openclaw-installer/npm/user.npmrc',
         globalConfigPath: '/tmp/openclaw-installer/npm/global.npmrc',
+        prefixPath: '/tmp/qclaw-private-node',
         cachePath: '/private/tmp/qclaw-openclaw-admin-npm/cache',
         fetchTimeoutMs: 30000,
         fetchRetries: 2,
@@ -133,6 +138,7 @@ describe('openclaw-download-fallbacks', () => {
       'openclaw',
       '--userconfig=/tmp/openclaw-installer/npm/user.npmrc',
       '--globalconfig=/tmp/openclaw-installer/npm/global.npmrc',
+      '--prefix=/tmp/qclaw-private-node',
       '--cache=/private/tmp/qclaw-openclaw-admin-npm/cache',
       '--fetch-timeout=30000',
       '--fetch-retries=2',

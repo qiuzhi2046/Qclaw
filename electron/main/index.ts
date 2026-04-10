@@ -15,6 +15,7 @@ import { tryNormalizeProcessCwd } from './runtime-working-directory'
 import { revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
+import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -75,6 +76,10 @@ function createWindow() {
   process.env.QCLAW_USER_DATA_DIR = app.getPath('userData')
   process.env.QCLAW_SAFE_WORK_DIR = path.join(process.env.QCLAW_USER_DATA_DIR, 'runtime')
   tryNormalizeProcessCwd()
+  void appendEnvCheckDiagnostic('main-create-window', {
+    userDataDir: process.env.QCLAW_USER_DATA_DIR,
+    safeWorkDir: process.env.QCLAW_SAFE_WORK_DIR,
+  })
 
   const workAreaSize = screen.getPrimaryDisplay().workAreaSize
   const mainWindowBounds = resolveMainWindowBounds(workAreaSize)
@@ -266,6 +271,9 @@ function createTray() {
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+  void appendEnvCheckDiagnostic('main-ipc-handlers-registered', {
+    userDataDir: app.getPath('userData'),
+  })
   createWindow()
   createTray()
 })
