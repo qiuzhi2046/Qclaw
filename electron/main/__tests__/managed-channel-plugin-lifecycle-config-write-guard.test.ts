@@ -77,6 +77,7 @@ function createDependencies() {
       code: 0,
     }),
     now: vi.fn(() => 0),
+    emitRepairProgress: sendRepairProgressMock,
   }
 }
 

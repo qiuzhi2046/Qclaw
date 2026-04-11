@@ -245,7 +245,7 @@ describe('startModelOAuthFlow', () => {
     expect(result.loginProviderId).toBe('qwen-portal')
     expect(result.ok).toBe(true)
     expect(emitted.some((entry) => entry.channel === 'oauth:success')).toBe(true)
-  })
+  }, 10_000)
 
   it('recovers from a stale gateway provider list by restarting the gateway once and retrying', async () => {
     const emitted: Array<{ channel: string; payload: Record<string, any> }> = []

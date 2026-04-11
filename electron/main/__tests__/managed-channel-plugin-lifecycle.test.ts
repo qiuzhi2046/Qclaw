@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ManagedChannelPluginStatusView } from '../../../src/shared/managed-channel-plugin-lifecycle'
 import {
@@ -7,6 +7,14 @@ import {
 } from '../../../src/shared/managed-channel-plugin-lifecycle'
 import { createManagedChannelPluginLifecycleService } from '../managed-channel-plugin-lifecycle'
 import { resetManagedOperationLocksForTests } from '../managed-operation-lock'
+
+const { applyConfigPatchGuardedMock } = vi.hoisted(() => ({
+  applyConfigPatchGuardedMock: vi.fn(),
+}))
+
+vi.mock('../openclaw-config-coordinator', () => ({
+  applyConfigPatchGuarded: applyConfigPatchGuardedMock,
+}))
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -179,6 +187,21 @@ describe('managed channel lifecycle specs', () => {
 })
 
 describe('createManagedChannelPluginLifecycleService', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    applyConfigPatchGuardedMock.mockResolvedValue({
+      ok: true,
+      blocked: false,
+      wrote: true,
+      target: 'config',
+      snapshotCreated: false,
+      snapshot: null,
+      changedJsonPaths: ['plugins.allow'],
+      ownershipSummary: null,
+      message: 'written',
+    })
+  })
+
   it('returns plugin-ready-channel-not-ready when the plugin is healthy but runtime/account proof is still missing', async () => {
     const dependencies = createDependencies()
     dependencies.getOfficialChannelStatus.mockResolvedValue(
@@ -269,17 +292,21 @@ describe('createManagedChannelPluginLifecycleService', () => {
       action: 'repair-before-setup',
     })
     expect(dependencies.installPluginNpx).not.toHaveBeenCalled()
-    expect(dependencies.writeConfig).toHaveBeenCalledWith({
-      channels: {
-        wecom: {
-          enabled: true,
-          botId: 'bot_123',
-          secret: 'secret_456',
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith({
+      beforeConfig: currentConfig,
+      afterConfig: {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: 'bot_123',
+            secret: 'secret_456',
+          },
+        },
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
         },
       },
-      plugins: {
-        allow: ['wecom-openclaw-plugin'],
-      },
+      reason: 'managed-channel-plugin-repair',
     })
     expect(dependencies.reloadGatewayForConfigChange).toHaveBeenCalledTimes(1)
   })
@@ -322,18 +349,22 @@ describe('createManagedChannelPluginLifecycleService', () => {
       scopePluginIds: ['wecom-openclaw-plugin', 'wecom'],
       quarantineOfficialManagedPlugins: true,
     })
-    expect(dependencies.writeConfig).toHaveBeenCalledWith({
-      channels: {
-        wecom: {
-          enabled: true,
-          botId: 'bot_123',
-          secret: 'secret_456',
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith({
+      beforeConfig: currentConfig,
+      afterConfig: {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: 'bot_123',
+            secret: 'secret_456',
+          },
+        },
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
+          installs: {},
         },
       },
-      plugins: {
-        allow: ['wecom-openclaw-plugin'],
-        installs: {},
-      },
+      reason: 'managed-channel-plugin-repair',
     })
   })
 
@@ -377,19 +408,23 @@ describe('createManagedChannelPluginLifecycleService', () => {
       scopePluginIds: ['openclaw-qqbot', 'qqbot', 'openclaw-qq', '@sliverp/qqbot', '@tencent-connect/qqbot', '@tencent-connect/openclaw-qq', '@tencent-connect/openclaw-qqbot'],
       quarantineOfficialManagedPlugins: true,
     })
-    expect(dependencies.writeConfig).toHaveBeenCalledWith({
-      channels: {
-        qqbot: {
-          enabled: true,
-          appId: 'bot_123',
-          clientSecret: 'secret_456',
-          allowFrom: ['*'],
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith({
+      beforeConfig: currentConfig,
+      afterConfig: {
+        channels: {
+          qqbot: {
+            enabled: true,
+            appId: 'bot_123',
+            clientSecret: 'secret_456',
+            allowFrom: ['*'],
+          },
+        },
+        plugins: {
+          allow: ['openclaw-qqbot'],
+          entries: {},
         },
       },
-      plugins: {
-        allow: ['openclaw-qqbot'],
-        entries: {},
-      },
+      reason: 'managed-channel-plugin-repair',
     })
   })
 
@@ -408,7 +443,7 @@ describe('createManagedChannelPluginLifecycleService', () => {
       action: 'reuse-installed',
     })
     expect(dependencies.installPluginNpx).not.toHaveBeenCalled()
-    expect(dependencies.writeConfig).not.toHaveBeenCalled()
+    expect(applyConfigPatchGuardedMock).not.toHaveBeenCalled()
     expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
   })
 
@@ -513,17 +548,30 @@ describe('createManagedChannelPluginLifecycleService', () => {
       action: 'installed',
     })
     expect(dependencies.installPluginNpx).toHaveBeenCalledWith('@wecom/wecom-openclaw-cli', ['wecom-openclaw-plugin'])
-    expect(dependencies.writeConfig).toHaveBeenCalledWith({
-      channels: {
-        wecom: {
-          enabled: true,
-          botId: 'bot_123',
-          secret: 'secret_456',
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith({
+      beforeConfig: {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: 'bot_123',
+            secret: 'secret_456',
+          },
+        },
+        plugins: {},
+      },
+      afterConfig: {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: 'bot_123',
+            secret: 'secret_456',
+          },
+        },
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
         },
       },
-      plugins: {
-        allow: ['wecom-openclaw-plugin'],
-      },
+      reason: 'managed-channel-plugin-repair',
     })
     expect(dependencies.reloadGatewayForConfigChange).toHaveBeenCalledTimes(1)
   })
@@ -543,7 +591,7 @@ describe('createManagedChannelPluginLifecycleService', () => {
       throw new Error(`Expected repair-failed result, received ${result.kind}`)
     }
     expect(result.error).toContain('配置')
-    expect(dependencies.writeConfig).not.toHaveBeenCalled()
+    expect(applyConfigPatchGuardedMock).not.toHaveBeenCalled()
     expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
   })
 
@@ -579,7 +627,31 @@ describe('createManagedChannelPluginLifecycleService', () => {
       action: 'reused-existing',
     })
     expect(dependencies.installPluginNpx).toHaveBeenCalledWith('@wecom/wecom-openclaw-cli', ['wecom-openclaw-plugin'])
-    expect(dependencies.writeConfig).toHaveBeenCalled()
+    expect(applyConfigPatchGuardedMock).toHaveBeenCalledWith({
+      beforeConfig: {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: 'bot_123',
+            secret: 'secret_456',
+          },
+        },
+        plugins: {},
+      },
+      afterConfig: {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: 'bot_123',
+            secret: 'secret_456',
+          },
+        },
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
+        },
+      },
+      reason: 'managed-channel-plugin-repair',
+    })
     expect(dependencies.reloadGatewayForConfigChange).toHaveBeenCalledTimes(1)
   })
 })

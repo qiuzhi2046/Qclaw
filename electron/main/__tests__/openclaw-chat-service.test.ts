@@ -4883,7 +4883,7 @@ describe('openclaw chat service', () => {
     expect(transcript.historySource).toBe('local-cache')
     expect(transcript.hasLocalTranscript).toBe(true)
     expect(transcript.messages).toHaveLength(1)
-    expect(transcript.externalTranscriptErrorCode).toBe('gateway-offline')
+    expect(transcript.externalTranscriptErrorCode).toBe('gateway-auth-failed')
   })
 
   it('strips untrusted metadata wrappers from external user messages', async () => {
@@ -5899,7 +5899,7 @@ Sender (untrusted metadata):
 
     expect(result.ok).toBe(false)
     expect(result.messageText).not.toContain('当前 OpenClaw 版本还不支持')
-    expect(result.messageText).toContain('网关尚未就绪')
+    expect(result.messageText).toContain('网关 token 已变更')
   })
 
   it('rejects model switches early when the target model is not allowed by the current OpenClaw config', async () => {

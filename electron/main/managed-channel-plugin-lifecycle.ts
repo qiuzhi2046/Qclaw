@@ -18,8 +18,7 @@ import type { CliResult, RepairIncompatibleExtensionPluginsOptions } from './cli
 import { withManagedOperationLock, ManagedOperationLockTimeoutError } from './managed-operation-lock'
 import type { RepairIncompatibleExtensionsResult } from './plugin-install-safety'
 import { reconcileManagedPluginConfig } from './managed-plugin-config-reconciler'
-import { dingtalkPreflightHook } from './dingtalk-official-channel'
-import { sendRepairProgress, type RepairProgressEvent } from './renderer-notification-bridge'
+import type { RepairProgressEvent } from './renderer-notification-bridge'
 
 interface GatewayReloadLikeResult {
   ok: boolean
@@ -53,6 +52,21 @@ export interface ManagedChannelPluginLifecycleDependencies {
     options?: { preferEnsureWhenNotRunning?: boolean }
   ) => Promise<GatewayReloadLikeResult>
   now: () => number
+  resolveHomeDir?: () => Promise<string | null>
+  runChannelPreflight?: (
+    channelId: ManagedChannelLifecycleId,
+    context: { homeDir: string; config: Record<string, any> }
+  ) => Promise<{ ok: boolean; evidence?: string[]; error?: string }>
+  emitRepairProgress?: (event: RepairProgressEvent) => void
+}
+
+type ManagedChannelPluginLifecycleResolvedDependencies = ManagedChannelPluginLifecycleDependencies & {
+  resolveHomeDir: () => Promise<string | null>
+  runChannelPreflight: (
+    channelId: ManagedChannelLifecycleId,
+    context: { homeDir: string; config: Record<string, any> }
+  ) => Promise<{ ok: boolean; evidence?: string[]; error?: string }>
+  emitRepairProgress: (event: RepairProgressEvent) => void
 }
 
 interface ManagedChannelRepairCooldownState {
@@ -356,28 +370,14 @@ async function buildGenericStatus(
 export function createManagedChannelPluginLifecycleService(
   dependencies: Partial<ManagedChannelPluginLifecycleDependencies> = {}
 ) {
-  const resolvedDependencies: ManagedChannelPluginLifecycleDependencies = {
+  const resolvedDependencies: ManagedChannelPluginLifecycleResolvedDependencies = {
     ...createUnavailableDependencies(),
+    resolveHomeDir: async () => null,
+    runChannelPreflight: async () => ({ ok: true }),
+    emitRepairProgress: () => {},
     ...dependencies,
   }
   const repairCooldowns = new Map<string, ManagedChannelRepairCooldownState>()
-
-  async function resolveHomeDir(): Promise<string | null> {
-    try {
-      const { getOpenClawPaths } = await import('./cli')
-      const paths = await getOpenClawPaths()
-      return paths.homeDir || null
-    } catch {
-      return null
-    }
-  }
-
-  function resolvePreflightHook(
-    channelId: ManagedChannelLifecycleId
-  ): ((context: { homeDir: string; config: Record<string, any> }) => Promise<{ ok: boolean; evidence?: string[]; error?: string }>) | null {
-    if (channelId === 'dingtalk') return dingtalkPreflightHook
-    return null
-  }
 
   function createCapabilities(spec: ManagedChannelPluginLifecycleSpec) {
     return createManagedChannelCapabilitySnapshot({
@@ -518,20 +518,18 @@ export function createManagedChannelPluginLifecycleService(
     }
 
     // Phase 2: unified config reconciliation via reconciler
-    const homeDir = await resolveHomeDir()
+    const homeDir = await resolvedDependencies.resolveHomeDir()
     if (homeDir) {
       await reconcileManagedPluginConfig(
         spec.channelId,
         homeDir,
         { scope: 'plugins-only', checkDisk: true, detectOrphans: true, apply: true, caller: 'preflight' }
       ).catch(() => null)
-    }
-
-    // Phase 2: channel-specific preflight hook (e.g. dingtalk doctor --fix)
-    const preflightHook = resolvePreflightHook(spec.channelId)
-    if (preflightHook && homeDir) {
       const currentConfig = await resolvedDependencies.readConfig().catch(() => null)
-      const hookResult = await preflightHook({ homeDir, config: currentConfig || {} }).catch(() => ({
+      const hookResult = await resolvedDependencies.runChannelPreflight(
+        spec.channelId,
+        { homeDir, config: currentConfig || {} }
+      ).catch(() => ({
         ok: false as const,
         error: 'preflight hook threw an exception',
       }))
@@ -635,7 +633,13 @@ export function createManagedChannelPluginLifecycleService(
   }
 
   function emitRepairProgress(channelId: string, phase: string, status: RepairProgressEvent['status'], message: string): void {
-    sendRepairProgress({ channelId, phase, status, message, timestamp: Date.now() })
+    resolvedDependencies.emitRepairProgress({
+      channelId,
+      phase,
+      status,
+      message,
+      timestamp: Date.now(),
+    })
   }
 
   async function repairViaInteractiveInstaller(
@@ -963,10 +967,14 @@ let defaultManagedChannelPluginLifecycleServicePromise:
 async function getDefaultManagedChannelPluginLifecycleService() {
   if (!defaultManagedChannelPluginLifecycleServicePromise) {
     defaultManagedChannelPluginLifecycleServicePromise = (async () => {
-      const cli = await import('./cli')
-      const gateway = await import('./gateway-lifecycle-controller')
-      const officialAdapters = await import('./official-channel-adapters')
-      const commandOutput = await import('./openclaw-command-output')
+      const [cli, gateway, officialAdapters, commandOutput, dingtalk, notifications] = await Promise.all([
+        import('./cli'),
+        import('./gateway-lifecycle-controller'),
+        import('./official-channel-adapters'),
+        import('./openclaw-command-output'),
+        import('./dingtalk-official-channel'),
+        import('./renderer-notification-bridge'),
+      ])
 
       return createManagedChannelPluginLifecycleService({
         getOfficialChannelStatus: officialAdapters.getOfficialChannelStatus,
@@ -997,11 +1005,26 @@ async function getDefaultManagedChannelPluginLifecycleService() {
         writeConfig: cli.writeConfig,
         reloadGatewayForConfigChange: gateway.reloadGatewayForConfigChange,
         now: () => Date.now(),
+        resolveHomeDir: async () => {
+          const paths = await cli.getOpenClawPaths()
+          return paths.homeDir || null
+        },
+        runChannelPreflight: async (channelId, context) => {
+          if (channelId !== 'dingtalk') {
+            return { ok: true }
+          }
+          return dingtalk.dingtalkPreflightHook(context)
+        },
+        emitRepairProgress: notifications.sendRepairProgress,
       })
     })()
   }
 
   return defaultManagedChannelPluginLifecycleServicePromise
+}
+
+export function resetManagedChannelPluginLifecycleServiceForTests(): void {
+  defaultManagedChannelPluginLifecycleServicePromise = null
 }
 
 export async function inspectManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginInspectResult> {

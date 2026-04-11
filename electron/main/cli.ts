@@ -2,11 +2,15 @@
  * OpenClaw CLI wrapper — all interactions via spawn
  */
 import type { ChildProcess } from 'node:child_process'
-import { homedir, tmpdir, userInfo } from 'os'
-import { dirname, join, resolve as resolvePath } from 'path'
-import { access, readFile, writeFile, mkdir, stat, lstat, unlink } from 'fs/promises'
-import { createWriteStream, existsSync } from 'fs'
-import https from 'https'
+const os = process.getBuiltinModule('node:os') as typeof import('node:os')
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+const fsPromises = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
+const https = process.getBuiltinModule('node:https') as typeof import('node:https')
+const { homedir, tmpdir, userInfo } = os
+const { dirname, join, resolve: resolvePath } = path
+const { access, readFile, writeFile, mkdir, stat, lstat, unlink } = fsPromises
+const { createWriteStream, existsSync } = fs
 import { atomicWriteJson } from './atomic-write'
 import { applyEnvFileUpdates } from './env-file'
 import { createOAuthOutputScanner, shouldAutoOpenBrowserForArgs } from './oauth-browser'
