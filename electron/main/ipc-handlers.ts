@@ -49,6 +49,7 @@ import {
   cancelActiveCommand,
   cancelActiveCommands,
   prepareMacGitTools,
+  buildCommandCapabilityEnv,
 } from './cli'
 import { getModelCatalog, type ModelCatalogQuery } from './openclaw-model-catalog'
 import {
@@ -118,6 +119,7 @@ import { previewOpenClawRestore, runOpenClawRestore } from './openclaw-restore-s
 import { checkOpenClawUpgrade, runOpenClawUpgrade } from './openclaw-upgrade-service'
 import { readOpenClawRuntimeReconcileStore } from './openclaw-runtime-reconcile'
 import { withManagedOperationLock } from './managed-operation-lock'
+import { probePlatformCommandCapability } from './command-capabilities'
 import { buildAppleScriptDoShellScript } from './node-runtime'
 import type { FeishuBotDiagnosticSendRequest } from '../../src/shared/feishu-diagnostics'
 import {
@@ -1133,10 +1135,18 @@ export function registerIpcHandlers() {
       }
 
       // 1. 尝试 npx（部分工具是 npm 包）
+      const capability = await probePlatformCommandCapability('npx', {
+        platform: process.platform,
+        env: buildCommandCapabilityEnv(),
+      })
+      const npxCommand = capability.available
+        ? String(capability.resolvedPath || '').trim() || 'npx'
+        : ''
       for (const bin of missingBins) {
         if (await verifyBin(bin)) continue
+        if (!npxCommand) break
         log(`尝试 npx -y ${bin} ...`)
-        await runShell('npx', ['-y', bin, '--version'], 60_000, 'env-setup')
+        await runShell(npxCommand, ['-y', bin, '--version'], 60_000, 'env-setup')
         if (await verifyBin(bin)) {
           log(`${bin} 已通过 npx 安装`)
         }

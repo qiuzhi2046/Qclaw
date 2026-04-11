@@ -20,5 +20,6 @@ describe('feishu installer session source', () => {
     )
 
     expect(source).toContain('capability.resolvedPath')
+    expect(source).toContain('buildCommandCapabilityEnv()')
   })
 })

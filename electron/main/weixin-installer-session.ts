@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { cancelActiveProcess } from './command-control'
-import { getOpenClawPaths, readConfig, runShellStreaming } from './cli'
+import { buildCommandCapabilityEnv, getOpenClawPaths, readConfig, runShellStreaming } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
@@ -254,7 +254,7 @@ export async function startWeixinInstallerSession(
 
   const capability = await probePlatformCommandCapability('npx', {
     platform: process.platform,
-    env: process.env,
+    env: buildCommandCapabilityEnv(),
   })
   if (!capability.available) {
     const errorSessionId = activeSession?.id || randomUUID()
@@ -284,6 +284,10 @@ export async function startWeixinInstallerSession(
   })
   const beforeAccountIds = await collectAccountIds().catch(() => [])
   const sessionId = randomUUID()
+  const spawnCommand = [
+    String(capability.resolvedPath || '').trim() || WEIXIN_INSTALLER_COMMAND[0],
+    ...WEIXIN_INSTALLER_COMMAND.slice(1),
+  ]
   activeSession = {
     id: sessionId,
     process: null,
@@ -292,7 +296,7 @@ export async function startWeixinInstallerSession(
     code: null,
     ok: false,
     canceled: false,
-    command: [...WEIXIN_INSTALLER_COMMAND],
+    command: [...spawnCommand],
     beforeAccountIds,
     afterAccountIds: [],
     newAccountIds: [],
@@ -317,7 +321,7 @@ export async function startWeixinInstallerSession(
         sessionId,
         type: 'started',
         phase: 'running',
-        command: [...WEIXIN_INSTALLER_COMMAND],
+        command: [...spawnCommand],
         beforeAccountIds: [...beforeAccountIds],
       })
     } else {
@@ -325,7 +329,7 @@ export async function startWeixinInstallerSession(
     }
 
     return runShellStreaming(
-      'npx',
+      spawnCommand[0],
       buildWeixinInstallerArgs(mirror.registryUrl, runtime.commandOptions),
       0,
       {

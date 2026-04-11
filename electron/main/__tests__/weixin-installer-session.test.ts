@@ -71,4 +71,14 @@ describe('weixin installer session source', () => {
     expect(source).not.toContain("const { spawn } = childProcess")
     expect(source).not.toContain("spawn(WEIXIN_INSTALLER_COMMAND[0], WEIXIN_INSTALLER_COMMAND.slice(1)")
   })
+
+  it('prefers the command capability resolved path when launching npx', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'electron', 'main', 'weixin-installer-session.ts'),
+      'utf8'
+    )
+
+    expect(source).toContain('capability.resolvedPath')
+    expect(source).toContain('buildCommandCapabilityEnv()')
+  })
 })

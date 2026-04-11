@@ -701,16 +701,18 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
   const timeout = options.timeout ?? MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs
   const commandProbeEnv = buildCommandCapabilityEnv()
   const explicitBinaryPath = String(options.binaryPath || '').trim()
+  const openClawCapability = !explicitBinaryPath
+    ? await probePlatformCommandCapability('openclaw', {
+        platform: process.platform,
+        env: commandProbeEnv,
+      })
+    : null
   if (!explicitBinaryPath) {
-    const openClawCapability = await probePlatformCommandCapability('openclaw', {
-      platform: process.platform,
-      env: commandProbeEnv,
-    })
-    if (!openClawCapability.available) {
+    if (!openClawCapability?.available) {
       return {
         ok: false,
         stdout: '',
-        stderr: openClawCapability.message || 'OpenClaw 命令行工具命令不可用',
+        stderr: openClawCapability?.message || 'OpenClaw 命令行工具命令不可用',
         code: 1,
       }
     }
@@ -755,7 +757,10 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
       expectWarning: expectCapability?.message,
       scriptAvailable: scriptCapability?.available,
       scriptWarning: scriptCapability?.message,
-      commandPath: explicitBinaryPath || undefined,
+      commandPath:
+        explicitBinaryPath
+        || String(openClawCapability?.resolvedPath || '').trim()
+        || undefined,
     })
     const mergedEnv: NodeJS.ProcessEnv = {
       ...process.env,
@@ -1142,7 +1147,7 @@ export async function runDirect(
   )
 }
 
-function buildCommandCapabilityEnv(): NodeJS.ProcessEnv {
+export function buildCommandCapabilityEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PATH: buildCliPathWithCandidates({
@@ -3401,13 +3406,24 @@ export async function channelsAdd(channel: string, token: string): Promise<CliRe
 
 /** Install plugin via npx (for official plugins like feishu) */
 export async function installPluginNpx(url: string, expectedPluginIds: string[] = []): Promise<CliResult> {
-  const capabilityError = await guardPlatformCommands(['npx'])
-  if (capabilityError) return capabilityError
+  const capability = await probePlatformCommandCapability('npx', {
+    platform: process.platform,
+    env: buildCommandCapabilityEnv(),
+  })
+  if (!capability.available) {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: capability.message || 'npx 命令不可用，无法安装插件。',
+      code: 1,
+    }
+  }
+  const npxCommand = String(capability.resolvedPath || '').trim() || 'npx'
   const runNpxInstall = async (args: string[], registryUrl?: string | null) => {
     const npmEnv = await createPluginInstallNpmEnv()
     try {
       return await runShell(
-        'npx',
+        npxCommand,
         args,
         MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs,
         {

@@ -15,7 +15,7 @@ import {
   setActiveProcess,
 } from './command-control'
 import { buildFeishuInstallerPromptHookScript } from './feishu-installer-prompt-hook'
-import { getOpenClawPaths, readConfig } from './cli'
+import { buildCommandCapabilityEnv, getOpenClawPaths, readConfig } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import {
@@ -442,7 +442,7 @@ export async function startFeishuInstallerSession(
 
   const capability = await probePlatformCommandCapability('npx', {
     platform: process.platform,
-    env: process.env,
+    env: buildCommandCapabilityEnv(),
   })
   if (!capability.available) {
     const errorSessionId = activeSession?.id || randomUUID()
