@@ -470,6 +470,10 @@ export async function startFeishuInstallerSession(
 
   try {
     const commandResolution = buildFeishuInstallerCommand()
+    const spawnCommand = [
+      String(capability.resolvedPath || '').trim() || commandResolution.command[0],
+      ...commandResolution.command.slice(1),
+    ]
     const promptHookPath = await ensureFeishuInstallerPromptHookFile()
     const promptBridgeServer = await createPromptBridgeServer(sessionToken)
     const promptBridgePort = resolvePromptBridgePort(promptBridgeServer)
@@ -477,7 +481,7 @@ export async function startFeishuInstallerSession(
     const diagEnabled = isFeishuInstallerDiagEnabled()
     const diagLogPath = diagEnabled ? await resolveFeishuInstallerDiagLogPath() : ''
 
-    const proc = spawn(commandResolution.command[0], commandResolution.command.slice(1), {
+    const proc = spawn(spawnCommand[0], spawnCommand.slice(1), {
       cwd: resolveSafeWorkingDirectory({
         env: process.env,
         platform: process.platform,
@@ -517,7 +521,7 @@ export async function startFeishuInstallerSession(
       code: null,
       ok: false,
       canceled: false,
-      command: [...commandResolution.command],
+      command: [...spawnCommand],
       npmCacheDir: isolatedNpmCache.cacheDir,
       emit,
       pendingPrompt: null,
@@ -531,12 +535,12 @@ export async function startFeishuInstallerSession(
       sessionId,
       type: 'started',
       phase: 'running',
-      command: [...commandResolution.command],
+      command: [...spawnCommand],
       pendingPrompt: null,
     })
     void appendFeishuInstallerDiag('session-started', {
       sessionId,
-      command: [...commandResolution.command],
+      command: [...spawnCommand],
       promptBridgePort,
       diagLogPath,
       npmCacheDir: isolatedNpmCache.cacheDir,
