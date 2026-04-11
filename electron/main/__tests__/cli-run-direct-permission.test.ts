@@ -4,13 +4,30 @@ const { readFile } = process.getBuiltinModule('node:fs/promises') as typeof impo
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 function extractRunDirectSource(cliSource: string): string {
-  const matched = cliSource.match(
-    /export async function runDirect\([\s\S]*?\n}\n\nfunction buildCommandCapabilityEnv\(\): NodeJS\.ProcessEnv \{/
-  )
-  if (!matched) {
+  const signature = 'export async function runDirect('
+  const start = cliSource.indexOf(signature)
+  if (start < 0) {
     throw new Error('runDirect source block not found')
   }
-  return matched[0]
+
+  const bodyStart = cliSource.indexOf('{', start)
+  if (bodyStart < 0) {
+    throw new Error('runDirect source body not found')
+  }
+
+  let depth = 0
+  for (let index = bodyStart; index < cliSource.length; index += 1) {
+    const char = cliSource[index]
+    if (char === '{') depth += 1
+    if (char === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return cliSource.slice(start, index + 1)
+      }
+    }
+  }
+
+  throw new Error('runDirect source block is unterminated')
 }
 
 describe('runDirect permission auto repair wiring', () => {
