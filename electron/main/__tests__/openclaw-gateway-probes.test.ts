@@ -15,6 +15,8 @@ vi.mock('../platforms/windows/windows-platform-ops', () => ({
 }))
 
 import { parseLsofPortOwnerOutput, probeGatewayPortOwner } from '../openclaw-gateway-probes'
+import { runCli } from '../cli'
+import { probeGatewayServiceInstalled } from '../openclaw-gateway-probes'
 import { DEFAULT_GATEWAY_PORT, isManagedGatewayPort, resolveGatewayConfiguredPort } from '../../../src/shared/gateway-runtime-state'
 
 describe('openclaw gateway probes', () => {
@@ -51,6 +53,36 @@ describe('openclaw gateway probes', () => {
     )
 
     expect(owner.kind).toBe('none')
+  })
+
+  it('treats both legacy and current service-missing messages as not installed', async () => {
+    vi.mocked(runCli)
+      .mockResolvedValueOnce({
+        ok: false,
+        stdout: '',
+        stderr: 'Gateway service not loaded.',
+        code: 1,
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        stdout: '',
+        stderr: 'Gateway service missing.',
+        code: 1,
+      })
+
+    await expect(probeGatewayServiceInstalled()).resolves.toBe(false)
+    await expect(probeGatewayServiceInstalled()).resolves.toBe(false)
+  })
+
+  it('treats restart success as service installed', async () => {
+    vi.mocked(runCli).mockResolvedValueOnce({
+      ok: true,
+      stdout: 'restarted',
+      stderr: '',
+      code: 0,
+    })
+
+    await expect(probeGatewayServiceInstalled()).resolves.toBe(true)
   })
 
   const itOnWindows = process.platform === 'win32' ? it : it.skip

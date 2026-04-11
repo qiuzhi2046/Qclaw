@@ -9,7 +9,19 @@ import {
   supportsPinnedOpenClawCorrection,
 } from '../../src/shared/openclaw-version-policy'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
-import { checkOpenClaw, gatewayHealth, gatewayStart, readConfig, runCli, runDirect, runDoctor, runShell, writeConfig } from './cli'
+import {
+  activateManagedWindowsRuntimeSnapshotFromExistingRuntime,
+  checkOpenClaw,
+  discoverOpenClawForEnvCheck,
+  gatewayHealth,
+  gatewayStart,
+  readConfig,
+  runCli,
+  runDirect,
+  runDoctor,
+  runShell,
+  writeConfig,
+} from './cli'
 import {
   isOpenClawInstallPermissionFailureResult,
   probeOpenClawInstallPath,
@@ -39,6 +51,7 @@ import {
   type OpenClawElevatedLifecycleTransactionResult,
 } from './openclaw-elevated-lifecycle-transaction'
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
@@ -81,6 +94,35 @@ function buildManualUpgradeHint(candidate: OpenClawInstallCandidate | null): str
     return '当前 OpenClaw 安装来源无法识别。为避免误改系统环境，请先确认 which openclaw 对应的实际路径，并将 PATH 切换到 2026.3.24，或移除该版本后让 Qclaw 重新安装。'
   }
   return undefined
+}
+
+function isQclawOwnedUpgradeSource(
+  source: OpenClawInstallCandidate['installSource'] | null | undefined
+): boolean {
+  return source === 'qclaw-bundled' || source === 'qclaw-managed'
+}
+
+async function activateManagedRuntimeAfterQclawOwnedUpgrade(
+  candidate: OpenClawInstallCandidate
+): Promise<boolean> {
+  if (process.platform !== 'win32') return false
+  if (!isQclawOwnedUpgradeSource(candidate.installSource)) return false
+  const selectedRuntimeSnapshot = getSelectedWindowsActiveRuntimeSnapshot()
+  const preservedExtensionsDir =
+    selectedRuntimeSnapshot &&
+    String(selectedRuntimeSnapshot.configPath || '').trim() === String(candidate.configPath || '').trim() &&
+    String(selectedRuntimeSnapshot.stateDir || '').trim() === String(candidate.stateRoot || '').trim()
+      ? selectedRuntimeSnapshot.extensionsDir
+      : null
+
+  const activatedRuntimeSnapshot =
+    await activateManagedWindowsRuntimeSnapshotFromExistingRuntime({
+      configPath: candidate.configPath,
+      stateDir: candidate.stateRoot,
+      extensionsDir: String(preservedExtensionsDir || '').trim() || path.join(candidate.stateRoot, 'extensions'),
+    }).catch(() => null)
+
+  return Boolean(activatedRuntimeSnapshot)
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -687,8 +729,25 @@ async function runSourceAwareUpgrade(
   return upgradeResult
 }
 
+async function resolveUpgradeDiscovery(): Promise<OpenClawDiscoveryResult> {
+  if (process.platform === 'win32') {
+    return await discoverOpenClawForEnvCheck().catch(() => ({
+      status: 'absent',
+      candidates: [],
+      activeCandidateId: null,
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: '',
+    }))
+  }
+
+  return discoverOpenClawInstallations()
+}
+
 export async function checkOpenClawUpgrade(): Promise<OpenClawUpgradeCheckResult> {
-  const discovery = await discoverOpenClawInstallations()
+  const discovery = await resolveUpgradeDiscovery()
   return checkOpenClawUpgradeFromDiscovery(discovery)
 }
 
@@ -765,6 +824,7 @@ async function checkOpenClawUpgradeFromDiscovery(
     version: activeCandidate.version,
     installSource: activeCandidate.installSource,
     candidatePaths: activeCandidate,
+    platform: process.platform,
   })
   const canAutoUpgrade =
     policy.enforcement === 'optional_upgrade' || policy.enforcement === 'auto_correct'
@@ -804,7 +864,11 @@ async function checkOpenClawUpgradeFromDiscovery(
 
 export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
   return withManagedOperationLock(RUNTIME_INSTALL_LOCK_KEY, async () => {
-    const check = await checkOpenClawUpgrade()
+    const discovery = await resolveUpgradeDiscovery()
+    const check =
+      process.platform === 'win32'
+        ? await checkOpenClawUpgradeForEnvCheck(discovery)
+        : await checkOpenClawUpgradeFromDiscovery(discovery)
     if (!check.activeCandidate) {
       return {
         ok: false,
@@ -892,6 +956,11 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
       }
     }
 
+    const activatedManagedRuntime = await activateManagedRuntimeAfterQclawOwnedUpgrade(check.activeCandidate)
+    const activationWarnings =
+      process.platform === 'win32' && isQclawOwnedUpgradeSource(check.activeCandidate.installSource) && !activatedManagedRuntime
+        ? ['OpenClaw 已写入 Qclaw 托管运行时，但当前会话未能自动切换到新的托管运行时。']
+        : []
     const versionCheck = await checkOpenClaw()
     const upgradedVersion = versionCheck.installed ? versionCheck.version : ''
     const upgradeSucceeded =
@@ -920,7 +989,7 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
         backupCreated,
         gatewayWasRunning,
         gatewayRestored: Boolean(gatewayWasRunning ? gatewayRestoreResult.ok : true),
-        warnings: [...check.warnings, ...backupWarnings, ...officialRepairResult.warnings],
+        warnings: [...check.warnings, ...backupWarnings, ...activationWarnings, ...officialRepairResult.warnings],
         message: `OpenClaw 已升级到 ${upgradedVersion || check.targetVersion}，但${officialRepairResult.summary}`,
         errorCode: 'upgrade_failed',
       }
@@ -935,7 +1004,7 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
       backupCreated,
       gatewayWasRunning,
       gatewayRestored: Boolean(gatewayWasRunning ? gatewayRestoreResult.ok : true),
-      warnings: [...check.warnings, ...backupWarnings, ...officialRepairResult.warnings],
+      warnings: [...check.warnings, ...backupWarnings, ...activationWarnings, ...officialRepairResult.warnings],
       message: upgradeSucceeded
         ? `OpenClaw 已升级到 ${upgradedVersion || check.targetVersion}。 ${officialRepairResult.summary}`.trim()
         : '升级命令已执行，但未能确认目标版本是否生效。',

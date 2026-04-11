@@ -102,13 +102,43 @@ function findKnownCommandCandidate(
     activeRuntimeSnapshot: runtime.activeRuntimeSnapshot,
   })
   for (const candidate of candidates) {
+    const normalizedCandidate = normalizeResolvedOpenClawBinaryPath(candidate, runtime, fileExists)
     try {
-      if (fileExists(candidate)) return candidate
+      if (normalizedCandidate && fileExists(normalizedCandidate)) return normalizedCandidate
     } catch {
       // ignore invalid candidate checks and continue probing.
     }
   }
   return null
+}
+
+function normalizeWindowsCommandCandidatePath(
+  candidatePath: string,
+  runtime: CommandLookupRuntime,
+  fileExists: (candidatePath: string) => boolean = fs.existsSync
+): string {
+  const trimmed = String(candidatePath || '').trim()
+  if (!trimmed || runtime.platform !== 'win32') return trimmed
+  if (path.extname(trimmed)) return trimmed
+
+  const cmdShimPath = `${trimmed}.cmd`
+  try {
+    if (fileExists(cmdShimPath)) {
+      return cmdShimPath
+    }
+  } catch {
+    // Ignore invalid filesystem probes and fall back to the original candidate.
+  }
+
+  return trimmed
+}
+
+function normalizeResolvedOpenClawBinaryPath(
+  candidatePath: string,
+  runtime: CommandLookupRuntime,
+  fileExists: (candidatePath: string) => boolean = fs.existsSync
+): string {
+  return normalizeWindowsCommandCandidatePath(candidatePath, runtime, fileExists).trim()
 }
 
 function resolveWindowsSnapshotBinaryPath(
@@ -117,10 +147,11 @@ function resolveWindowsSnapshotBinaryPath(
 ): string | null {
   const candidate = runtime.activeRuntimeSnapshot?.openclawPath?.trim()
   if (!candidate || runtime.platform !== 'win32') return null
+  const normalizedCandidate = normalizeResolvedOpenClawBinaryPath(candidate, runtime, fileExists)
 
   try {
-    if (fileExists(candidate)) {
-      return candidate
+    if (normalizedCandidate && fileExists(normalizedCandidate)) {
+      return normalizedCandidate
     }
   } catch {
     // Ignore invalid snapshot path checks and continue with the normal lookup flow.
@@ -190,7 +221,7 @@ export function resolveOpenClawBinaryPathFromNpmPrefix(
     npmPrefix,
     activeRuntimeSnapshot: runtime.activeRuntimeSnapshot,
   })[0]
-  if (candidate) return candidate
+  if (candidate) return normalizeResolvedOpenClawBinaryPath(candidate, runtime, options.fileExists)
   throw new Error(
     `Unable to resolve the openclaw binary from npm prefix: ${npmPrefix || '(empty)'}`
   )
@@ -437,7 +468,7 @@ export async function resolveOpenClawBinaryPath(
       runtime.commandLookupTimeoutMs,
       'openclaw command lookup'
     )
-    const trimmed = binaryPath.trim()
+    const trimmed = normalizeResolvedOpenClawBinaryPath(binaryPath, runtime, options.fileExists)
     if (!trimmed) {
       throw new Error('Unable to resolve the openclaw binary path')
     }

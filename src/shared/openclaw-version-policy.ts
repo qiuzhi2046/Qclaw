@@ -80,9 +80,13 @@ export function classifyOpenClawVersionLockState(
 
 export function supportsPinnedOpenClawCorrection(
   installSource: OpenClawInstallSource | null | undefined,
-  candidatePaths?: OpenClawInstallCandidatePaths | null
+  candidatePaths?: OpenClawInstallCandidatePaths | null,
+  platform: NodeJS.Platform = process.platform
 ): boolean {
   if (!installSource) return false
+  if (platform === 'win32' && (installSource === 'qclaw-bundled' || installSource === 'qclaw-managed')) {
+    return true
+  }
   if (
     installSource === 'npm-global' ||
     installSource === 'nvm' ||
@@ -119,6 +123,7 @@ export function resolveOpenClawVersionEnforcement(input: {
   version: string | null | undefined
   installSource: OpenClawInstallSource | null | undefined
   candidatePaths?: OpenClawInstallCandidatePaths | null
+  platform?: NodeJS.Platform
 }): OpenClawVersionEnforcementResult {
   const normalizedVersion = normalizeOpenClawPolicyVersion(input.version)
   if (!isStrictOpenClawPolicyVersion(normalizedVersion)) {
@@ -133,7 +138,11 @@ export function resolveOpenClawVersionEnforcement(input: {
     }
   }
   const policyState = classifyOpenClawVersionLockState(normalizedVersion)
-  const canCorrect = supportsPinnedOpenClawCorrection(input.installSource, input.candidatePaths)
+  const canCorrect = supportsPinnedOpenClawCorrection(
+    input.installSource,
+    input.candidatePaths,
+    input.platform || process.platform
+  )
 
   switch (policyState) {
     case 'supported_target':

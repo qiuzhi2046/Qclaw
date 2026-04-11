@@ -1,3 +1,4 @@
+const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
@@ -54,8 +55,11 @@ export interface WindowsPrivateNodeRuntimePaths {
 
 export interface WindowsPrivateOpenClawRuntimePaths {
   hostPackageRoot: string
+  installStagingDir: string
   npmPrefix: string
   openclawExecutable: string
+  packageJsonPath: string
+  runtimeMarkerPath: string
 }
 
 export interface ResolveWindowsPrivateNodeRuntimePathsOptions {
@@ -69,6 +73,39 @@ export interface SelectAuthoritativeWindowsActiveRuntimeSnapshotDependencies {
   env?: NodeJS.ProcessEnv
   isSnapshotComplete?: (snapshot: WindowsActiveRuntimeSnapshot) => Promise<boolean>
 }
+
+export interface WindowsManagedOpenClawRuntimeMarker {
+  generatedBy: 'qclaw'
+  hostPackageRoot: string
+  nodeVersion: string
+  schema: 'qclaw-managed-openclaw-runtime'
+}
+
+export interface PrepareWindowsManagedOpenClawRuntimeCandidateOptions {
+  configPath: string
+  env?: NodeJS.ProcessEnv
+  extensionsDir?: string
+  stateDir: string
+  userDataDir?: string
+}
+
+export interface PrepareWindowsManagedOpenClawRuntimeCandidateResult {
+  errors: string[]
+  marker: WindowsManagedOpenClawRuntimeMarker | null
+  missingPaths: string[]
+  ok: boolean
+  paths: WindowsPrivateOpenClawRuntimePaths
+  snapshot: WindowsActiveRuntimeSnapshot | null
+  version: string | null
+}
+
+export interface PrepareWindowsManagedOpenClawRuntimeCandidateDependencies {
+  access?: (targetPath: string) => Promise<void>
+  probeVersion?: (binaryPath: string) => Promise<string>
+  readTextFile?: (targetPath: string) => Promise<string>
+}
+
+export const WINDOWS_MANAGED_OPENCLAW_RUNTIME_MARKER_FILENAME = '.qclaw-managed-runtime.json'
 
 function normalizeComparableWindowsPath(value: string): string {
   return trimWindowsPath(value).toLowerCase()
@@ -151,11 +188,15 @@ export function resolveWindowsPrivateOpenClawRuntimePaths(
 ): WindowsPrivateOpenClawRuntimePaths {
   const nodeRuntimePaths = resolveWindowsPrivateNodeRuntimePaths(options)
   const npmPrefix = nodeRuntimePaths.nodeVersionDir
+  const hostPackageRoot = path.win32.join(npmPrefix, 'node_modules', 'openclaw')
 
   return {
-    hostPackageRoot: path.win32.join(npmPrefix, 'node_modules', 'openclaw'),
+    hostPackageRoot,
+    installStagingDir: path.win32.join(nodeRuntimePaths.runtimeRoot, 'openclaw', '.staging', path.win32.basename(npmPrefix)),
     npmPrefix,
     openclawExecutable: path.win32.join(npmPrefix, 'openclaw.cmd'),
+    packageJsonPath: path.win32.join(hostPackageRoot, 'package.json'),
+    runtimeMarkerPath: path.win32.join(hostPackageRoot, WINDOWS_MANAGED_OPENCLAW_RUNTIME_MARKER_FILENAME),
   }
 }
 
@@ -174,6 +215,158 @@ export function resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable(
   }
 
   return resolveWindowsPrivateOpenClawRuntimePaths(options)
+}
+
+export function buildWindowsManagedOpenClawRuntimeMarker(
+  options: ResolveWindowsPrivateNodeRuntimePathsOptions = {}
+): WindowsManagedOpenClawRuntimeMarker {
+  const nodeRuntimePaths = resolveWindowsPrivateNodeRuntimePaths(options)
+  const openClawRuntimePaths = resolveWindowsPrivateOpenClawRuntimePaths(options)
+  return {
+    generatedBy: 'qclaw',
+    hostPackageRoot: openClawRuntimePaths.hostPackageRoot,
+    nodeVersion: path.win32.basename(nodeRuntimePaths.nodeVersionDir),
+    schema: 'qclaw-managed-openclaw-runtime',
+  }
+}
+
+function normalizeOpenClawVersionProbe(value: string | null | undefined): string | null {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const matched = raw.match(/\d{4}\.\d+\.\d+/)
+  if (matched?.[0]) return matched[0]
+  return raw.replace(/^v/i, '').split('-')[0].trim() || null
+}
+
+function isManagedOpenClawRuntimeMarker(value: unknown): value is WindowsManagedOpenClawRuntimeMarker {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<WindowsManagedOpenClawRuntimeMarker>
+  return (
+    candidate.generatedBy === 'qclaw' &&
+    candidate.schema === 'qclaw-managed-openclaw-runtime' &&
+    Boolean(trim(candidate.hostPackageRoot || '')) &&
+    Boolean(trim(candidate.nodeVersion || ''))
+  )
+}
+
+async function pathExists(
+  targetPath: string,
+  accessFn: (targetPath: string) => Promise<void>
+): Promise<boolean> {
+  try {
+    await accessFn(targetPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function prepareWindowsManagedOpenClawRuntimeCandidate(
+  options: PrepareWindowsManagedOpenClawRuntimeCandidateOptions,
+  dependencies: PrepareWindowsManagedOpenClawRuntimeCandidateDependencies = {}
+): Promise<PrepareWindowsManagedOpenClawRuntimeCandidateResult> {
+  const env = options.env || process.env
+  const accessFn =
+    dependencies.access ||
+    (async (targetPath: string) => {
+      await fs.promises.access(targetPath)
+    })
+  const readTextFile =
+    dependencies.readTextFile ||
+    (async (targetPath: string) => fs.promises.readFile(targetPath, 'utf8'))
+  const probeVersion = dependencies.probeVersion || (async () => '')
+  const nodeRuntimePaths = resolveWindowsPrivateNodeRuntimePaths({ env })
+  const paths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+  const requiredPaths = [
+    nodeRuntimePaths.nodeExecutable,
+    paths.openclawExecutable,
+    paths.hostPackageRoot,
+    paths.packageJsonPath,
+    paths.runtimeMarkerPath,
+  ]
+  const missingPaths: string[] = []
+
+  for (const requiredPath of requiredPaths) {
+    if (!(await pathExists(requiredPath, accessFn))) {
+      missingPaths.push(requiredPath)
+    }
+  }
+
+  if (missingPaths.length > 0) {
+    return {
+      errors: [],
+      marker: null,
+      missingPaths,
+      ok: false,
+      paths,
+      snapshot: null,
+      version: null,
+    }
+  }
+
+  const errors: string[] = []
+  let marker: WindowsManagedOpenClawRuntimeMarker | null = null
+
+  try {
+    const parsedMarker = JSON.parse(await readTextFile(paths.runtimeMarkerPath)) as unknown
+    if (!isManagedOpenClawRuntimeMarker(parsedMarker)) {
+      errors.push('Invalid Qclaw managed OpenClaw runtime marker.')
+    } else {
+      marker = parsedMarker
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
+
+  try {
+    const packageJson = JSON.parse(await readTextFile(paths.packageJsonPath)) as { name?: string }
+    if (String(packageJson.name || '').trim() !== 'openclaw') {
+      errors.push('Managed OpenClaw runtime package.json is not the openclaw package.')
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
+
+  const version = normalizeOpenClawVersionProbe(await probeVersion(paths.openclawExecutable).catch(() => ''))
+  if (!version) {
+    errors.push('Managed OpenClaw runtime version probe failed.')
+  }
+
+  if (errors.length > 0 || !marker || !version) {
+    return {
+      errors,
+      marker,
+      missingPaths: [],
+      ok: false,
+      paths,
+      snapshot: null,
+      version,
+    }
+  }
+
+  const stateDir = trim(options.stateDir)
+  const configPath = trim(options.configPath)
+  const extensionsDir = trim(options.extensionsDir || path.win32.join(stateDir, 'extensions'))
+  const userDataDir = trim(options.userDataDir || env.QCLAW_USER_DATA_DIR || '')
+
+  return {
+    errors: [],
+    marker,
+    missingPaths: [],
+    ok: true,
+    paths,
+    snapshot: buildWindowsActiveRuntimeSnapshot({
+      configPath,
+      extensionsDir,
+      hostPackageRoot: paths.hostPackageRoot,
+      nodeExecutable: nodeRuntimePaths.nodeExecutable,
+      npmPrefix: paths.npmPrefix,
+      openclawExecutable: paths.openclawExecutable,
+      stateDir,
+      userDataDir: userDataDir || undefined,
+    }),
+    version,
+  }
 }
 
 export function buildWindowsActiveRuntimeSnapshot(

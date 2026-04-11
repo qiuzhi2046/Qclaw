@@ -154,12 +154,46 @@ describe('checkOpenClaw selected runtime completeness gate', () => {
     expect(selectedNodeIndex).toBeLessThan(installationDiscoveryIndex)
   })
 
+  it('only switches Windows runtime selection to a prepared managed candidate when the discovered install is blocking', async () => {
+    const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
+    const discoverSource = extractDiscoverWindowsActiveRuntimeSnapshotSource(cliSource)
+
+    expect(cliSource).toContain('function shouldSwitchWindowsRuntimeToManagedCandidate(')
+    expect(cliSource).toContain('prepareManagedWindowsRuntimeSnapshotFromExistingRuntime(')
+    expect(cliSource).toContain('resolveOpenClawVersionEnforcement({')
+    expect(discoverSource).toContain('const activeDiscoveryCandidate = resolveDiscoveryActiveCandidate(discovery)')
+    expect(discoverSource).toContain('const shouldSwitchToManaged = shouldSwitchWindowsRuntimeToManagedCandidate(activeDiscoveryCandidate)')
+    expect(discoverSource).toContain('if (!shouldSwitchToManaged) {')
+    expect(discoverSource).toContain('const preparedManagedRuntimeSnapshot = await prepareManagedWindowsRuntimeSnapshotFromExistingRuntime({')
+    expect(discoverSource).toContain('return preparedManagedRuntimeSnapshot')
+    expect(discoverSource.indexOf('if (!shouldSwitchToManaged) {')).toBeLessThan(
+      discoverSource.indexOf('const preparedManagedRuntimeSnapshot = await prepareManagedWindowsRuntimeSnapshotFromExistingRuntime({')
+    )
+  })
+
+  it('records managed runtime preparation and final selection diagnostics for env-check troubleshooting', async () => {
+    const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
+    const discoverSource = extractDiscoverWindowsActiveRuntimeSnapshotSource(cliSource)
+
+    expect(cliSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-preparing-managed-runtime'")
+    expect(cliSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-verifying-managed-runtime'")
+    expect(discoverSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-selection-decision'")
+    expect(discoverSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-selection-result'")
+    expect(discoverSource).toContain('activeCandidateSource: activeDiscoveryCandidate?.installSource || null')
+    expect(discoverSource).toContain("reason: 'managed-runtime-prepare-failed'")
+  })
+
   it('keeps env-check discovery on the selected runtime instead of whole-machine discovery on Windows', async () => {
     const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
     const discoverSource = extractDiscoverOpenClawForEnvCheckSource(cliSource)
 
     expect(discoverSource).toContain('resolveSelectedWindowsOpenClawRuntimeSnapshot()')
+    expect(discoverSource).toContain('const commandProbeEnv = buildCommandCapabilityEnv(selectedRuntimeSnapshot || null)')
+    expect(discoverSource).toContain('resolveOpenClawBinaryPath({')
+    expect(discoverSource).toContain('env: commandProbeEnv')
     expect(discoverSource).toContain('discoverOpenClawInstallationsFromKnownPaths({')
+    expect(discoverSource).toContain('activeBinaryPath: resolvedOpenClawPath || null')
+    expect(discoverSource).toContain('knownPaths: [selectedOpenClawPath, resolvedOpenClawPath]')
     expect(discoverSource).toContain("if (process.platform !== 'win32')")
     expect(discoverSource).toContain('return discoverOpenClawInstallations()')
   })
@@ -329,7 +363,8 @@ describe('checkOpenClaw selected runtime completeness gate', () => {
     const pairingApproveSource = extractPairingApproveSource(cliSource)
 
     expect(pairingApproveSource).toContain("timeoutMs: null")
-    expect(pairingApproveSource).toContain("],\n      undefined,\n      'config-write'")
+    expect(pairingApproveSource).toContain('undefined,')
+    expect(pairingApproveSource).toContain("'config-write'")
     expect(pairingApproveSource).not.toContain('MAIN_RUNTIME_POLICY.cli.pairingApproveTimeoutMs')
   })
 })

@@ -374,6 +374,29 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
     })
   })
 
+  it('requests a full service reinstall when neither the scheduled task nor the startup launcher exists', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      stdout: '',
+      stderr: 'ERROR: The system cannot find the file specified.',
+      code: 1,
+    })
+
+    await expect(
+      inspectWindowsGatewayLauncherIntegrity({
+        appDataDir: 'C:\\Users\\demo\\AppData\\Roaming',
+        homeDir: 'C:\\Users\\demo\\.openclaw',
+        runShell,
+        fileExists: () => false,
+      })
+    ).resolves.toEqual({
+      status: 'service-missing',
+      taskName: null,
+      launcherPath: null,
+      shouldReinstallService: true,
+    })
+  })
+
   it('treats the QClaw hidden startup launcher as healthy and still resolves gateway.cmd as the launcher path', async () => {
     const runShell = vi.fn().mockResolvedValueOnce({
       ok: false,

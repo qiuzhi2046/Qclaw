@@ -407,9 +407,12 @@ export async function runDashboardEntryBootstrapFlow(
   let modelStatus = upstreamModelStatus
   if (!modelStatus) {
     const modelStatusResult = await api.getModelStatus().catch(() => null)
-    modelStatus = modelStatusResult?.ok
-      ? ((modelStatusResult.data as Record<string, any>) || null)
-      : null
+    const resolvedModelStatusResult = modelStatusResult as { ok?: boolean; data?: unknown } | null
+    if (resolvedModelStatusResult?.ok) {
+      modelStatus = ((resolvedModelStatusResult!.data as Record<string, any>) || null)
+    } else {
+      modelStatus = null
+    }
   }
   if (!modelStatus) {
     softWarnings.push('模型状态暂时不可用，稍后可在控制面板中刷新。')

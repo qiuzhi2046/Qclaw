@@ -5,14 +5,75 @@ import type {
   QClawUpdateOpenDownloadResult,
   QClawUpdateStatus,
 } from '../../src/shared/openclaw-phase4'
-import { app, shell } from 'electron'
 import { createRequire } from 'node:module'
+import { runQClawUpdateInstall } from './qclaw-update-install-lifecycle'
+import {
+  type BuilderPublishConfig,
+  type QClawUpdateConfigurationState,
+  extractPublishUrlFromAppUpdateYaml,
+  looksPlaceholderPublishUrl,
+  resolveConfigurationStateFromBuilderConfig,
+  resolveConfigurationStateFromPackagedYaml,
+} from './qclaw-update-config'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { access, readFile } = fs.promises
 const require = createRequire(import.meta.url)
-const { autoUpdater } = require('electron-updater') as typeof import('electron-updater')
+
+interface ElectronAppLike {
+  getAppPath: () => string
+  getVersion: () => string
+  isPackaged: boolean
+}
+
+interface ElectronShellLike {
+  openExternal: (url: string) => Promise<void> | void
+}
+
+interface AutoUpdaterLike {
+  autoDownload: boolean
+  autoInstallOnAppQuit: boolean
+  autoRunAppAfterInstall?: boolean
+  checkForUpdates: () => Promise<unknown>
+  downloadUpdate: () => Promise<unknown>
+  getFeedURL: () => string
+  on: (event: string, listener: (...args: any[]) => void) => void
+  quitAndInstall: (isSilent?: boolean, isForceRunAfter?: boolean) => void
+}
+
+let electronAppCache: ElectronAppLike | null = null
+let electronShellCache: ElectronShellLike | null = null
+let autoUpdaterCache: AutoUpdaterLike | null = null
+
+function getElectronApp(): ElectronAppLike {
+  if (electronAppCache) return electronAppCache
+  const electronModule = require('electron') as { app: ElectronAppLike }
+  electronAppCache = electronModule.app
+  return electronAppCache
+}
+
+function getElectronShell(): ElectronShellLike {
+  if (electronShellCache) return electronShellCache
+  const electronModule = require('electron') as { shell: ElectronShellLike }
+  electronShellCache = electronModule.shell
+  return electronShellCache
+}
+
+function getAutoUpdater(): AutoUpdaterLike {
+  if (autoUpdaterCache) return autoUpdaterCache
+  const electronUpdaterModule = require('electron-updater') as { autoUpdater: AutoUpdaterLike }
+  autoUpdaterCache = electronUpdaterModule.autoUpdater
+  return autoUpdaterCache
+}
+
+function resolveCurrentAppVersion(): string {
+  try {
+    return String(getElectronApp().getVersion() || '').trim()
+  } catch {
+    return ''
+  }
+}
 
 let listenersBound = false
 
@@ -20,7 +81,7 @@ let currentStatus: QClawUpdateStatus = {
   ok: true,
   supported: process.platform === 'darwin' || process.platform === 'win32',
   configured: false,
-  currentVersion: app.getVersion(),
+  currentVersion: resolveCurrentAppVersion(),
   availableVersion: null,
   status: 'disabled',
   progressPercent: null,
@@ -41,38 +102,10 @@ function normalizeText(value: unknown): string {
   return String(value || '').trim()
 }
 
-function looksPlaceholderPublishUrl(value: string): boolean {
-  const normalized = normalizeText(value)
-  return (
-    !normalized ||
-    /example\.invalid/i.test(normalized) ||
-    /example\.com/i.test(normalized) ||
-    /electron-vite-react/i.test(normalized) ||
-    /releases\/download\/v0\.9\.9/i.test(normalized)
-  )
-}
-
-function unquoteYamlScalar(value: string): string {
-  const normalized = normalizeText(value)
-  if (!normalized) return ''
-  if (
-    (normalized.startsWith('"') && normalized.endsWith('"')) ||
-    (normalized.startsWith("'") && normalized.endsWith("'"))
-  ) {
-    return normalized.slice(1, -1).trim()
-  }
-  return normalized
-}
-
-function extractPublishUrlFromAppUpdateYaml(raw: string): string | undefined {
-  const match = raw.match(/^\s*url:\s*(.+?)\s*$/m)
-  const value = match?.[1]
-  return value ? unquoteYamlScalar(value) : undefined
-}
 
 function resolveFeedUrl(): string | undefined {
   try {
-    const feedUrl = normalizeText(autoUpdater.getFeedURL())
+    const feedUrl = normalizeText(getAutoUpdater().getFeedURL())
     return feedUrl || undefined
   } catch {
     return undefined
@@ -206,7 +239,7 @@ function explainUpdaterError(code: QClawUpdateErrorCode, fallback: string): stri
 function cloneStatus(): QClawUpdateStatus {
   return {
     ...currentStatus,
-    currentVersion: app.getVersion(),
+    currentVersion: resolveCurrentAppVersion(),
     feedUrl: currentStatus.feedUrl || resolveFeedUrl(),
   }
 }
@@ -216,17 +249,13 @@ function setStatus(patch: Partial<QClawUpdateStatus>): QClawUpdateStatus {
   currentStatus = {
     ...currentStatus,
     ...patch,
-    currentVersion: app.getVersion(),
+    currentVersion: resolveCurrentAppVersion(),
     feedUrl: nextFeedUrl,
   }
   return cloneStatus()
 }
 
-async function resolveUpdateConfigurationState(): Promise<{
-  supported: boolean
-  configured: boolean
-  message: string
-}> {
+async function resolveUpdateConfigurationState(): Promise<QClawUpdateConfigurationState> {
   const supported = process.platform === 'darwin' || process.platform === 'win32'
   if (!supported) {
     return {
@@ -236,25 +265,13 @@ async function resolveUpdateConfigurationState(): Promise<{
     }
   }
 
+  const app = getElectronApp()
   if (app.isPackaged) {
     const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml')
     if (await pathExists(updateConfigPath)) {
       try {
         const rawConfig = await readFile(updateConfigPath, 'utf8')
-        const publishUrl = extractPublishUrlFromAppUpdateYaml(rawConfig)
-        if (looksPlaceholderPublishUrl(publishUrl || '')) {
-          return {
-            supported: true,
-            configured: false,
-            message: '当前打包产物仍使用占位更新源，Qclaw 自动更新尚未启用。',
-          }
-        }
-
-        return {
-          supported: true,
-          configured: true,
-          message: 'Qclaw 自动更新已就绪。',
-        }
+        return resolveConfigurationStateFromPackagedYaml(rawConfig)
       } catch {
         return {
           supported: true,
@@ -283,25 +300,8 @@ async function resolveUpdateConfigurationState(): Promise<{
 
   try {
     const raw = await readFile(builderConfigPath, 'utf8')
-    const config = JSON.parse(raw) as {
-      appId?: string
-      publish?: { url?: string } | string
-    }
-    const publishUrl =
-      typeof config.publish === 'string'
-        ? config.publish
-        : normalizeText(config.publish?.url)
-    const looksPlaceholder =
-      normalizeText(config.appId) === 'YourAppID' ||
-      looksPlaceholderPublishUrl(publishUrl)
-
-    return {
-      supported: true,
-      configured: false,
-      message: looksPlaceholder
-        ? '当前仍是占位发布配置，Qclaw 自动更新尚未启用。'
-        : '当前为开发环境，Qclaw 自动更新需在打包产物中验证。',
-    }
+    const config = JSON.parse(raw) as BuilderPublishConfig
+    return resolveConfigurationStateFromBuilderConfig(config)
   } catch {
     return {
       supported: true,
@@ -315,8 +315,12 @@ function bindUpdaterEvents() {
   if (listenersBound) return
   listenersBound = true
 
+  const autoUpdater = getAutoUpdater()
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
+  if (process.platform === 'win32') {
+    autoUpdater.autoRunAppAfterInstall = true
+  }
 
   autoUpdater.on('checking-for-update', () => {
     setStatus({
@@ -414,7 +418,7 @@ async function ensureUpdaterAvailability(): Promise<QClawUpdateStatus> {
     ok: true,
     supported: state.supported,
     configured: state.configured,
-    currentVersion: app.getVersion(),
+    currentVersion: resolveCurrentAppVersion(),
     feedUrl: currentStatus.feedUrl || resolveFeedUrl(),
     status:
       !state.supported || !state.configured
@@ -444,7 +448,7 @@ export async function checkQClawUpdate(): Promise<QClawUpdateStatus> {
   }
 
   try {
-    await autoUpdater.checkForUpdates()
+    await getAutoUpdater().checkForUpdates()
     return cloneStatus()
   } catch (error) {
     const errorCode = classifyUpdaterError(error)
@@ -503,7 +507,7 @@ export async function downloadQClawUpdate(): Promise<QClawUpdateActionResult> {
       errorCode: undefined,
       message: 'Qclaw Lite 更新包下载中...',
     })
-    await autoUpdater.downloadUpdate()
+    await getAutoUpdater().downloadUpdate()
     return {
       ok: true,
       status: cloneStatus(),
@@ -560,7 +564,7 @@ export async function installQClawUpdate(): Promise<QClawUpdateActionResult> {
   })
 
   setImmediate(() => {
-    autoUpdater.quitAndInstall()
+    runQClawUpdateInstall(getAutoUpdater(), process.platform)
   })
 
   return {
@@ -617,7 +621,7 @@ export async function openQClawUpdateDownloadUrl(): Promise<QClawUpdateOpenDownl
   }
 
   try {
-    await shell.openExternal(manualDownloadUrl)
+    await getElectronShell().openExternal(manualDownloadUrl)
     return {
       ok: true,
       status,

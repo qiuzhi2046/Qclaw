@@ -78,13 +78,14 @@ import {
   normalizePairingAllowFromList,
   resolvePairingConfigTarget,
 } from './pairing-allowfrom-config'
-import type { OpenClawDiscoveryResult } from '../../src/shared/openclaw-phase1'
+import type { OpenClawDiscoveryResult, OpenClawInstallCandidate } from '../../src/shared/openclaw-phase1'
 import { buildCliPathWithCandidates, listExecutablePathCandidates } from './runtime-path-discovery'
 import { resolveBoundOpenClawCommand } from './openclaw-runtime-invocation'
 import { ensureWindowsPrivateNodeRuntime } from './platforms/windows/windows-private-node-runtime'
 import {
   buildWindowsActiveRuntimeSnapshot,
   buildWindowsSelectedRuntimeSnapshotFields,
+  prepareWindowsManagedOpenClawRuntimeCandidate,
   resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable,
   reuseWindowsSelectedRuntimeSnapshotFields,
   resolveWindowsPrivateOpenClawRuntimePaths,
@@ -142,7 +143,7 @@ import { buildOnboardCommand, collectOnboardValueFlags } from './openclaw-comman
 import { parseJsonFromCommandResult } from './openclaw-command-output'
 import type { RepairStalePluginConfigFromCommandResult } from './openclaw-config-warnings'
 import type { OpenClawPaths } from './openclaw-paths'
-import { resolveOpenClawPaths } from './openclaw-paths'
+import { resolveOpenClawPaths, resolveOpenClawPathsFromStateRoot } from './openclaw-paths'
 import { rerunReadOnlyCommandAfterStalePluginRepair } from './openclaw-readonly-stale-plugin-repair'
 import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
 import { resetRuntimeOpenClawPathsCache, resolveRuntimeOpenClawPaths } from './openclaw-runtime-paths'
@@ -171,7 +172,7 @@ import {
 import { sanitizeManagedInstallerEnv } from './managed-installer-env'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 import { pollWithBackoff } from '../../src/shared/polling'
-import { PINNED_OPENCLAW_VERSION } from '../../src/shared/openclaw-version-policy'
+import { PINNED_OPENCLAW_VERSION, resolveOpenClawVersionEnforcement } from '../../src/shared/openclaw-version-policy'
 import { runPluginRepairPreflight } from './plugin-repair-preflight'
 import {
   classifyOnboardFailure,
@@ -359,6 +360,101 @@ async function canAccessWindowsActiveRuntimeSnapshot(
   return nodeExists && openclawExists && hostPackageRootExists
 }
 
+function resolveDiscoveryActiveCandidate(
+  discovery: OpenClawDiscoveryResult | null | undefined
+): OpenClawInstallCandidate | null {
+  const candidates = Array.isArray(discovery?.candidates) ? discovery.candidates : []
+  const activeCandidateId = String(discovery?.activeCandidateId || '').trim()
+  return (
+    candidates.find((candidate) => candidate.candidateId === activeCandidateId)
+    || candidates.find((candidate) => candidate.isPathActive)
+    || candidates[0]
+    || null
+  )
+}
+
+function shouldSwitchWindowsRuntimeToManagedCandidate(
+  candidate: OpenClawInstallCandidate | null | undefined
+): boolean {
+  const activeCandidate = candidate || null
+  if (!activeCandidate) return false
+  if (activeCandidate.installSource === 'qclaw-managed') return false
+
+  const policy = resolveOpenClawVersionEnforcement({
+    version: activeCandidate.version,
+    installSource: activeCandidate.installSource,
+    candidatePaths: activeCandidate,
+    platform: 'win32',
+  })
+  return policy.blocksContinue
+}
+
+async function prepareManagedWindowsRuntimeSnapshotFromExistingRuntime(input: {
+  configPath?: string | null
+  stateDir?: string | null
+  extensionsDir?: string | null
+}): Promise<WindowsActiveRuntimeSnapshot | null> {
+  const stateDir = String(input.stateDir || '').trim()
+  const configPath = String(input.configPath || '').trim()
+  const extensionsDir = String(input.extensionsDir || '').trim() || join(stateDir, 'extensions')
+  if (!stateDir || !configPath) {
+    await appendEnvCheckDiagnostic('main-windows-runtime-preparing-managed-runtime-skipped', {
+      reason: 'missing-runtime-paths',
+      hasStateDir: Boolean(stateDir),
+      hasConfigPath: Boolean(configPath),
+    }).catch(() => undefined)
+    return null
+  }
+
+  await appendEnvCheckDiagnostic('main-windows-runtime-preparing-managed-runtime', {
+    stateDir,
+    configPath,
+    extensionsDir,
+  }).catch(() => undefined)
+
+  try {
+    const preparedManagedRuntime = await prepareWindowsManagedOpenClawRuntimeCandidate({
+      configPath,
+      env: process.env,
+      extensionsDir,
+      stateDir,
+      userDataDir: String(process.env.QCLAW_USER_DATA_DIR || '').trim() || undefined,
+    })
+    const preparedSnapshot = preparedManagedRuntime.snapshot
+
+    await appendEnvCheckDiagnostic('main-windows-runtime-verifying-managed-runtime', {
+      ok: preparedManagedRuntime.ok,
+      reason: preparedManagedRuntime.ok ? 'candidate-ready' : 'candidate-incomplete',
+      stateDir,
+      configPath,
+      openclawPath: preparedManagedRuntime.ok ? preparedSnapshot?.openclawPath || null : null,
+      nodePath: preparedManagedRuntime.ok ? preparedSnapshot?.nodePath || null : null,
+    }).catch(() => undefined)
+
+    return preparedManagedRuntime.ok ? preparedSnapshot : null
+  } catch (error) {
+    await appendEnvCheckDiagnostic('main-windows-runtime-verifying-managed-runtime', {
+      ok: false,
+      reason: 'prepare-threw',
+      stateDir,
+      configPath,
+      error: error instanceof Error ? error.message : String(error || 'unknown'),
+    }).catch(() => undefined)
+    return null
+  }
+}
+
+export async function activateManagedWindowsRuntimeSnapshotFromExistingRuntime(input: {
+  configPath?: string | null
+  stateDir?: string | null
+  extensionsDir?: string | null
+}): Promise<WindowsActiveRuntimeSnapshot | null> {
+  if (process.platform !== 'win32') return null
+  const preparedManagedRuntimeSnapshot = await prepareManagedWindowsRuntimeSnapshotFromExistingRuntime(input)
+  if (!preparedManagedRuntimeSnapshot) return null
+  return commitSelectedWindowsActiveRuntimeSnapshot(preparedManagedRuntimeSnapshot)
+}
+
 async function discoverWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRuntimeSnapshot | null> {
   if (process.platform !== 'win32') return null
 
@@ -391,7 +487,48 @@ async function discoverWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRunt
     env: process.env,
     isSnapshotComplete: canAccessWindowsActiveRuntimeSnapshot,
   })
+  const activeDiscoveryCandidate = resolveDiscoveryActiveCandidate(discovery)
+  const shouldSwitchToManaged = shouldSwitchWindowsRuntimeToManagedCandidate(activeDiscoveryCandidate)
+  await appendEnvCheckDiagnostic('main-windows-runtime-selection-decision', {
+    hasSelectedCandidate: Boolean(selectedCandidate),
+    activeCandidateId: activeDiscoveryCandidate?.candidateId || null,
+    activeCandidateSource: activeDiscoveryCandidate?.installSource || null,
+    activeCandidateVersion: activeDiscoveryCandidate?.version || null,
+    shouldSwitchToManaged,
+  }).catch(() => undefined)
   if (selectedCandidate) {
+    if (!shouldSwitchToManaged) {
+      await appendEnvCheckDiagnostic('main-windows-runtime-selection-result', {
+        decision: 'keep-selected',
+        reason: 'active-candidate-not-blocking',
+        selectedNodePath: selectedCandidate.nodePath,
+        selectedOpenClawPath: selectedCandidate.openclawPath,
+      }).catch(() => undefined)
+      return selectedCandidate
+    }
+
+    const preparedManagedRuntimeSnapshot = await prepareManagedWindowsRuntimeSnapshotFromExistingRuntime({
+      configPath: activeDiscoveryCandidate?.configPath || selectedCandidate.configPath,
+      stateDir: activeDiscoveryCandidate?.stateRoot || selectedCandidate.stateDir,
+      extensionsDir: selectedCandidate.extensionsDir,
+    })
+    if (preparedManagedRuntimeSnapshot) {
+      await appendEnvCheckDiagnostic('main-windows-runtime-selection-result', {
+        decision: 'use-prepared-managed',
+        reason: 'blocking-active-candidate',
+        previousOpenClawPath: selectedCandidate.openclawPath,
+        selectedOpenClawPath: preparedManagedRuntimeSnapshot.openclawPath,
+        selectedNodePath: preparedManagedRuntimeSnapshot.nodePath,
+      }).catch(() => undefined)
+      return preparedManagedRuntimeSnapshot
+    }
+
+    await appendEnvCheckDiagnostic('main-windows-runtime-selection-result', {
+      decision: 'keep-selected',
+      reason: 'managed-runtime-prepare-failed',
+      selectedNodePath: selectedCandidate.nodePath,
+      selectedOpenClawPath: selectedCandidate.openclawPath,
+    }).catch(() => undefined)
     return selectedCandidate
   }
 
@@ -413,6 +550,32 @@ async function discoverWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRunt
   }).catch(() => null)
   if (!openClawPaths?.homeDir || !openClawPaths.configFile) return null
 
+  if (shouldSwitchToManaged) {
+    const preparedManagedRuntimeSnapshot = await prepareManagedWindowsRuntimeSnapshotFromExistingRuntime({
+      configPath: activeDiscoveryCandidate?.configPath || openClawPaths.configFile,
+      stateDir: activeDiscoveryCandidate?.stateRoot || openClawPaths.homeDir,
+      extensionsDir: join(activeDiscoveryCandidate?.stateRoot || openClawPaths.homeDir, 'extensions'),
+    })
+    if (preparedManagedRuntimeSnapshot) {
+      await appendEnvCheckDiagnostic('main-windows-runtime-selection-result', {
+        decision: 'use-prepared-managed',
+        reason: 'blocking-active-candidate',
+        previousOpenClawPath: openclawExecutable,
+        selectedOpenClawPath: preparedManagedRuntimeSnapshot.openclawPath,
+        selectedNodePath: preparedManagedRuntimeSnapshot.nodePath,
+      }).catch(() => undefined)
+      return preparedManagedRuntimeSnapshot
+    }
+  }
+
+  await appendEnvCheckDiagnostic('main-windows-runtime-selection-result', {
+    decision: 'use-external-fallback',
+    reason: shouldSwitchToManaged ? 'managed-runtime-prepare-failed' : 'active-candidate-not-blocking',
+    selectedNodePath: nodeExecutable,
+    selectedOpenClawPath: openclawExecutable,
+    activeCandidateId: activeDiscoveryCandidate?.candidateId || null,
+    activeCandidateSource: activeDiscoveryCandidate?.installSource || null,
+  }).catch(() => undefined)
   return buildWindowsActiveRuntimeSnapshot({
     openclawExecutable,
     hostPackageRoot,
@@ -1244,8 +1407,36 @@ export interface ScanIncompatibleExtensionPluginsOptions {
   quarantineOfficialManagedPlugins?: boolean
 }
 
+async function resolveOpenClawPluginRepairPaths(): Promise<OpenClawPaths | null> {
+  const activeRuntimeSnapshot = await resolveWindowsActiveRuntimeSnapshotForRead().catch(() => null)
+  if (activeRuntimeSnapshot?.stateDir) {
+    return resolveOpenClawPathsFromStateRoot({
+      stateRoot: activeRuntimeSnapshot.stateDir,
+    })
+  }
+
+  const authoritativeRuntimeSnapshot = readAuthoritativeWindowsChannelRuntimeSnapshot()
+  if (authoritativeRuntimeSnapshot?.stateDir) {
+    return resolveOpenClawPathsFromStateRoot({
+      stateRoot: authoritativeRuntimeSnapshot.stateDir,
+    })
+  }
+
+  const readOnlyPaths = await getOpenClawPathsForRead(activeRuntimeSnapshot || undefined).catch(() => null)
+  if (String(readOnlyPaths?.homeDir || '').trim()) {
+    return readOnlyPaths
+  }
+
+  const writablePaths = await getOpenClawPaths().catch(() => null)
+  if (String(writablePaths?.homeDir || '').trim()) {
+    return writablePaths
+  }
+
+  return null
+}
+
 async function resolveOpenClawPluginRepairHomeDir(): Promise<string | null> {
-  const openClawPaths = await getOpenClawPathsForRead().catch(() => null)
+  const openClawPaths = await resolveOpenClawPluginRepairPaths()
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   return homeDir || null
 }
@@ -1283,7 +1474,7 @@ export async function repairIncompatibleExtensionPlugins(
     scopePluginIds: options.scopePluginIds || [],
     quarantineOfficialManagedPlugins: options.quarantineOfficialManagedPlugins === true,
   })
-  const openClawPaths = await getOpenClawPathsForRead().catch(() => null)
+  const openClawPaths = await resolveOpenClawPluginRepairPaths()
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   const configPath = String(openClawPaths?.configFile || '').trim()
   if (!homeDir) {
@@ -3065,9 +3256,16 @@ export async function discoverOpenClawForEnvCheck(): Promise<OpenClawDiscoveryRe
 
   const selectedRuntimeSnapshot = await resolveSelectedWindowsOpenClawRuntimeSnapshot()
   const selectedOpenClawPath = String(selectedRuntimeSnapshot?.openclawPath || '').trim()
+  const commandProbeEnv = buildCommandCapabilityEnv(selectedRuntimeSnapshot || null)
+  const resolvedOpenClawPath =
+    selectedOpenClawPath ||
+    (await resolveOpenClawBinaryPath({
+      activeRuntimeSnapshot: selectedRuntimeSnapshot || undefined,
+      env: commandProbeEnv,
+    }).catch(() => null))
   const discovery = await discoverOpenClawInstallationsFromKnownPaths({
-    activeBinaryPath: selectedOpenClawPath || null,
-    knownPaths: selectedOpenClawPath ? [selectedOpenClawPath] : [],
+    activeBinaryPath: resolvedOpenClawPath || null,
+    knownPaths: [selectedOpenClawPath, resolvedOpenClawPath],
   })
   const gatewayOwnerHomeDir =
     String(selectedRuntimeSnapshot?.stateDir || '').trim() || resolveOpenClawPaths().homeDir

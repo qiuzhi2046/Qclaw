@@ -7,9 +7,13 @@ import {
   classifyOpenClawPhase1,
   compareLooseVersions,
   hasInitializedOpenClawConfig,
+  isQclawOwnedOpenClawSource,
+  isUpgradeableInstallSource,
+  requiresManualUserIntervention,
   resolveOpenClawInstallDecision,
   shouldEnsureBaselineBackup,
   shouldRouteToSetupAfterPhase1,
+  supportsQclawAutoRepair,
   type OpenClawDiscoveryResult,
   type OpenClawInstallCandidate,
 } from '../openclaw-phase1'
@@ -63,6 +67,36 @@ describe('compareLooseVersions', () => {
     expect(compareLooseVersions('2026.3.22-2', '2026.3.22')).toBe(0)
     expect(compareLooseVersions('2026.3.23-2', '2026.3.22')).toBe(1)
     expect(compareLooseVersions('2026.3.21-9', '2026.3.22')).toBe(-1)
+  })
+})
+
+describe('openclaw install source guards', () => {
+  it('recognizes Qclaw-owned sources', () => {
+    expect(isQclawOwnedOpenClawSource('qclaw-bundled')).toBe(true)
+    expect(isQclawOwnedOpenClawSource('qclaw-managed')).toBe(true)
+    expect(isQclawOwnedOpenClawSource('npm-global')).toBe(false)
+    expect(isQclawOwnedOpenClawSource(null)).toBe(false)
+  })
+
+  it('marks only Qclaw-owned sources as Qclaw auto-repairable', () => {
+    expect(supportsQclawAutoRepair('qclaw-bundled')).toBe(true)
+    expect(supportsQclawAutoRepair('qclaw-managed')).toBe(true)
+    expect(supportsQclawAutoRepair('custom')).toBe(false)
+    expect(supportsQclawAutoRepair(undefined)).toBe(false)
+  })
+
+  it('keeps manual intervention limited to custom and unknown sources', () => {
+    expect(requiresManualUserIntervention('custom')).toBe(true)
+    expect(requiresManualUserIntervention('unknown')).toBe(true)
+    expect(requiresManualUserIntervention('qclaw-managed')).toBe(false)
+    expect(requiresManualUserIntervention('npm-global')).toBe(false)
+  })
+
+  it('treats Qclaw-owned sources as upgradeable install sources', () => {
+    expect(isUpgradeableInstallSource('qclaw-bundled')).toBe(true)
+    expect(isUpgradeableInstallSource('qclaw-managed')).toBe(true)
+    expect(isUpgradeableInstallSource('unknown')).toBe(false)
+    expect(isUpgradeableInstallSource('custom')).toBe(false)
   })
 })
 

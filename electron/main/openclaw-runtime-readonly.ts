@@ -99,11 +99,13 @@ async function deriveSelectedWindowsRuntimeSnapshotForRead(
   )
   if (!requiredRuntimePaths) return null
 
-  const openClawPaths = await resolvePaths({
-    binaryPath: requiredRuntimePaths.openclawExecutable,
-    env,
-    platform: 'win32',
-  }).catch(() => null)
+  const openClawPaths = await Promise.resolve(
+    resolvePaths({
+      binaryPath: requiredRuntimePaths.openclawExecutable,
+      env,
+      platform: 'win32',
+    })
+  ).catch(() => null)
   if (!openClawPaths?.homeDir || !openClawPaths.configFile) return null
 
   const privateRuntimeSnapshot = buildWindowsActiveRuntimeSnapshot({

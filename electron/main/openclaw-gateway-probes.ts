@@ -11,6 +11,7 @@ import {
 import { probeWindowsPortOwner } from './platforms/windows/windows-platform-ops'
 
 const { createServer } = process.getBuiltinModule('node:net') as typeof import('node:net')
+const GATEWAY_SERVICE_NOT_LOADED_PATTERN = /\bgateway service (?:not loaded|missing)\b/i
 
 export interface GatewayHealthProbeResult extends CliResult {
   stateCode: GatewayRuntimeStateCode
@@ -64,7 +65,7 @@ export function parseLsofPortOwnerOutput(stdout: string, port: number): GatewayP
 
 export async function probeGatewayServiceInstalled(): Promise<boolean> {
   const result = await runCli(['gateway', 'restart'], undefined, 'gateway')
-  return !/gateway service not loaded/i.test(`${result.stderr}\n${result.stdout}`)
+  return !GATEWAY_SERVICE_NOT_LOADED_PATTERN.test(`${result.stderr}\n${result.stdout}`)
 }
 
 export async function probeGatewayHealthRaw(): Promise<GatewayHealthProbeResult> {

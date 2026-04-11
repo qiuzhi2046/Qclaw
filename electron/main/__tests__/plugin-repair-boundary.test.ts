@@ -15,15 +15,18 @@ describe('plugin repair API boundaries', () => {
     expect(scanBlock).not.toContain('restoreConfiguredManagedChannels === true')
   })
 
-  it('resolves plugin repair homeDir from readonly OpenClaw paths without recursive self-calls', () => {
-    const helperStart = cliSource.indexOf('async function resolveOpenClawPluginRepairHomeDir(): Promise<string | null> {')
-    const scanStart = cliSource.indexOf('export async function scanIncompatibleExtensionPlugins(', helperStart)
+  it('resolves plugin repair paths from readonly runtime state first and then falls back safely', () => {
+    const helperStart = cliSource.indexOf('async function resolveOpenClawPluginRepairPaths(): Promise<OpenClawPaths | null> {')
+    const homeDirHelperStart = cliSource.indexOf('async function resolveOpenClawPluginRepairHomeDir(): Promise<string | null> {', helperStart)
 
     expect(helperStart).toBeGreaterThan(-1)
-    expect(scanStart).toBeGreaterThan(helperStart)
+    expect(homeDirHelperStart).toBeGreaterThan(helperStart)
 
-    const helperBlock = cliSource.slice(helperStart, scanStart)
-    expect(helperBlock).toContain('getOpenClawPathsForRead()')
+    const helperBlock = cliSource.slice(helperStart, homeDirHelperStart)
+    expect(helperBlock).toContain('resolveWindowsActiveRuntimeSnapshotForRead()')
+    expect(helperBlock).toContain('readAuthoritativeWindowsChannelRuntimeSnapshot()')
+    expect(helperBlock).toContain('getOpenClawPathsForRead(activeRuntimeSnapshot || undefined)')
+    expect(helperBlock).toContain('await getOpenClawPaths().catch(() => null)')
     expect(helperBlock).not.toContain('await resolveOpenClawPluginRepairHomeDir()')
   })
 
@@ -35,8 +38,8 @@ describe('plugin repair API boundaries', () => {
     expect(nextFunction).toBeGreaterThan(repairStart)
 
     const repairBlock = cliSource.slice(repairStart, nextFunction)
-    expect(repairBlock).not.toContain('await getOpenClawPaths().catch(() => null)')
-    expect(repairBlock).toContain('await getOpenClawPathsForRead().catch(() => null)')
+    expect(repairBlock).not.toContain('await getOpenClawPathsForRead().catch(() => null)')
+    expect(repairBlock).toContain('await resolveOpenClawPluginRepairPaths()')
     expect(repairBlock).toContain("await readConfig({ configPath }).catch(() => null)")
   })
 })

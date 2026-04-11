@@ -16,6 +16,7 @@ import { revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
+import { shouldBypassAppExitCleanupOnQuit } from './qclaw-update-install-lifecycle'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -285,6 +286,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   isQuitting = true
+  if (shouldBypassAppExitCleanupOnQuit()) {
+    return
+  }
   if (appExitCleanupDone) return
   event.preventDefault()
 

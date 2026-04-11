@@ -397,6 +397,35 @@ describe('resolveOpenClawBinaryPath', () => {
     expect(commandPathResolver).not.toHaveBeenCalled()
   })
 
+  itOnWindows('normalizes an extensionless Windows runtime snapshot openclaw path to the .cmd shim', async () => {
+    const snapshot = buildWindowsActiveRuntimeSnapshot({
+      openclawExecutable: 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw',
+      nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+      npmPrefix: 'C:\\Users\\alice\\AppData\\Roaming\\npm',
+      configPath: 'C:\\Users\\alice\\.openclaw\\config.json',
+      stateDir: 'C:\\Users\\alice\\.openclaw',
+      extensionsDir: 'C:\\Users\\alice\\.openclaw\\extensions',
+    })
+    const commandPathResolver = vi.fn(async () => {
+      throw new Error('unexpected command lookup')
+    })
+
+    const resolved = await resolveOpenClawBinaryPath({
+      activeRuntimeSnapshot: snapshot,
+      commandPathResolver,
+      platform: 'win32',
+      env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        USERPROFILE: 'C:\\Users\\alice',
+      }),
+      fileExists: (candidate: string) =>
+        candidate === 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd',
+    })
+
+    expect(resolved).toBe('C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd')
+    expect(commandPathResolver).not.toHaveBeenCalled()
+  })
+
   it('derives a deterministic openclaw binary path directly from an npm global prefix', async () => {
     const install = createFakeOpenClawInstall()
     const targetPlatform = process.platform === 'win32' ? 'win32' : 'darwin'
@@ -414,6 +443,26 @@ describe('resolveOpenClawBinaryPath', () => {
     })
 
     expect(resolved).toBe(expectedBinaryPath)
+  })
+
+  itOnWindows('prefers the .cmd shim when command lookup returns an extensionless Windows openclaw path', async () => {
+    const tempDir = makeTempDir()
+    const barePath = path.join(tempDir, 'openclaw')
+    const cmdPath = `${barePath}.cmd`
+    fs.writeFileSync(barePath, '')
+    fs.writeFileSync(cmdPath, '@echo off\r\n')
+
+    const resolved = await resolveOpenClawBinaryPath({
+      commandPathResolver: async () => barePath,
+      platform: 'win32',
+      env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        USERPROFILE: 'C:\\Users\\alice',
+      }),
+      fileExists: (candidate: string) => candidate === barePath || candidate === cmdPath,
+    })
+
+    expect(resolved).toBe(cmdPath)
   })
 })
 

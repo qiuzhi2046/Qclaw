@@ -34,6 +34,8 @@ export interface WindowsChannelRuntimeSnapshotView extends WindowsSelectedRuntim
 }
 
 export type OpenClawInstallSource =
+  | 'qclaw-bundled'
+  | 'qclaw-managed'
   | 'npm-global'
   | 'homebrew'
   | 'nvm'
@@ -251,8 +253,27 @@ export function compareLooseVersions(left: string, right: string): number {
   return 0
 }
 
+export function isQclawOwnedOpenClawSource(
+  source: OpenClawInstallSource | null | undefined
+): boolean {
+  return source === 'qclaw-bundled' || source === 'qclaw-managed'
+}
+
+export function supportsQclawAutoRepair(
+  source: OpenClawInstallSource | null | undefined
+): boolean {
+  return isQclawOwnedOpenClawSource(source)
+}
+
+export function requiresManualUserIntervention(
+  source: OpenClawInstallSource | null | undefined
+): boolean {
+  if (!source) return true
+  return source === 'custom' || source === 'unknown'
+}
+
 export function isUpgradeableInstallSource(source: OpenClawInstallSource): boolean {
-  return source !== 'unknown' && source !== 'custom'
+  return !requiresManualUserIntervention(source)
 }
 
 export function shouldEnsureBaselineBackup(

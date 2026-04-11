@@ -8,11 +8,16 @@ import type {
 import { atomicWriteJson } from './atomic-write'
 import { formatDisplayPath, resolveOpenClawPaths } from './openclaw-paths'
 import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
-import { buildWindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
+import {
+  buildWindowsManagedOpenClawRuntimeMarker,
+  buildWindowsActiveRuntimeSnapshot,
+  resolveWindowsPrivateOpenClawRuntimePaths,
+} from './platforms/windows/windows-runtime-policy'
 import { readOpenClawPackageInfo, resolveOpenClawBinaryPath } from './openclaw-package'
 import { resolveRuntimeOpenClawPaths } from './openclaw-runtime-paths'
 import { listExecutablePathCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
 import {
   getBaselineBackupBypassStatus,
   getBaselineBackupStatus,
@@ -31,6 +36,14 @@ const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000
 
 interface WindowsInstallSnapshotCandidate extends OpenClawInstallCandidate {
   activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+}
+
+interface CandidateRuntimeStateSnapshot {
+  activeRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null
+  configPath: string
+  displayConfigPath: string
+  displayStateRoot: string
+  stateRoot: string
 }
 
 interface WindowsOpenClawDiscoveryResult extends OpenClawDiscoveryResult {
@@ -165,15 +178,254 @@ function buildFingerprint(
     .digest('hex')
 }
 
+function isQclawOwnedInstallSource(source: OpenClawInstallSource): boolean {
+  return source === 'qclaw-bundled' || source === 'qclaw-managed'
+}
+
+function normalizePathForCompare(value: string): string {
+  return String(value || '').trim().replace(/\\/g, '/').toLowerCase()
+}
+
+function isWithinOwnedRoot(candidatePath: string, roots: string[]): boolean {
+  const normalizedCandidatePath = normalizePathForCompare(candidatePath)
+  if (!normalizedCandidatePath) return false
+  return roots.some((root) => {
+    const normalizedRoot = normalizePathForCompare(root)
+    if (!normalizedRoot) return false
+    return (
+      normalizedCandidatePath === normalizedRoot ||
+      normalizedCandidatePath.startsWith(`${normalizedRoot}/`)
+    )
+  })
+}
+
+function resolveQclawOwnedDataRoots(env: NodeJS.ProcessEnv = process.env): string[] {
+  const roots = new Set<string>()
+  const userDataDir = String(env.QCLAW_USER_DATA_DIR || '').trim()
+  if (userDataDir) roots.add(userDataDir)
+
+  if (process.platform === 'win32') {
+    const localAppData = String(env.LOCALAPPDATA || '').trim()
+    if (localAppData) {
+      roots.add(path.join(localAppData, 'Qclaw'))
+    }
+  }
+
+  return Array.from(roots)
+}
+
+function isQclawOwnedStateSnapshot(input: {
+  configPath: string
+  stateRoot: string
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  const ownedRoots = resolveQclawOwnedDataRoots(input.env)
+  if (ownedRoots.length === 0) return false
+  return (
+    isWithinOwnedRoot(input.configPath, ownedRoots) &&
+    isWithinOwnedRoot(input.stateRoot, ownedRoots)
+  )
+}
+
+function resolveOwnershipState(input: {
+  installSource: OpenClawInstallSource
+  managedInstall: boolean
+  baselineBackup: OpenClawInstallCandidate['baselineBackup']
+  configPath: string
+  stateRoot: string
+  env?: NodeJS.ProcessEnv
+  fallbackOwnership: Extract<OpenClawOwnershipState, 'external-preexisting' | 'unknown-external'>
+}): OpenClawOwnershipState {
+  if (input.baselineBackup) {
+    return 'mixed-managed'
+  }
+  const qclawOwnedStateSnapshot = isQclawOwnedStateSnapshot({
+    configPath: input.configPath,
+    stateRoot: input.stateRoot,
+    env: input.env,
+  })
+  if ((isQclawOwnedInstallSource(input.installSource) || input.managedInstall) && qclawOwnedStateSnapshot) {
+    return 'qclaw-installed'
+  }
+  return input.fallbackOwnership
+}
+
+async function persistManagedInstallFingerprintForSource(
+  installSource: OpenClawInstallSource,
+  installFingerprint: string
+): Promise<boolean> {
+  if (installSource !== 'qclaw-managed') return false
+  return markManagedOpenClawInstall(installFingerprint).catch(() => false)
+}
+
+async function isVerifiedQclawManagedInstallCandidate(input: {
+  binaryPath: string
+  resolvedBinaryPath: string
+  packageRoot: string
+  env?: NodeJS.ProcessEnv
+}): Promise<boolean> {
+  if (process.platform !== 'win32') return false
+
+  const env = input.env || process.env
+  const expectedRuntimePaths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+  const expectedMarker = buildWindowsManagedOpenClawRuntimeMarker({ env })
+  const candidateBinaryPaths = [
+    input.binaryPath,
+    input.resolvedBinaryPath,
+  ].map((value) => normalizePathForCompare(value))
+  const normalizedExpectedExecutable = normalizePathForCompare(expectedRuntimePaths.openclawExecutable)
+  const normalizedExpectedPackageRoot = normalizePathForCompare(expectedRuntimePaths.hostPackageRoot)
+
+  if (
+    normalizePathForCompare(input.packageRoot) !== normalizedExpectedPackageRoot &&
+    !candidateBinaryPaths.includes(normalizedExpectedExecutable)
+  ) {
+    return false
+  }
+
+  const requiredPaths = [
+    expectedRuntimePaths.openclawExecutable,
+    expectedRuntimePaths.hostPackageRoot,
+    expectedRuntimePaths.packageJsonPath,
+    expectedRuntimePaths.runtimeMarkerPath,
+  ]
+
+  for (const requiredPath of requiredPaths) {
+    if (!(await pathExists(requiredPath))) {
+      return false
+    }
+  }
+
+  try {
+    const packageJson = JSON.parse(await readFile(expectedRuntimePaths.packageJsonPath, 'utf8')) as { name?: string }
+    if (String(packageJson.name || '').trim() !== 'openclaw') {
+      return false
+    }
+  } catch {
+    return false
+  }
+
+  try {
+    const marker = JSON.parse(await readFile(expectedRuntimePaths.runtimeMarkerPath, 'utf8')) as Partial<{
+      generatedBy: string
+      hostPackageRoot: string
+      nodeVersion: string
+      schema: string
+    }>
+    return (
+      String(marker.generatedBy || '').trim() === expectedMarker.generatedBy &&
+      normalizePathForCompare(String(marker.hostPackageRoot || '')) === normalizePathForCompare(expectedMarker.hostPackageRoot) &&
+      String(marker.nodeVersion || '').trim() === expectedMarker.nodeVersion &&
+      String(marker.schema || '').trim() === expectedMarker.schema
+    )
+  } catch {
+    return false
+  }
+}
+
+async function resolveVerifiedInstallSource(input: {
+  installSource: OpenClawInstallSource
+  binaryPath: string
+  resolvedBinaryPath: string
+  packageRoot: string
+  env?: NodeJS.ProcessEnv
+}): Promise<OpenClawInstallSource> {
+  if (input.installSource !== 'qclaw-managed') {
+    return input.installSource
+  }
+
+  const verified = await isVerifiedQclawManagedInstallCandidate({
+    binaryPath: input.binaryPath,
+    resolvedBinaryPath: input.resolvedBinaryPath,
+    packageRoot: input.packageRoot,
+    env: input.env,
+  })
+  return verified ? input.installSource : 'custom'
+}
+
+function resolveCandidateRuntimeStateSnapshot(input: {
+  activeBinaryPath: string | null
+  binaryPath: string
+  packageRoot: string
+  resolvedBinaryPath: string
+  runtimePaths: Awaited<ReturnType<typeof resolveRuntimeOpenClawPaths>>
+}): CandidateRuntimeStateSnapshot {
+  const selectedRuntimeSnapshot =
+    process.platform === 'win32' ? getSelectedWindowsActiveRuntimeSnapshot() : null
+  const normalizedSelectedBinaryPath = normalizePathForCompare(selectedRuntimeSnapshot?.openclawPath || '')
+  const normalizedBinaryCandidates = [
+    input.binaryPath,
+    input.resolvedBinaryPath,
+  ].map((value) => normalizePathForCompare(value))
+
+  if (
+    selectedRuntimeSnapshot &&
+    normalizedSelectedBinaryPath &&
+    normalizedBinaryCandidates.includes(normalizedSelectedBinaryPath)
+  ) {
+    return {
+      activeRuntimeSnapshot: { ...selectedRuntimeSnapshot },
+      configPath: selectedRuntimeSnapshot.configPath,
+      displayConfigPath: formatDisplayPath(selectedRuntimeSnapshot.configPath),
+      displayStateRoot: formatDisplayPath(selectedRuntimeSnapshot.stateDir),
+      stateRoot: selectedRuntimeSnapshot.stateDir,
+    }
+  }
+
+  return {
+    activeRuntimeSnapshot: buildWindowsInstallSnapshot({
+      binaryPath: input.binaryPath,
+      configPath: input.runtimePaths.configFile,
+      hostPackageRoot: input.packageRoot,
+      stateRoot: input.runtimePaths.homeDir,
+    }),
+    configPath: input.runtimePaths.configFile,
+    displayConfigPath: input.runtimePaths.displayConfigFile,
+    displayStateRoot: input.runtimePaths.displayHomeDir,
+    stateRoot: input.runtimePaths.homeDir,
+  }
+}
+
 export function inferOpenClawInstallSource(input: {
   binaryPath: string
   resolvedBinaryPath?: string
   packageRoot?: string
+  platform?: NodeJS.Platform
+  env?: NodeJS.ProcessEnv
+  resourcesPath?: string
 }): OpenClawInstallSource {
+  const platform = input.platform || process.platform
   const binaryPath = String(input.binaryPath || '').replace(/\\/g, '/').toLowerCase()
   const resolvedBinaryPath = String(input.resolvedBinaryPath || '').replace(/\\/g, '/').toLowerCase()
   const packageRoot = String(input.packageRoot || '').replace(/\\/g, '/').toLowerCase()
   const fullText = `${binaryPath}\n${resolvedBinaryPath}\n${packageRoot}`
+  if (platform === 'win32') {
+    const env = input.env || process.env
+    const privateRuntimePaths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+    const normalizedManagedExecutable = privateRuntimePaths.openclawExecutable.replace(/\\/g, '/').toLowerCase()
+    const normalizedManagedPackageRoot = privateRuntimePaths.hostPackageRoot.replace(/\\/g, '/').toLowerCase()
+    if (
+      fullText.includes(normalizedManagedExecutable) ||
+      fullText.includes(normalizedManagedPackageRoot)
+    ) {
+      return 'qclaw-managed'
+    }
+
+    const normalizedResourcesPath = String(input.resourcesPath || process.resourcesPath || '')
+      .replace(/\\/g, '/')
+      .toLowerCase()
+    const bundledBinarySignature = '/resources/cli/openclaw'
+    const bundledPackageSignature = '/resources/openclaw'
+    const matchesBundledBinary =
+      fullText.includes(bundledBinarySignature) ||
+      (normalizedResourcesPath && fullText.includes(`${normalizedResourcesPath}/cli/openclaw`))
+    const matchesBundledPackage =
+      fullText.includes(bundledPackageSignature) ||
+      (normalizedResourcesPath && fullText.includes(`${normalizedResourcesPath}/openclaw`))
+    if (matchesBundledBinary || matchesBundledPackage) {
+      return 'qclaw-bundled'
+    }
+  }
   const hasHomebrewCellarSignature =
     fullText.includes('/cellar/openclaw') || fullText.includes('/caskroom/openclaw')
   const hasHomebrewPrefixSignature = fullText.includes('/homebrew/') || fullText.includes('/linuxbrew/')
@@ -254,39 +506,58 @@ async function buildCandidateFromBinary(
   const openClawPaths = await resolveRuntimeOpenClawPaths({ binaryPath })
   try {
     const packageInfo = await readOpenClawPackageInfo({ binaryPath })
+    const candidateRuntimeState = resolveCandidateRuntimeStateSnapshot({
+      activeBinaryPath,
+      binaryPath: packageInfo.binaryPath,
+      packageRoot: packageInfo.packageRoot,
+      resolvedBinaryPath: packageInfo.resolvedBinaryPath,
+      runtimePaths: openClawPaths,
+    })
     const installFingerprint = buildFingerprint(
       packageInfo.resolvedBinaryPath,
       packageInfo.packageRoot,
       packageInfo.version,
-      openClawPaths.configFile,
-      openClawPaths.homeDir
+      candidateRuntimeState.configPath,
+      candidateRuntimeState.stateRoot
     )
     const baselineBackup = await getBaselineBackupStatus(installFingerprint)
     const baselineBackupBypass = await getBaselineBackupBypassStatus(installFingerprint)
-    const managedInstall = await isManagedInstallFingerprint(installFingerprint)
-    const activeRuntimeSnapshot = buildWindowsInstallSnapshot({
+    const rawInstallSource = inferOpenClawInstallSource(packageInfo)
+    const installSource = await resolveVerifiedInstallSource({
+      installSource: rawInstallSource,
       binaryPath: packageInfo.binaryPath,
-      configPath: openClawPaths.configFile,
-      hostPackageRoot: packageInfo.packageRoot,
-      stateRoot: openClawPaths.homeDir,
+      resolvedBinaryPath: packageInfo.resolvedBinaryPath,
+      packageRoot: packageInfo.packageRoot,
+      env: process.env,
     })
+    const managedInstall =
+      (await isManagedInstallFingerprint(installFingerprint)) ||
+      (await persistManagedInstallFingerprintForSource(installSource, installFingerprint))
 
     return {
-      activeRuntimeSnapshot,
+      activeRuntimeSnapshot: candidateRuntimeState.activeRuntimeSnapshot,
       candidateId: installFingerprint.slice(0, 16),
       binaryPath: packageInfo.binaryPath,
       resolvedBinaryPath: packageInfo.resolvedBinaryPath,
       packageRoot: packageInfo.packageRoot,
       version: packageInfo.version,
-      installSource: inferOpenClawInstallSource(packageInfo),
+      installSource,
       isPathActive:
         normalizeForCompare(activeBinaryPath || '') === normalizeForCompare(packageInfo.binaryPath) ||
         normalizeForCompare(activeBinaryPath || '') === normalizeForCompare(packageInfo.resolvedBinaryPath),
-      configPath: openClawPaths.configFile,
-      stateRoot: openClawPaths.homeDir,
-      displayConfigPath: openClawPaths.displayConfigFile,
-      displayStateRoot: openClawPaths.displayHomeDir,
-      ownershipState: managedInstall ? 'qclaw-installed' : baselineBackup ? 'mixed-managed' : 'external-preexisting',
+      configPath: candidateRuntimeState.configPath,
+      stateRoot: candidateRuntimeState.stateRoot,
+      displayConfigPath: candidateRuntimeState.displayConfigPath,
+      displayStateRoot: candidateRuntimeState.displayStateRoot,
+      ownershipState: resolveOwnershipState({
+        installSource,
+        managedInstall,
+        baselineBackup,
+        configPath: candidateRuntimeState.configPath,
+        stateRoot: candidateRuntimeState.stateRoot,
+        env: process.env,
+        fallbackOwnership: 'external-preexisting',
+      }),
       installFingerprint,
       baselineBackup,
       baselineBackupBypass,
@@ -297,39 +568,58 @@ async function buildCandidateFromBinary(
     if (!version) return null
 
     const packageRoot = path.dirname(resolvedBinaryPath)
+    const candidateRuntimeState = resolveCandidateRuntimeStateSnapshot({
+      activeBinaryPath,
+      binaryPath,
+      packageRoot,
+      resolvedBinaryPath,
+      runtimePaths: openClawPaths,
+    })
     const installFingerprint = buildFingerprint(
       resolvedBinaryPath,
       packageRoot,
       version,
-      openClawPaths.configFile,
-      openClawPaths.homeDir
+      candidateRuntimeState.configPath,
+      candidateRuntimeState.stateRoot
     )
     const baselineBackup = await getBaselineBackupStatus(installFingerprint)
     const baselineBackupBypass = await getBaselineBackupBypassStatus(installFingerprint)
-    const managedInstall = await isManagedInstallFingerprint(installFingerprint)
-    const activeRuntimeSnapshot = buildWindowsInstallSnapshot({
+    const rawInstallSource = inferOpenClawInstallSource({ binaryPath, resolvedBinaryPath, packageRoot })
+    const installSource = await resolveVerifiedInstallSource({
+      installSource: rawInstallSource,
       binaryPath,
-      configPath: openClawPaths.configFile,
-      hostPackageRoot: packageRoot,
-      stateRoot: openClawPaths.homeDir,
+      resolvedBinaryPath,
+      packageRoot,
+      env: process.env,
     })
+    const managedInstall =
+      (await isManagedInstallFingerprint(installFingerprint)) ||
+      (await persistManagedInstallFingerprintForSource(installSource, installFingerprint))
 
     return {
-      activeRuntimeSnapshot,
+      activeRuntimeSnapshot: candidateRuntimeState.activeRuntimeSnapshot,
       candidateId: installFingerprint.slice(0, 16),
       binaryPath,
       resolvedBinaryPath,
       packageRoot,
       version,
-      installSource: inferOpenClawInstallSource({ binaryPath, resolvedBinaryPath, packageRoot }),
+      installSource,
       isPathActive:
         normalizeForCompare(activeBinaryPath || '') === normalizeForCompare(binaryPath) ||
         normalizeForCompare(activeBinaryPath || '') === normalizeForCompare(resolvedBinaryPath),
-      configPath: openClawPaths.configFile,
-      stateRoot: openClawPaths.homeDir,
-      displayConfigPath: openClawPaths.displayConfigFile,
-      displayStateRoot: openClawPaths.displayHomeDir,
-      ownershipState: managedInstall ? 'qclaw-installed' : baselineBackup ? 'mixed-managed' : 'unknown-external',
+      configPath: candidateRuntimeState.configPath,
+      stateRoot: candidateRuntimeState.stateRoot,
+      displayConfigPath: candidateRuntimeState.displayConfigPath,
+      displayStateRoot: candidateRuntimeState.displayStateRoot,
+      ownershipState: resolveOwnershipState({
+        installSource,
+        managedInstall,
+        baselineBackup,
+        configPath: candidateRuntimeState.configPath,
+        stateRoot: candidateRuntimeState.stateRoot,
+        env: process.env,
+        fallbackOwnership: 'unknown-external',
+      }),
       installFingerprint,
       baselineBackup,
       baselineBackupBypass,

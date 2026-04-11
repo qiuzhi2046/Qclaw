@@ -14,7 +14,10 @@ const {
   checkOpenClawLatestVersionMock,
   gatewayHealthMock,
   checkOpenClawMock,
+  discoverOpenClawForEnvCheckMock,
+  activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock,
   gatewayStartMock,
+  getSelectedWindowsActiveRuntimeSnapshotMock,
   readConfigMock,
   runCliMock,
   runDirectMock,
@@ -34,7 +37,10 @@ const {
   checkOpenClawLatestVersionMock: vi.fn(),
   gatewayHealthMock: vi.fn(),
   checkOpenClawMock: vi.fn(),
+  discoverOpenClawForEnvCheckMock: vi.fn(),
+  activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock: vi.fn(),
   gatewayStartMock: vi.fn(),
+  getSelectedWindowsActiveRuntimeSnapshotMock: vi.fn(),
   readConfigMock: vi.fn(),
   runCliMock: vi.fn(),
   runDirectMock: vi.fn(),
@@ -60,7 +66,9 @@ vi.mock('../openclaw-latest-version-service', () => ({
 }))
 
 vi.mock('../cli', () => ({
+  activateManagedWindowsRuntimeSnapshotFromExistingRuntime: activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock,
   checkOpenClaw: checkOpenClawMock,
+  discoverOpenClawForEnvCheck: discoverOpenClawForEnvCheckMock,
   gatewayHealth: gatewayHealthMock,
   gatewayStart: gatewayStartMock,
   readConfig: readConfigMock,
@@ -69,6 +77,10 @@ vi.mock('../cli', () => ({
   runDoctor: runDoctorMock,
   runShell: runShellMock,
   writeConfig: writeConfigMock,
+}))
+
+vi.mock('../windows-active-runtime', () => ({
+  getSelectedWindowsActiveRuntimeSnapshot: getSelectedWindowsActiveRuntimeSnapshotMock,
 }))
 
 vi.mock('../openclaw-backup-index', () => ({
@@ -116,7 +128,10 @@ describe('openclaw upgrade service', () => {
     checkOpenClawLatestVersionMock.mockReset()
     gatewayHealthMock.mockReset()
     checkOpenClawMock.mockReset()
+    discoverOpenClawForEnvCheckMock.mockReset()
+    activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock.mockReset()
     gatewayStartMock.mockReset()
+    getSelectedWindowsActiveRuntimeSnapshotMock.mockReset()
     readConfigMock.mockReset()
     runCliMock.mockReset()
     runDirectMock.mockReset()
@@ -133,7 +148,10 @@ describe('openclaw upgrade service', () => {
     runMacOpenClawElevatedLifecycleTransactionMock.mockReset()
     gatewayHealthMock.mockResolvedValue({ running: true, raw: '{}' })
     checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    discoverOpenClawForEnvCheckMock.mockImplementation(() => discoverOpenClawInstallationsMock())
+    activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock.mockResolvedValue(null)
     gatewayStartMock.mockResolvedValue({ ok: true, stdout: '', stderr: '', code: 0 })
+    getSelectedWindowsActiveRuntimeSnapshotMock.mockReturnValue(null)
     readConfigMock.mockResolvedValue({
       gateway: {
         mode: 'local',
@@ -327,6 +345,66 @@ describe('openclaw upgrade service', () => {
     expect(result.warnings).toContain('from-env-check')
   })
 
+  it('uses the same discovery source for upgrade checks as the upgrade runner on the current platform', async () => {
+    const envCheckDiscovery: OpenClawDiscoveryResult = {
+      status: 'installed',
+      activeCandidateId: 'candidate-platform',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: ['platform-discovery'],
+      defaultBackupDirectory: '/Users/test/Documents/Qclaw Lite Backups',
+      candidates: [
+        {
+          candidateId: 'candidate-platform',
+          binaryPath: '/private/runtime/openclaw.cmd',
+          resolvedBinaryPath: '/private/runtime/openclaw.cmd',
+          packageRoot: '/private/runtime/node_modules/openclaw',
+          version: '2026.3.24',
+          installSource: 'npm-global',
+          isPathActive: true,
+          configPath: '/Users/test/.openclaw/openclaw.json',
+          stateRoot: '/Users/test/.openclaw',
+          displayConfigPath: '~/.openclaw/openclaw.json',
+          displayStateRoot: '~/.openclaw',
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'fingerprint-platform',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+    }
+
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      ...envCheckDiscovery,
+      activeCandidateId: 'candidate-global',
+      warnings: ['global-discovery'],
+      candidates: [
+        {
+          ...envCheckDiscovery.candidates[0],
+          candidateId: 'candidate-global',
+          installFingerprint: 'fingerprint-global',
+        },
+      ],
+    })
+    discoverOpenClawForEnvCheckMock.mockResolvedValue(envCheckDiscovery)
+
+    const result = await checkOpenClawUpgrade()
+
+    if (process.platform === 'win32') {
+      expect(discoverOpenClawForEnvCheckMock).toHaveBeenCalledTimes(1)
+      expect(discoverOpenClawInstallationsMock).not.toHaveBeenCalled()
+      expect(result.activeCandidate?.candidateId).toBe('candidate-platform')
+      expect(result.warnings).toContain('platform-discovery')
+      return
+    }
+
+    expect(discoverOpenClawInstallationsMock).toHaveBeenCalledTimes(1)
+    expect(discoverOpenClawForEnvCheckMock).not.toHaveBeenCalled()
+    expect(result.activeCandidate?.candidateId).toBe('candidate-global')
+    expect(result.warnings).toContain('global-discovery')
+  })
+
   it('keeps supported custom installs usable while withholding in-app upgrade execution', async () => {
     discoverOpenClawInstallationsMock.mockResolvedValue({
       candidates: [
@@ -361,6 +439,227 @@ describe('openclaw upgrade service', () => {
     expect(result.canAutoUpgrade).toBe(false)
     expect(result.errorCode).toBeUndefined()
     expect(result.manualHint).toContain('2026.3.24')
+  })
+
+  it('activates the managed Windows runtime before verifying a qclaw-bundled auto-correction result', async () => {
+    if (process.platform !== 'win32') return
+
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      status: 'installed',
+      activeCandidateId: 'candidate-1',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: 'C:\\Users\\test\\Documents\\Qclaw Lite Backups',
+      candidates: [
+        {
+          candidateId: 'candidate-1',
+          binaryPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+          resolvedBinaryPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+          packageRoot: 'D:\\qclaw\\resources\\openclaw',
+          version: '2026.3.1',
+          installSource: 'qclaw-bundled',
+          isPathActive: true,
+          configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+          stateRoot: 'C:\\Users\\test\\.openclaw',
+          displayConfigPath: '~/.openclaw/openclaw.json',
+          displayStateRoot: '~/.openclaw',
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'fingerprint-1',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+    })
+    runShellMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', code: 0 })
+    activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock.mockResolvedValue({
+      configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+      extensionsDir: 'C:\\Users\\test\\.openclaw\\extensions',
+      hostPackageRoot: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw',
+      nodePath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe',
+      npmPrefix: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1',
+      openclawPath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
+      stateDir: 'C:\\Users\\test\\.openclaw',
+      userDataDir: 'C:\\Users\\test\\AppData\\Roaming\\Qclaw',
+    })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+
+    const result = await runOpenClawUpgrade()
+
+    expect(activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock).toHaveBeenCalledWith({
+      configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+      stateDir: 'C:\\Users\\test\\.openclaw',
+      extensionsDir: 'C:\\Users\\test\\.openclaw\\extensions',
+    })
+    expect(checkOpenClawMock).toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.currentVersion).toBe('2026.3.24')
+  })
+
+  it('reuses Windows env-check discovery when running an upgrade', async () => {
+    if (process.platform !== 'win32') return
+
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      status: 'installed',
+      activeCandidateId: 'candidate-custom',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: 'C:\\Users\\test\\Documents\\Qclaw Lite Backups',
+      candidates: [
+        {
+          candidateId: 'candidate-custom',
+          binaryPath: 'D:\\legacy\\openclaw.cmd',
+          resolvedBinaryPath: 'D:\\legacy\\openclaw.cmd',
+          packageRoot: 'D:\\legacy\\node_modules\\openclaw',
+          version: '2026.3.1',
+          installSource: 'custom',
+          isPathActive: true,
+          configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+          stateRoot: 'C:\\Users\\test\\.openclaw',
+          displayConfigPath: '~/.openclaw/openclaw.json',
+          displayStateRoot: '~/.openclaw',
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'fingerprint-custom',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+    })
+    discoverOpenClawForEnvCheckMock.mockResolvedValue({
+      status: 'installed',
+      activeCandidateId: 'candidate-bundled',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: 'C:\\Users\\test\\Documents\\Qclaw Lite Backups',
+      candidates: [
+        {
+          candidateId: 'candidate-bundled',
+          binaryPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+          resolvedBinaryPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+          packageRoot: 'D:\\qclaw\\resources\\openclaw',
+          version: '2026.3.1',
+          installSource: 'qclaw-bundled',
+          isPathActive: true,
+          configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+          stateRoot: 'C:\\Users\\test\\.openclaw',
+          displayConfigPath: '~/.openclaw/openclaw.json',
+          displayStateRoot: '~/.openclaw',
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'fingerprint-bundled',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+    })
+    runShellMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', code: 0 })
+
+    const result = await runOpenClawUpgrade()
+
+    expect(discoverOpenClawForEnvCheckMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(result.installSource).toBe('qclaw-bundled')
+  })
+
+  it('preserves the selected runtime extensions directory when activating a managed Windows runtime after upgrade', async () => {
+    if (process.platform !== 'win32') return
+
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      status: 'installed',
+      activeCandidateId: 'candidate-1',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: 'C:\\Users\\test\\Documents\\Qclaw Lite Backups',
+      candidates: [
+        {
+          candidateId: 'candidate-1',
+          binaryPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+          resolvedBinaryPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+          packageRoot: 'D:\\qclaw\\resources\\openclaw',
+          version: '2026.3.1',
+          installSource: 'qclaw-bundled',
+          isPathActive: true,
+          configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+          stateRoot: 'C:\\Users\\test\\.openclaw',
+          displayConfigPath: '~/.openclaw/openclaw.json',
+          displayStateRoot: '~/.openclaw',
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'fingerprint-1',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+    })
+    getSelectedWindowsActiveRuntimeSnapshotMock.mockReturnValue({
+      configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+      extensionsDir: 'D:\\custom-extensions',
+      hostPackageRoot: 'D:\\qclaw\\resources\\openclaw',
+      nodePath: 'D:\\qclaw\\resources\\node.exe',
+      npmPrefix: 'D:\\qclaw\\resources',
+      openclawPath: 'D:\\qclaw\\resources\\cli\\openclaw.cmd',
+      stateDir: 'C:\\Users\\test\\.openclaw',
+      userDataDir: 'C:\\Users\\test\\AppData\\Roaming\\Qclaw',
+    })
+    runShellMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', code: 0 })
+    activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock.mockResolvedValue({
+      configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+      extensionsDir: 'D:\\custom-extensions',
+      hostPackageRoot: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw',
+      nodePath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe',
+      npmPrefix: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1',
+      openclawPath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
+      stateDir: 'C:\\Users\\test\\.openclaw',
+      userDataDir: 'C:\\Users\\test\\AppData\\Roaming\\Qclaw',
+    })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+
+    await runOpenClawUpgrade()
+
+    expect(activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock).toHaveBeenCalledWith({
+      configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+      stateDir: 'C:\\Users\\test\\.openclaw',
+      extensionsDir: 'D:\\custom-extensions',
+    })
+  })
+
+  it('allows Windows Qclaw-managed installs to enter auto-correct when the pinned version drifts', async () => {
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      candidates: [
+        {
+          candidateId: 'candidate-managed',
+          binaryPath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
+          resolvedBinaryPath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
+          packageRoot: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw',
+          version: '2026.3.25',
+          installSource: 'qclaw-managed',
+          isPathActive: true,
+          configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
+          stateRoot: 'C:\\Users\\test\\.openclaw',
+          displayConfigPath: '~\\.openclaw\\openclaw.json',
+          displayStateRoot: '~\\.openclaw',
+          ownershipState: 'qclaw-installed',
+          installFingerprint: 'fingerprint-managed',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+      warnings: [],
+    })
+
+    const result = await checkOpenClawUpgrade()
+
+    expect(result.policyState).toBe('above_max')
+    expect(result.enforcement).toBe('auto_correct')
+    expect(result.targetAction).toBe('downgrade')
+    expect(result.blocksContinue).toBe(true)
+    expect(result.canAutoUpgrade).toBe(true)
+    expect(result.manualHint).toBeUndefined()
   })
 
   it('manual-blocks installs whose version string cannot be parsed safely', async () => {
@@ -443,7 +742,7 @@ describe('openclaw upgrade service', () => {
     expect(runShellMock).toHaveBeenCalledTimes(1)
     expect(runShellMock).toHaveBeenNthCalledWith(
       1,
-      'npm',
+      process.platform === 'win32' ? 'npm.cmd' : 'npm',
       expect.arrayContaining([
         'install',
         '-g',

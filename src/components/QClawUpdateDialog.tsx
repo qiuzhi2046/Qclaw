@@ -14,6 +14,12 @@ function statusLabel(status: QClawUpdateStatus['status']): string {
   return '错误'
 }
 
+function describeManualInstaller(platform: string): string {
+  if (platform === 'darwin') return 'dmg 安装包'
+  if (platform === 'win32') return 'exe / msi 安装包'
+  return '安装包'
+}
+
 export default function QClawUpdateDialog({
   open,
   onClose,
@@ -21,7 +27,8 @@ export default function QClawUpdateDialog({
   open: boolean
   onClose: () => void
 }) {
-  const isMac = window.api.platform === 'darwin'
+  const platform = window.api.platform
+  const manualInstallerLabel = describeManualInstaller(platform)
   const [status, setStatus] = useState<QClawUpdateStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -182,7 +189,7 @@ export default function QClawUpdateDialog({
   )
 
   async function tryOpenManualFallback(fallbackMessage: string) {
-    if (!isMac || !canTryManualDownload) return false
+    if (!canTryManualDownload) return false
 
     setOpeningDownloadUrl(true)
     try {
@@ -208,10 +215,12 @@ export default function QClawUpdateDialog({
       setActionResult(result)
       setStatus(result.status)
       if (!result.ok) {
-        await tryOpenManualFallback('自动更新失败，已为你打开 dmg 安装包下载链接，请改为手动安装。')
+        await tryOpenManualFallback(`自动更新失败，已为你打开 ${manualInstallerLabel} 下载链接，请改为手动安装。`)
       }
     } catch (e: any) {
-      const fallbackOpened = await tryOpenManualFallback('自动更新失败，已为你打开 dmg 安装包下载链接，请改为手动安装。')
+      const fallbackOpened = await tryOpenManualFallback(
+        `自动更新失败，已为你打开 ${manualInstallerLabel} 下载链接，请改为手动安装。`
+      )
       if (!fallbackOpened) {
         setError(e?.message || '下载 Qclaw 更新失败')
       }
@@ -231,10 +240,12 @@ export default function QClawUpdateDialog({
       setStatus(result.status)
       if (!result.ok) {
         setInstalling(false)
-        await tryOpenManualFallback('自动安装不可用，已为你打开 dmg 安装包下载链接，请改为手动安装。')
+        await tryOpenManualFallback(`自动安装不可用，已为你打开 ${manualInstallerLabel} 下载链接，请改为手动安装。`)
       }
     } catch (e: any) {
-      const fallbackOpened = await tryOpenManualFallback('自动安装失败，已为你打开 dmg 安装包下载链接，请改为手动安装。')
+      const fallbackOpened = await tryOpenManualFallback(
+        `自动安装失败，已为你打开 ${manualInstallerLabel} 下载链接，请改为手动安装。`
+      )
       if (!fallbackOpened) {
         setError(e?.message || '安装 Qclaw 更新失败')
       }

@@ -414,7 +414,7 @@ export async function inspectWindowsGatewayLauncherIntegrity(
     if (!startupLauncherPath || !(await fileExists(startupLauncherPath))) {
       return {
         launcherPath: null,
-        shouldReinstallService: false,
+        shouldReinstallService: true,
         status: 'service-missing',
         taskName: null,
       }

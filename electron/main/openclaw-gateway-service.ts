@@ -135,7 +135,7 @@ interface EnsureGatewayRunningOptions {
   skipRuntimePrecheck?: boolean
 }
 
-const GATEWAY_SERVICE_NOT_LOADED_PATTERN = /\bgateway service not loaded\b/i
+const GATEWAY_SERVICE_NOT_LOADED_PATTERN = /\bgateway service (?:not loaded|missing)\b/i
 const UNKNOWN_MANAGED_CHANNEL_ID_PATTERN =
   /channels\.([A-Za-z0-9._-]+): unknown channel id: ([A-Za-z0-9._-]+)/gi
 

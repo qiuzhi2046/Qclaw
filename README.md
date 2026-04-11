@@ -146,8 +146,11 @@ npm install
 # 启动开发环境
 npm run dev
 
-# 构建生产版本
-npm run build
+# 本地编译前端与 Electron 产物
+npm run build:app
+
+# Windows 本地 unsigned 打包（仅限 Windows x64）
+npm run package:win:unsigned
 ```
 
 ### 常用命令
@@ -155,7 +158,9 @@ npm run build
 | 命令 | 说明 |
 |------|------|
 | `npm run dev` | 启动开发服务器 |
-| `npm run build` | 构建并打包应用 |
+| `npm run build:app` | 仅编译应用，不执行打包 |
+| `npm run package:win:unsigned` | Windows x64 本地 unsigned NSIS 打包 |
+| `npm run build` | 构建并打包应用，适合已具备发布环境时使用 |
 | `npm test` | 运行测试 |
 | `npm run typecheck` | TypeScript 类型检查 |
 

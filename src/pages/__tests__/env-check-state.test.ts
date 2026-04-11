@@ -19,6 +19,7 @@ import {
   shouldDownloadNodeInstallerBeforeInstall,
   shouldOfferManualNodeUpgrade,
   shouldRenderStartupIssueInline,
+  shouldShowOpenClawManualHint,
 } from '../EnvCheck'
 
 describe('createEnvCheckRestartState', () => {
@@ -188,7 +189,9 @@ describe('createEnvCheckRestartState', () => {
     const managedMarkIndex = source.indexOf(
       'await markInstalledOpenClawAsManagedDuringEnvCheck(finalDiscoveryResult)'
     )
-    const finalInspectionIndex = source.indexOf('const finalGateState = await inspectExistingOpenClaw(95)')
+    const finalInspectionIndex = source.indexOf(
+      "const finalGateState = await inspectExistingOpenClaw(\n      resolveOpenClawEnvCheckProgress('discovering-existing-install')\n    )"
+    )
 
     expect(postInstallDiscoveryIndex).toBeGreaterThan(-1)
     expect(managedMarkIndex).toBeGreaterThan(postInstallDiscoveryIndex)
@@ -650,6 +653,64 @@ describe('createEnvCheckRestartState', () => {
     expect(gateState.manualHint).toContain('2026.3.24')
   })
 
+  it('shows manual openclaw hints for blocking external installs while suppressing qclaw-owned runtimes', () => {
+    expect(
+      shouldShowOpenClawManualHint(
+        {
+          activeCandidate: {
+            installSource: 'custom',
+          } as any,
+          blocksContinue: true,
+          canAutoCorrect: false,
+          manualHint: '请手动切换版本',
+        },
+        false
+      )
+    ).toBe(true)
+
+    expect(
+      shouldShowOpenClawManualHint(
+        {
+          activeCandidate: {
+            installSource: 'homebrew',
+          } as any,
+          blocksContinue: true,
+          canAutoCorrect: false,
+          manualHint: '请在 Homebrew 环境中手动切换版本',
+        },
+        false
+      )
+    ).toBe(true)
+
+    expect(
+      shouldShowOpenClawManualHint(
+        {
+          activeCandidate: {
+            installSource: 'custom',
+          } as any,
+          blocksContinue: false,
+          canAutoCorrect: false,
+          manualHint: '请手动切换版本',
+        },
+        false
+      )
+    ).toBe(false)
+
+    expect(
+      shouldShowOpenClawManualHint(
+        {
+          activeCandidate: {
+            installSource: 'qclaw-managed',
+          } as any,
+          blocksContinue: true,
+          canAutoCorrect: false,
+          manualHint: '请手动切换版本',
+        },
+        false
+      )
+    ).toBe(false)
+  })
+
   it('hides the openclaw action button when takeover backup is still blocking auto-correction', () => {
     expect(
       canShowOpenClawUpgradeAction(
@@ -690,6 +751,13 @@ describe('createEnvCheckRestartState', () => {
         false
       )
     ).toBe(true)
+
+    expect(
+      canContinueWithOpenClawGate(
+        null,
+        false
+      )
+    ).toBe(false)
 
     expect(
       canContinueWithOpenClawGate(

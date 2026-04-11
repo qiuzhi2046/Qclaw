@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  verify-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -38,3 +38,76 @@ jobs:
 
       - name: Run model regression suite
         run: npm run test:model-regression -- --skip-typecheck
+
+  verify-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Use Node.js 22.22.1
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22.22.1'
+
+      - name: Show tool versions
+        run: |
+          node -v
+          npm -v
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run TypeScript checks
+        run: npm run typecheck
+
+      - name: Run full Vitest suite
+        run: npm test
+
+      - name: Run app-only build
+        run: npm run build:app
+
+      - name: Run Windows unsigned packaging smoke
+        run: npm run package:win:unsigned
+
+      - name: Verify Windows packaging artifacts
+        shell: pwsh
+        run: |
+          $metadata = Get-ChildItem -Path release -Recurse -Filter latest*.yml | Select-Object -First 1
+          if (-not $metadata) {
+            throw "latest*.yml not found under release/"
+          }
+
+          $metadataContent = Get-Content -Path $metadata.FullName -Raw
+          $installerRelativePath = [regex]::Match(
+            $metadataContent,
+            '(?m)^\s*path:\s*["'']?(?<path>Qclaw-Lite_[^"'']+?\.exe)["'']?\s*$'
+          ).Groups['path'].Value
+          if (-not $installerRelativePath) {
+            $installerRelativePath = [regex]::Match(
+              $metadataContent,
+              '(?m)^\s*-\s*url:\s*["'']?(?<path>Qclaw-Lite_[^"'']+?\.exe)["'']?\s*$'
+            ).Groups['path'].Value
+          }
+          if (-not $installerRelativePath) {
+            throw "Unable to resolve NSIS installer path from $($metadata.FullName)"
+          }
+
+          $installer = Join-Path $metadata.DirectoryName $installerRelativePath
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Expected NSIS installer not found: $installer"
+          }
+
+          $blockmap = "$installer.blockmap"
+          if (-not $blockmap) {
+            throw ".blockmap not found under release/"
+          }
+          if (-not (Test-Path -LiteralPath $blockmap -PathType Leaf)) {
+            throw "Expected blockmap not found: $blockmap"
+          }
+
+          Write-Host "Found installer: $installer"
+          Write-Host "Found metadata: $($metadata.FullName)"
+          Write-Host "Found blockmap: $blockmap"

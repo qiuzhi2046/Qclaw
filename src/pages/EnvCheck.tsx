@@ -17,6 +17,7 @@ import {
   buildManualBackupWarning,
   compareLooseVersions,
   hasInitializedOpenClawConfig,
+  isQclawOwnedOpenClawSource,
   resolveOpenClawInstallDecision,
   shouldEnsureBaselineBackup,
   type OpenClawBaselineBackupEnsureResult,
@@ -492,7 +493,8 @@ export function canContinueWithOpenClawGate(
   activeTakeoverBackupBlocked: boolean
 ): boolean {
   if (activeTakeoverBackupBlocked) return false
-  return !gateState?.blocksContinue
+  if (!gateState) return false
+  return !gateState.blocksContinue
 }
 
 export function canShowOpenClawUpgradeAction(
@@ -542,6 +544,57 @@ function resolveDeferredGatewayOwnerWarning(ownerState?: WindowsGatewayOwnerStat
     default:
       return null
   }
+}
+
+type OpenClawEnvCheckPhase =
+  | 'manual-refresh'
+  | 'discovering-existing-install'
+  | 'takeover-backup'
+  | 'auto-correcting'
+  | 'manual-upgrade'
+  | 'history-recovery-discovery'
+  | 'history-recovery-backup'
+  | 'refreshing-environment'
+  | 'verifying-install'
+  | 'installed-recheck-complete'
+
+function resolveOpenClawEnvCheckProgress(phase: OpenClawEnvCheckPhase): number {
+  switch (phase) {
+    case 'manual-refresh':
+      return 96
+    case 'discovering-existing-install':
+      return 97
+    case 'takeover-backup':
+      return 98
+    case 'auto-correcting':
+      return 99
+    case 'manual-upgrade':
+      return 94
+    case 'history-recovery-discovery':
+      return 95
+    case 'history-recovery-backup':
+      return 97
+    case 'refreshing-environment':
+      return 86
+    case 'verifying-install':
+      return 90
+    case 'installed-recheck-complete':
+      return 94
+    default:
+      return 95
+  }
+}
+
+export function shouldShowOpenClawManualHint(
+  gateState:
+    | Pick<OpenClawVersionGateState, 'activeCandidate' | 'blocksContinue' | 'canAutoCorrect' | 'manualHint'>
+    | null
+    | undefined,
+  activeTakeoverBackupBlocked: boolean
+): boolean {
+  if (activeTakeoverBackupBlocked) return false
+  if (!gateState?.manualHint || !gateState.blocksContinue || gateState.canAutoCorrect) return false
+  return !isQclawOwnedOpenClawSource(gateState.activeCandidate?.installSource)
 }
 
 export function buildDeferredGatewayStepState(
@@ -915,20 +968,23 @@ export default function EnvCheck({
     progress: number,
     options: { manualRefresh?: boolean } = {}
   ): Promise<OpenClawVersionGateState | null> => {
+    const currentProgress = options.manualRefresh
+      ? resolveOpenClawEnvCheckProgress('manual-refresh')
+      : progress
     await appendEnvCheckDiag('renderer-inspect-existing-openclaw-start', {
-      progress,
+      progress: currentProgress,
       manualRefresh: Boolean(options.manualRefresh),
     })
     setIsRefreshingOpenClawVersion(true)
     setOpenClawUpgradeError('')
     updateStep('openclaw', {
       status: 'checking',
-      description: options.manualRefresh ? '正在刷新 OpenClaw 版本信息...' : '正在识别已有 OpenClaw 安装...',
-      progress,
+      description: options.manualRefresh ? '正在刷新 OpenClaw 版本与运行时状态...' : '正在识别已有 OpenClaw 安装...',
+      progress: currentProgress,
     })
 
     await appendEnvCheckDiag('renderer-inspect-existing-openclaw-discover-requested', {
-      progress,
+      progress: currentProgress,
       manualRefresh: Boolean(options.manualRefresh),
     })
     const discovery = await discoverOpenClawDuringEnvCheck()
@@ -984,7 +1040,7 @@ export default function EnvCheck({
       updateStep('openclaw', {
         status: 'checking',
         description: `正在为 ${takeoverCandidates.length} 个 OpenClaw 安装执行接管备份...`,
-        progress,
+        progress: Math.max(currentProgress, resolveOpenClawEnvCheckProgress('takeover-backup')),
       })
 
       for (const candidate of takeoverCandidates) {
@@ -1041,7 +1097,7 @@ export default function EnvCheck({
       if (!acceptedAutoCorrection) {
         setOpenClawGateState(nextGateState)
         setIsRefreshingOpenClawVersion(false)
-        updateStep('openclaw', {
+      updateStep('openclaw', {
           status: 'pending-install',
           version: nextGateState.activeCandidate?.version || activeCandidate.version,
           description: '你未接受 OpenClaw 自动版本调整，Qclaw 即将退出。',
@@ -1054,7 +1110,7 @@ export default function EnvCheck({
       updateStep('openclaw', {
         status: 'installing',
         description: nextGateState.message,
-        progress: Math.min(100, progress + 2),
+        progress: resolveOpenClawEnvCheckProgress('auto-correcting'),
       })
 
       const correctionResult = await window.api.runOpenClawUpgrade()
@@ -1073,7 +1129,7 @@ export default function EnvCheck({
       }
 
       await window.api.refreshEnvironment().catch(() => null)
-      return inspectExistingOpenClaw(progress, { manualRefresh: true })
+      return inspectExistingOpenClaw(currentProgress, { manualRefresh: true })
     }
 
     setOpenClawGateState(nextGateState)
@@ -1104,7 +1160,7 @@ export default function EnvCheck({
 
   const handleOpenClawRefresh = async () => {
     if (isRunning || isRefreshingOpenClawVersion || isUpgradingOpenClaw || acknowledgingManualBackup) return
-    await inspectExistingOpenClaw(95, { manualRefresh: true })
+    await inspectExistingOpenClaw(resolveOpenClawEnvCheckProgress('manual-refresh'), { manualRefresh: true })
   }
 
   const handleRetryTakeoverBackup = async (candidateId: string) => {
@@ -1238,7 +1294,11 @@ export default function EnvCheck({
     if (isRunning || isRefreshingOpenClawVersion || isUpgradingOpenClaw || activeTakeoverBackupBlocked) return
     setIsUpgradingOpenClaw(true)
     setOpenClawUpgradeError('')
-    updateStep('openclaw', { status: 'installing', description: '正在升级 OpenClaw 命令行工具...', progress: 92 })
+    updateStep('openclaw', {
+      status: 'installing',
+      description: '正在升级 OpenClaw 命令行工具...',
+      progress: resolveOpenClawEnvCheckProgress('manual-upgrade'),
+    })
 
     try {
       const upgradeResult = await window.api.runOpenClawUpgrade()
@@ -1267,7 +1327,7 @@ export default function EnvCheck({
     updateStep('openclaw', {
       status: 'checking',
       description: '正在重新识别历史 OpenClaw 数据...',
-      progress,
+      progress: Math.max(progress, resolveOpenClawEnvCheckProgress('history-recovery-discovery')),
     })
 
     const recoveredDiscovery = await window.api.discoverOpenClaw().catch(() => null)
@@ -1280,7 +1340,7 @@ export default function EnvCheck({
     updateStep('openclaw', {
       status: 'checking',
       description: '正在备份历史 OpenClaw 数据...',
-      progress: Math.min(100, progress + 3),
+      progress: resolveOpenClawEnvCheckProgress('history-recovery-backup'),
     })
 
     const backupResult = await window.api.ensureOpenClawBaselineBackup(recoveredCandidate)
@@ -1895,7 +1955,7 @@ export default function EnvCheck({
       updateStep('openclaw', {
         status: 'checking',
         description: needOpenClawRuntimeRecovery ? '正在验证 OpenClaw 环境...' : '重新检测 OpenClaw 命令行工具...',
-        progress: 90,
+        progress: resolveOpenClawEnvCheckProgress('verifying-install'),
       })
       const newOpenclawResult = await window.api.checkOpenClaw()
       if (!newOpenclawResult.installed) {
@@ -1904,7 +1964,12 @@ export default function EnvCheck({
         setIsRunning(false)
         return
       }
-      updateStep('openclaw', { status: 'ok', version: newOpenclawResult.version, description: '已安装', progress: 95 })
+      updateStep('openclaw', {
+        status: 'ok',
+        version: newOpenclawResult.version,
+        description: '已安装，正在接管运行时...',
+        progress: resolveOpenClawEnvCheckProgress('installed-recheck-complete'),
+      })
       setCurrentStep(2)
     }
 
@@ -1917,7 +1982,9 @@ export default function EnvCheck({
     }
 
     if (needOpenClawRuntimeRecovery) {
-      const recoveryResult = await recoverHistoryOnlyOpenClaw(95)
+      const recoveryResult = await recoverHistoryOnlyOpenClaw(
+        resolveOpenClawEnvCheckProgress('history-recovery-discovery')
+      )
       if (!recoveryResult) {
         setIsRunning(false)
         return
@@ -1925,7 +1992,9 @@ export default function EnvCheck({
       finalDiscoveryResult = recoveryResult.discovery
     }
 
-    const finalGateState = await inspectExistingOpenClaw(95)
+    const finalGateState = await inspectExistingOpenClaw(
+      resolveOpenClawEnvCheckProgress('discovering-existing-install')
+    )
     finalDiscoveryResult = finalGateState?.discovery || finalDiscoveryResult
 
     await delay(envCheckTiming.transitionShortMs)
@@ -2197,14 +2266,14 @@ export default function EnvCheck({
         </div>
       )}
 
-      {!isRunning && !fatalIssue && !startupIssuePrompt && readyPayload && openClawGateState?.manualHint && !activeTakeoverBackupBlocked && (
+      {!isRunning && !fatalIssue && !startupIssuePrompt && readyPayload && shouldShowOpenClawManualHint(openClawGateState, activeTakeoverBackupBlocked) && (
         <Alert
           color="yellow"
           variant="light"
           title="OpenClaw 需要手动调整版本"
           mb="sm"
         >
-          <Text size="xs" c="dimmed">{openClawGateState.manualHint}</Text>
+          <Text size="xs" c="dimmed">{openClawGateState?.manualHint}</Text>
         </Alert>
       )}
 

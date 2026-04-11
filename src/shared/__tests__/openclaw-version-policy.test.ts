@@ -30,6 +30,10 @@ describe('openclaw version policy', () => {
     expect(supportsPinnedOpenClawCorrection('nvm')).toBe(true)
     expect(supportsPinnedOpenClawCorrection('custom')).toBe(false)
     expect(supportsPinnedOpenClawCorrection('unknown')).toBe(false)
+    expect(supportsPinnedOpenClawCorrection('qclaw-bundled', null, 'win32')).toBe(true)
+    expect(supportsPinnedOpenClawCorrection('qclaw-managed', null, 'win32')).toBe(true)
+    expect(supportsPinnedOpenClawCorrection('qclaw-bundled', null, 'darwin')).toBe(false)
+    expect(supportsPinnedOpenClawCorrection('qclaw-managed', null, 'linux')).toBe(false)
     expect(
       supportsPinnedOpenClawCorrection('homebrew', {
         packageRoot: '/tmp/homebrew/lib/node_modules/openclaw',
@@ -140,6 +144,36 @@ describe('openclaw version policy', () => {
       targetVersion: '2026.3.24',
       blocksContinue: true,
       canSelfHeal: false,
+    })
+
+    expect(
+      resolveOpenClawVersionEnforcement({
+        version: '2026.3.25',
+        installSource: 'qclaw-managed',
+        platform: 'win32',
+      })
+    ).toMatchObject({
+      policyState: 'above_max',
+      enforcement: 'auto_correct',
+      targetAction: 'downgrade',
+      targetVersion: '2026.3.24',
+      blocksContinue: true,
+      canSelfHeal: true,
+    })
+
+    expect(
+      resolveOpenClawVersionEnforcement({
+        version: '2026.3.21',
+        installSource: 'qclaw-bundled',
+        platform: 'win32',
+      })
+    ).toMatchObject({
+      policyState: 'below_min',
+      enforcement: 'auto_correct',
+      targetAction: 'upgrade',
+      targetVersion: '2026.3.24',
+      blocksContinue: true,
+      canSelfHeal: true,
     })
   })
 })

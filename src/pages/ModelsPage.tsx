@@ -1042,7 +1042,7 @@ export default function ModelsPage() {
           code: null,
           message: reason?.message || 'æ¨¡åž‹çŠ¶æ€è¯»å–å¤±è´¥',
         }))
-        if (statusResult.ok) {
+        if (statusResult.ok && 'data' in statusResult) {
           resolvedModelStatus = ((statusResult.data || null) as Record<string, any> | null)
           setModelStatus(resolvedModelStatus)
         } else {
@@ -1068,7 +1068,7 @@ export default function ModelsPage() {
             code: null,
             message: reason?.message || '模型状态读取失败',
           } satisfies ModelStatusResult))
-        if (statusResult.ok) {
+        if (statusResult.ok && 'data' in statusResult) {
           resolvedModelStatus = ((statusResult.data || null) as Record<string, any> | null)
           setModelStatus(resolvedModelStatus)
         } else {

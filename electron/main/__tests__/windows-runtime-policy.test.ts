@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildWindowsManagedOpenClawRuntimeMarker,
   buildWindowsActiveRuntimeSnapshot,
   buildWindowsSelectedRuntimeSnapshotFields,
+  prepareWindowsManagedOpenClawRuntimeCandidate,
   resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable,
   reuseWindowsSelectedRuntimeSnapshotFields,
   resolveWindowsPrivateOpenClawRuntimePaths,
   resolveWindowsPrivateNodeRuntimePaths,
   selectAuthoritativeWindowsActiveRuntimeSnapshot,
+  WINDOWS_MANAGED_OPENCLAW_RUNTIME_MARKER_FILENAME,
   WINDOWS_PRIVATE_NODE_VERSION,
 } from '../platforms/windows/windows-runtime-policy'
 import { buildTestEnv } from './test-env'
@@ -94,6 +97,15 @@ describe('resolveWindowsPrivateOpenClawRuntimePaths', () => {
     expect(paths.hostPackageRoot).toBe(
       'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw'
     )
+    expect(paths.installStagingDir).toBe(
+      'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\openclaw\\.staging\\v24.14.1'
+    )
+    expect(paths.packageJsonPath).toBe(
+      'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw\\package.json'
+    )
+    expect(paths.runtimeMarkerPath).toBe(
+      `C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw\\${WINDOWS_MANAGED_OPENCLAW_RUNTIME_MARKER_FILENAME}`
+    )
   })
 })
 
@@ -110,11 +122,17 @@ describe('resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable', () => {
     )
 
     expect(paths).toEqual({
+      installStagingDir:
+        'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\openclaw\\.staging\\v24.14.1',
       npmPrefix: 'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1',
       openclawExecutable:
         'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
       hostPackageRoot:
         'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw',
+      packageJsonPath:
+        'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw\\package.json',
+      runtimeMarkerPath:
+        `C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw\\${WINDOWS_MANAGED_OPENCLAW_RUNTIME_MARKER_FILENAME}`,
     })
   })
 
@@ -263,5 +281,82 @@ describe('reuseWindowsSelectedRuntimeSnapshotFields', () => {
       openclawPath: runtimeSnapshot.openclawPath.toUpperCase(),
       stateDir: `${runtimeSnapshot.stateDir}\\`,
     })
+  })
+})
+
+describe('prepareWindowsManagedOpenClawRuntimeCandidate', () => {
+  it('produces a verifiable managed runtime candidate without touching selected runtime state', async () => {
+    const env = buildTestEnv({
+      LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+      QCLAW_USER_DATA_DIR: 'C:\\Users\\alice\\AppData\\Local\\Qclaw',
+    })
+    const expectedPaths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+    const expectedMarker = buildWindowsManagedOpenClawRuntimeMarker({ env })
+
+    const result = await prepareWindowsManagedOpenClawRuntimeCandidate(
+      {
+        configPath: 'C:\\Users\\alice\\.openclaw\\openclaw.json',
+        env,
+        stateDir: 'C:\\Users\\alice\\.openclaw',
+      },
+      {
+        access: async () => undefined,
+        probeVersion: async () => 'OpenClaw 2026.3.24 (cff6dc9)',
+        readTextFile: async (targetPath: string) => {
+          if (targetPath === expectedPaths.packageJsonPath) {
+            return JSON.stringify({
+              name: 'openclaw',
+              version: '2026.3.24',
+            })
+          }
+          if (targetPath === expectedPaths.runtimeMarkerPath) {
+            return JSON.stringify(expectedMarker)
+          }
+          throw new Error(`unexpected read: ${targetPath}`)
+        },
+      }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.version).toBe('2026.3.24')
+    expect(result.marker).toEqual(expectedMarker)
+    expect(result.paths).toEqual(expectedPaths)
+    expect(result.snapshot).toMatchObject({
+      configPath: 'C:\\Users\\alice\\.openclaw\\openclaw.json',
+      extensionsDir: 'C:\\Users\\alice\\.openclaw\\extensions',
+      hostPackageRoot: expectedPaths.hostPackageRoot,
+      nodePath: 'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe',
+      npmPrefix: expectedPaths.npmPrefix,
+      openclawPath: expectedPaths.openclawExecutable,
+      stateDir: 'C:\\Users\\alice\\.openclaw',
+    })
+  })
+
+  it('rejects incomplete managed runtime layouts instead of treating them as healthy', async () => {
+    const env = buildTestEnv({
+      LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+    })
+    const expectedPaths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+    const missingPath = expectedPaths.runtimeMarkerPath
+
+    const result = await prepareWindowsManagedOpenClawRuntimeCandidate(
+      {
+        configPath: 'C:\\Users\\alice\\.openclaw\\openclaw.json',
+        env,
+        stateDir: 'C:\\Users\\alice\\.openclaw',
+      },
+      {
+        access: async (targetPath: string) => {
+          if (targetPath === missingPath) {
+            throw new Error('missing')
+          }
+        },
+      }
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.snapshot).toBeNull()
+    expect(result.version).toBeNull()
+    expect(result.missingPaths).toContain(missingPath)
   })
 })

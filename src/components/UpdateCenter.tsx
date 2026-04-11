@@ -6,7 +6,7 @@ import CombinedUpdateDialog from './CombinedUpdateDialog'
 import OpenClawUpgradeDialog from './OpenClawUpgradeDialog'
 import QClawUpdateDialog from './QClawUpdateDialog'
 
-function summarizeOpenClaw(check: CombinedUpdateCheckResult | null): string {
+export function summarizeOpenClaw(check: CombinedUpdateCheckResult | null): string {
   if (!check) return '读取中...'
   if (check.openclaw.policyState === 'supported_target') return '当前已是受支持上限版本'
   if (check.openclaw.policyState === 'supported_not_target' && check.openclaw.targetVersion) {
@@ -20,7 +20,7 @@ function summarizeOpenClaw(check: CombinedUpdateCheckResult | null): string {
   return '无法确认 OpenClaw 版本状态'
 }
 
-function summarizeQClaw(check: CombinedUpdateCheckResult | null): string {
+export function summarizeQClaw(check: CombinedUpdateCheckResult | null): string {
   if (!check) return '读取中...'
   if (check.qclaw.availableVersion) {
     return `${check.qclaw.currentVersion} → ${check.qclaw.availableVersion}`
