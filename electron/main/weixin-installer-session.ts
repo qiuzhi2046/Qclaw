@@ -5,6 +5,7 @@ import path from 'node:path'
 import { cancelActiveProcess } from './command-control'
 import { buildCommandCapabilityEnv, getOpenClawPaths, readConfig, runShellStreaming } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
+import { resolveManagedNpxCommand } from './managed-npx-command'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
@@ -252,17 +253,19 @@ export async function startWeixinInstallerSession(
     return buildSnapshot()
   }
 
-  const capability = await probePlatformCommandCapability('npx', {
+  const resolution = await resolveManagedNpxCommand({
+    buildEnv: buildCommandCapabilityEnv,
+    probeCapability: probePlatformCommandCapability,
     platform: process.platform,
-    env: buildCommandCapabilityEnv(),
+    unavailableMessage: 'npx 命令不可用，无法启动个人微信安装器。',
   })
-  if (!capability.available) {
+  if (!resolution.ok) {
     const errorSessionId = activeSession?.id || randomUUID()
     return {
       active: false,
       sessionId: errorSessionId,
       phase: 'exited',
-      output: capability.message || 'npx 命令不可用，无法启动个人微信安装器。',
+      output: resolution.result.stderr,
       code: 1,
       ok: false,
       canceled: false,
@@ -285,7 +288,7 @@ export async function startWeixinInstallerSession(
   const beforeAccountIds = await collectAccountIds().catch(() => [])
   const sessionId = randomUUID()
   const spawnCommand = [
-    String(capability.resolvedPath || '').trim() || WEIXIN_INSTALLER_COMMAND[0],
+    resolution.command,
     ...WEIXIN_INSTALLER_COMMAND.slice(1),
   ]
   activeSession = {

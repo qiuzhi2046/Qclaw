@@ -171,6 +171,14 @@ import {
   prepareManagedChannelPluginForSetup,
   repairManagedChannelPlugin,
 } from './managed-channel-plugin-lifecycle'
+import { runManagedNpxCommand } from './managed-npx-command'
+
+const MANAGED_NPX_RUNNER_DEPENDENCIES = {
+  buildEnv: buildCommandCapabilityEnv,
+  probeCapability: probePlatformCommandCapability,
+  runShellImpl: runShell,
+  platform: process.platform,
+} as const
 import {
   clearChatTranscript,
   createChatSession,
@@ -416,11 +424,10 @@ async function installSkillWithOfficialFallback(skillSlug: string): Promise<CliR
   }
 
   const locations = resolveOpenClawSkillLocations(await getOpenClawSkillsListPayload())
-  return runShell(
-    'npx',
+  return runManagedNpxCommand(
     ['-y', 'clawhub', '--workdir', locations.workspaceDir, '--dir', 'skills', 'install', safeName],
-    120_000,
-    { cwd: locations.workspaceDir, controlDomain: 'plugin-install' }
+    { cwd: locations.workspaceDir, timeout: 120_000, controlDomain: 'plugin-install' },
+    MANAGED_NPX_RUNNER_DEPENDENCIES
   )
 }
 
@@ -981,11 +988,10 @@ export function registerIpcHandlers() {
       }
 
       // Try clawhub uninstall with the exact name
-      const r1 = await runShell(
-        'npx',
+      const r1 = await runManagedNpxCommand(
         buildClawHubUninstallArgs(safeName, locations),
-        undefined,
-        { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' }
+        { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' },
+        MANAGED_NPX_RUNNER_DEPENDENCIES
       )
       if (r1.ok) return r1
       // Try clawhub uninstall by scanning lock file for matching slug
@@ -994,11 +1000,10 @@ export function registerIpcHandlers() {
         const slugs = Object.keys(lock.skills || {})
         const safeMatch = findExactSafeSkillSlugMatch(safeName, slugs)
         if (safeMatch && safeMatch !== safeName) {
-          const r2 = await runShell(
-            'npx',
+          const r2 = await runManagedNpxCommand(
             buildClawHubUninstallArgs(safeMatch, locations),
-            undefined,
-            { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' }
+            { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' },
+            MANAGED_NPX_RUNNER_DEPENDENCIES
           )
           if (r2.ok) return r2
         }
@@ -1020,11 +1025,10 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('clawhub:search', async (_e, query: string, limit = 10) => {
     const locations = await getOpenClawSkillLocations()
-    const result = await runShell(
-      'npx',
+    const result = await runManagedNpxCommand(
       ['-y', 'clawhub', 'search', query, '--limit', String(limit), '--registry', 'https://mirror-cn.clawhub.com'],
-      undefined,
-      { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' }
+      { cwd: locations.clawhubWorkdir, controlDomain: 'plugin-install' },
+      MANAGED_NPX_RUNNER_DEPENDENCIES
     )
     if (!result.ok) return { ok: false, skills: [], error: result.stderr }
     const skills: { slug: string; name: string; score: number }[] = []

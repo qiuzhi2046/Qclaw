@@ -18,6 +18,19 @@ describe('resolveOpenClawCommand', () => {
     })
   })
 
+  it('uses the injected command path for non-oauth calls', () => {
+    const resolved = resolveOpenClawCommand(['status', '--json'], {
+      platform: 'darwin',
+      commandPath: '/Users/demo/.nvm/versions/node/v24.9.0/bin/openclaw',
+    })
+
+    expect(resolved).toEqual({
+      command: '/Users/demo/.nvm/versions/node/v24.9.0/bin/openclaw',
+      args: ['status', '--json'],
+      shell: false,
+    })
+  })
+
   it('uses pty wrapper for oauth command on darwin', () => {
     const resolved = resolveOpenClawCommand(
       ['models', 'auth', 'login', '--provider', 'openai', '--method', 'openai-codex'],
@@ -26,6 +39,24 @@ describe('resolveOpenClawCommand', () => {
     expect(resolved.command).toBe('script')
     expect(resolved.args.slice(0, 4)).toEqual(['-q', '/dev/null', 'openclaw', 'models'])
     expect(resolved.shell).toBe(false)
+  })
+
+  it('passes the injected command path through the darwin pty wrapper', () => {
+    const resolved = resolveOpenClawCommand(
+      ['models', 'auth', 'login', '--provider', 'openai', '--method', 'openai-codex'],
+      {
+        platform: 'darwin',
+        commandPath: '/Users/demo/.nvm/versions/node/v24.9.0/bin/openclaw',
+      }
+    )
+
+    expect(resolved.command).toBe('script')
+    expect(resolved.args.slice(0, 4)).toEqual([
+      '-q',
+      '/dev/null',
+      '/Users/demo/.nvm/versions/node/v24.9.0/bin/openclaw',
+      'models',
+    ])
   })
 
   it('uses expect wrapper for google-gemini-cli oauth login on darwin when available', () => {

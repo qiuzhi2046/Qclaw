@@ -6,7 +6,9 @@ import Dashboard from '../Dashboard'
 import {
   buildDashboardPluginRepairOptions,
   DASHBOARD_PLUGIN_ACTIONS,
+  ensureDashboardPluginGatewayReadyAfterReload,
   getDashboardPluginCenterTriggerLabel,
+  hasVerifiedManagedChannelInstall,
   resolveDashboardFeishuPluginActionPlan,
   selectDashboardPluginRepairResult,
   shouldReloadGatewayAfterDashboardPluginInstall,
@@ -16,9 +18,6 @@ import {
 } from '../Dashboard'
 import type { DashboardEntrySnapshot } from '../../shared/dashboard-entry-bootstrap'
 import { buildManagedChannelRepairOutcome } from '../../shared/managed-channel-repair'
-
-const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
-const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 interface TestRepairIncompatiblePluginsResult {
   ok: boolean
@@ -267,50 +266,63 @@ describe('dashboard plugin center helpers', () => {
     expect(triggerMarkup).not.toContain('disabled')
   })
 
-  it('does not wire startup plugin repair to the button loading state', () => {
-    const dashboardSource = fs.readFileSync(
-      path.join(process.cwd(), 'src', 'pages', 'Dashboard.tsx'),
-      'utf8'
-    )
-
-    expect(dashboardSource).not.toContain('loading={pluginRepairRunning}')
-    expect(dashboardSource).toContain('window.api.repairManagedChannelPlugin')
-  })
-
-  it('does not keep the redundant plugin center helper copy', () => {
-    const dashboardSource = fs.readFileSync(
-      path.join(process.cwd(), 'src', 'pages', 'Dashboard.tsx'),
-      'utf8'
-    )
-
-    expect(dashboardSource).not.toContain(
-      '选择一个渠道后，Qclaw 会先检查并修复损坏插件环境，再安装对应插件。整个过程中都会显示进度条。'
-    )
-  })
-
-  it('re-checks Gateway with strict ensure after a repairable weixin reload failure before closing the plugin center as success', () => {
-    const dashboardSource = fs.readFileSync(
-      path.join(process.cwd(), 'src', 'pages', 'Dashboard.tsx'),
-      'utf8'
-    )
-
-    expect(dashboardSource).toMatch(
-      /reloadGatewayAfterChannelChange\(\)[\s\S]{0,1400}ensureGatewayRunning\(\{ skipRuntimePrecheck: true \}\)/
-    )
-    expect(dashboardSource).toMatch(
-      /ensureGatewayRunning\(\{ skipRuntimePrecheck: true \}\)[\s\S]{0,1400}getManagedChannelPluginStatus\(action\.id\)/
-    )
-  })
-
   it('requires both installed and registered evidence before treating a recovered managed plugin as ready', () => {
-    const dashboardSource = fs.readFileSync(
-      path.join(process.cwd(), 'src', 'pages', 'Dashboard.tsx'),
-      'utf8'
-    )
+    expect(hasVerifiedManagedChannelInstall({
+      stages: [
+        { id: 'installed', state: 'verified' },
+        { id: 'registered', state: 'verified' },
+      ],
+    })).toBe(true)
 
-    expect(dashboardSource).toMatch(
-      /function hasVerifiedManagedChannelInstall\(status: \{ stages: Array<\{ id: string; state: string \}> \}\): boolean \{[\s\S]{0,400}stage\.id === 'installed' && stage\.state === 'verified'[\s\S]{0,200}stage\.id === 'registered' && stage\.state === 'verified'/
-    )
+    expect(hasVerifiedManagedChannelInstall({
+      stages: [
+        { id: 'installed', state: 'verified' },
+        { id: 'registered', state: 'unknown' },
+      ],
+    })).toBe(false)
+  })
+
+  it('re-checks Gateway with strict ensure after a repairable weixin reload failure before treating the repair as success', async () => {
+    const appendLog = vi.fn()
+    const api = {
+      ensureGatewayRunning: vi.fn(async () => ({
+        ok: true,
+        running: true,
+        summary: '',
+        stderr: '',
+        stdout: '',
+      })),
+      getManagedChannelPluginStatus: vi.fn(async () => ({
+        summary: '微信插件已安装并注册',
+        stages: [
+          { id: 'installed', state: 'verified' },
+          { id: 'registered', state: 'verified' },
+        ],
+      })),
+    }
+
+    await expect(
+      ensureDashboardPluginGatewayReadyAfterReload(
+        api,
+        {
+          id: 'openclaw-weixin',
+          channelName: '微信',
+        },
+        {
+          ok: false,
+          running: false,
+          stateCode: 'plugin_load_failure',
+          summary: 'Gateway 未 ready',
+          stderr: '',
+          stdout: '',
+        },
+        appendLog
+      )
+    ).resolves.toBeUndefined()
+
+    expect(api.ensureGatewayRunning).toHaveBeenCalledWith({ skipRuntimePrecheck: true })
+    expect(api.getManagedChannelPluginStatus).toHaveBeenCalledWith('openclaw-weixin')
+    expect(appendLog).toHaveBeenCalledWith('⚠️ 网关重载命中可修复状态：Gateway 未 ready')
   })
 
   it('falls back to polling installer state when the weixin exit event is missed', async () => {

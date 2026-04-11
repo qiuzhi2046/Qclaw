@@ -80,6 +80,7 @@ import {
 import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { inspectMacNodeInstaller, type NodeInstallerReadinessResult } from './node-installer-checks'
 import { isSkipConfigUnsupportedError, shouldTryLegacySkipConfig } from './plugin-install-npx'
+import { resolveManagedNpxCommand } from './managed-npx-command'
 import {
   DEFAULT_BUNDLED_NODE_REQUIREMENT,
   getBundledTargetNodeVersion,
@@ -898,7 +899,7 @@ function sanitizeManagedEnv(
   return sanitizeManagedInstallerEnv(env)
 }
 
-function isNpmCommand(command: string): boolean {
+export function isNpmCommand(command: string): boolean {
   const normalized = String(command || '').trim().toLowerCase()
   return (
     normalized === 'npm' ||
@@ -916,7 +917,7 @@ function isNpmCommand(command: string): boolean {
   )
 }
 
-function shouldRetryWithNpmTlsFallback(
+export function shouldRetryWithNpmTlsFallback(
   command: string,
   result: CliResult,
   controlDomain: CommandControlDomain
@@ -3406,19 +3407,16 @@ export async function channelsAdd(channel: string, token: string): Promise<CliRe
 
 /** Install plugin via npx (for official plugins like feishu) */
 export async function installPluginNpx(url: string, expectedPluginIds: string[] = []): Promise<CliResult> {
-  const capability = await probePlatformCommandCapability('npx', {
+  const resolution = await resolveManagedNpxCommand({
+    buildEnv: buildCommandCapabilityEnv,
+    probeCapability: probePlatformCommandCapability,
     platform: process.platform,
-    env: buildCommandCapabilityEnv(),
+    unavailableMessage: 'npx 命令不可用，无法安装插件。',
   })
-  if (!capability.available) {
-    return {
-      ok: false,
-      stdout: '',
-      stderr: capability.message || 'npx 命令不可用，无法安装插件。',
-      code: 1,
-    }
+  if (!resolution.ok) {
+    return resolution.result
   }
-  const npxCommand = String(capability.resolvedPath || '').trim() || 'npx'
+  const npxCommand = resolution.command
   const runNpxInstall = async (args: string[], registryUrl?: string | null) => {
     const npmEnv = await createPluginInstallNpmEnv()
     try {

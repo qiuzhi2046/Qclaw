@@ -18,6 +18,7 @@ import { buildFeishuInstallerPromptHookScript } from './feishu-installer-prompt-
 import { buildCommandCapabilityEnv, getOpenClawPaths, readConfig } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
+import { resolveManagedNpxCommand } from './managed-npx-command'
 import {
   FEISHU_OFFICIAL_PLUGIN_ID,
   prepareFeishuInstallerConfig,
@@ -440,18 +441,20 @@ export async function startFeishuInstallerSession(
     return buildSnapshot()
   }
 
-  const capability = await probePlatformCommandCapability('npx', {
+  const resolution = await resolveManagedNpxCommand({
+    buildEnv: buildCommandCapabilityEnv,
+    probeCapability: probePlatformCommandCapability,
     platform: process.platform,
-    env: buildCommandCapabilityEnv(),
+    unavailableMessage: 'npx 命令不可用，无法启动飞书官方安装器。',
   })
-  if (!capability.available) {
+  if (!resolution.ok) {
     const errorSessionId = activeSession?.id || randomUUID()
     const commandResolution = buildFeishuInstallerCommand()
     return {
       active: false,
       sessionId: errorSessionId,
       phase: 'exited',
-      output: capability.message || 'npx 命令不可用，无法启动飞书官方安装器。',
+      output: resolution.result.stderr,
       code: 1,
       ok: false,
       canceled: false,
@@ -471,7 +474,7 @@ export async function startFeishuInstallerSession(
   try {
     const commandResolution = buildFeishuInstallerCommand()
     const spawnCommand = [
-      String(capability.resolvedPath || '').trim() || commandResolution.command[0],
+      resolution.command,
       ...commandResolution.command.slice(1),
     ]
     const promptHookPath = await ensureFeishuInstallerPromptHookFile()

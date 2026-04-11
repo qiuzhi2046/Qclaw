@@ -89,6 +89,15 @@ interface DashboardGatewayHealthLike {
   raw?: string
 }
 
+interface DashboardGatewayReloadResultLike {
+  ok?: boolean
+  running?: boolean
+  stateCode?: unknown
+  summary?: string
+  stderr?: string
+  stdout?: string
+}
+
 type PluginRepairResult = Awaited<ReturnType<typeof window.api.repairIncompatiblePlugins>>
 type PluginRepairOptions = Parameters<typeof window.api.repairIncompatiblePlugins>[0]
 type WeixinInstallerSnapshot = Awaited<ReturnType<typeof window.api.getWeixinInstallerState>>
@@ -218,9 +227,61 @@ function isDashboardPluginCenterRepairableReloadState(stateCode: unknown): boole
   return stateCode === 'plugin_load_failure' || stateCode === 'config_invalid'
 }
 
-function hasVerifiedManagedChannelInstall(status: { stages: Array<{ id: string; state: string }> }): boolean {
-  return status.stages.some((stage) => stage.id === 'installed' && stage.state === 'verified')
-    && status.stages.some((stage) => stage.id === 'registered' && stage.state === 'verified')
+export function hasVerifiedManagedChannelInstall(
+  status: { stages: Array<{ id: string; state: string }> } | null | undefined
+): boolean {
+  const stages = status?.stages || []
+  return stages.some((stage) => stage.id === 'installed' && stage.state === 'verified')
+    && stages.some((stage) => stage.id === 'registered' && stage.state === 'verified')
+}
+
+interface DashboardGatewayReloadRecoveryApi {
+  ensureGatewayRunning: (options: { skipRuntimePrecheck: true }) => Promise<{
+    ok?: boolean
+    running?: boolean
+    summary?: string
+    stderr?: string
+    stdout?: string
+  }>
+  getManagedChannelPluginStatus: (channelId: string) => Promise<{
+    summary?: string
+    stages: Array<{ id: string; state: string }>
+  }>
+}
+
+export async function ensureDashboardPluginGatewayReadyAfterReload(
+  api: DashboardGatewayReloadRecoveryApi,
+  action: Pick<DashboardPluginActionDefinition, 'id' | 'channelName'>,
+  reloadResult: DashboardGatewayReloadResultLike,
+  appendLog: (line: string) => void
+): Promise<void> {
+  const gatewayReady = reloadResult.ok && reloadResult.running === true
+  if (gatewayReady) return
+
+  if (!isDashboardPluginCenterRepairableReloadState(reloadResult.stateCode)) {
+    throw new Error(
+      reloadResult.summary
+        || reloadResult.stderr
+        || reloadResult.stdout
+        || '网关重载失败'
+    )
+  }
+
+  appendLog(`⚠️ 网关重载命中可修复状态：${reloadResult.summary || reloadResult.stderr || '待继续复检'}`)
+  const ensureResult = await api.ensureGatewayRunning({ skipRuntimePrecheck: true })
+  if (!ensureResult.ok || ensureResult.running !== true) {
+    throw new Error(
+      ensureResult.summary
+        || ensureResult.stderr
+        || ensureResult.stdout
+        || '网关重载失败'
+    )
+  }
+
+  const targetStatus = await api.getManagedChannelPluginStatus(action.id)
+  if (!hasVerifiedManagedChannelInstall(targetStatus)) {
+    throw new Error(targetStatus.summary || `${action.channelName} 插件仍未确认安装`)
+  }
 }
 
 function buildWeixinInstallerOutcome(accountCount: number): DashboardPluginInstallOutcome {
@@ -1047,32 +1108,15 @@ export default function Dashboard({
       startPluginCenterProgressTimer(95, 98, 1, 220)
       if (shouldReloadGatewayAfterDashboardPluginInstall(action)) {
         const reloadResult = await window.api.reloadGatewayAfterChannelChange()
-        const gatewayReady = reloadResult.ok && reloadResult.running === true
-        if (!gatewayReady) {
-          if (isDashboardPluginCenterRepairableReloadState(reloadResult.stateCode)) {
-            appendPluginCenterLog(`⚠️ 网关重载命中可修复状态：${reloadResult.summary || reloadResult.stderr || '待继续复检'}`)
-            const ensureResult = await window.api.ensureGatewayRunning({ skipRuntimePrecheck: true })
-            if (!ensureResult.ok || ensureResult.running !== true) {
-              throw new Error(
-                ensureResult.summary
-                  || ensureResult.stderr
-                  || ensureResult.stdout
-                  || '网关重载失败'
-              )
-            }
-            const targetStatus = await window.api.getManagedChannelPluginStatus(action.id)
-            if (!hasVerifiedManagedChannelInstall(targetStatus)) {
-              throw new Error(targetStatus.summary || `${action.channelName} 插件仍未确认安装`)
-            }
-          } else {
-            throw new Error(
-              reloadResult.summary
-                || reloadResult.stderr
-                || reloadResult.stdout
-                || '网关重载失败'
-            )
-          }
-        }
+        await ensureDashboardPluginGatewayReadyAfterReload(
+          {
+            ensureGatewayRunning: (options) => window.api.ensureGatewayRunning(options),
+            getManagedChannelPluginStatus: (channelId) => window.api.getManagedChannelPluginStatus(channelId),
+          },
+          action,
+          reloadResult,
+          appendPluginCenterLog
+        )
       }
       await fetchGatewayStatus()
       await fetchConfig()

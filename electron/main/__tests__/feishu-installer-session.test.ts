@@ -12,14 +12,4 @@ describe('feishu installer session source', () => {
 
     expect(source).not.toContain('timeout: MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs')
   })
-
-  it('prefers the command capability resolved path when spawning npx', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'electron', 'main', 'feishu-installer-session.ts'),
-      'utf8'
-    )
-
-    expect(source).toContain('capability.resolvedPath')
-    expect(source).toContain('buildCommandCapabilityEnv()')
-  })
 })
