@@ -51,6 +51,17 @@ interface RunManagedNpxDependencies extends ResolveManagedNpxCommandDependencies
   ) => Promise<ManagedNpxCommandResult>
 }
 
+function normalizeManagedNpxCommandPath(command: string, platform: NodeJS.Platform): string {
+  const normalized = String(command || '').trim()
+  if (!normalized || platform !== 'win32') return normalized
+
+  const normalizedSeparators = normalized.replace(/\\/g, '/')
+  const fileName = normalizedSeparators.slice(normalizedSeparators.lastIndexOf('/') + 1).toLowerCase()
+  if (fileName === 'npx') return `${normalized}.cmd`
+  if (fileName === 'npx.cmd') return `${normalized.slice(0, -4)}.cmd`
+  return normalized
+}
+
 export async function resolveManagedNpxCommand(
   dependencies: ResolveManagedNpxCommandDependencies = {}
 ): Promise<ResolveManagedNpxCommandResult> {
@@ -76,7 +87,7 @@ export async function resolveManagedNpxCommand(
 
   return {
     ok: true,
-    command: String(capability.resolvedPath || '').trim() || 'npx',
+    command: normalizeManagedNpxCommandPath(String(capability.resolvedPath || '').trim() || 'npx', platform),
   }
 }
 

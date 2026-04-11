@@ -28,6 +28,54 @@ describe('resolveManagedNpxCommand', () => {
       command: '/Users/demo/.nvm/versions/node/v24.9.0/bin/npx',
     })
   })
+
+  it('normalizes Windows extensionless resolved npx paths to the cmd shim', async () => {
+    const capability: CommandCapabilityProbeResult = {
+      id: 'npx',
+      platform: 'win32',
+      command: 'npx',
+      supported: true,
+      available: true,
+      source: 'named-command',
+      message: '',
+      resolvedPath: 'C:\\Program Files\\nodejs\\npx',
+    }
+
+    const result = await resolveManagedNpxCommand({
+      buildEnv: () => buildTestEnv({ PATH: 'C:\\Windows\\System32' }),
+      probeCapability: vi.fn(async () => capability),
+      platform: 'win32',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      command: 'C:\\Program Files\\nodejs\\npx.cmd',
+    })
+  })
+
+  it('normalizes Windows npx cmd extension casing for shell execution', async () => {
+    const capability: CommandCapabilityProbeResult = {
+      id: 'npx',
+      platform: 'win32',
+      command: 'npx',
+      supported: true,
+      available: true,
+      source: 'named-command',
+      message: '',
+      resolvedPath: 'C:\\Program Files\\nodejs\\npx.CMD',
+    }
+
+    const result = await resolveManagedNpxCommand({
+      buildEnv: () => buildTestEnv({ PATH: 'C:\\Windows\\System32' }),
+      probeCapability: vi.fn(async () => capability),
+      platform: 'win32',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      command: 'C:\\Program Files\\nodejs\\npx.cmd',
+    })
+  })
 })
 
 describe('runManagedNpxCommand', () => {

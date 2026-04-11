@@ -23,7 +23,6 @@ import {
   FEISHU_OFFICIAL_PLUGIN_ID,
   prepareFeishuInstallerConfig,
 } from './feishu-installer-config'
-import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 
@@ -491,11 +490,7 @@ export async function startFeishuInstallerSession(
       }),
       env: {
         ...process.env,
-        PATH: buildCliPathWithCandidates({
-          platform: process.platform,
-          currentPath: process.env.PATH || '',
-          env: process.env,
-        }),
+        PATH: buildCommandCapabilityEnv().PATH,
         NO_COLOR: '1',
         FORCE_COLOR: '0',
         NODE_OPTIONS: appendNodeRequireOption(process.env.NODE_OPTIONS, promptHookPath),
