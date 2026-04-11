@@ -8,6 +8,7 @@ import https from 'node:https'
 import { homedir, tmpdir, userInfo } from 'node:os'
 import { dirname, join, resolve as resolvePath } from 'node:path'
 import { atomicWriteJson } from './atomic-write'
+import { detectedNodeBinDirChanged, setDetectedNodeBinDir } from './detected-node-bin'
 import { applyEnvFileUpdates } from './env-file'
 import { createOAuthOutputScanner, shouldAutoOpenBrowserForArgs } from './oauth-browser'
 import { normalizeAuthChoice } from './openclaw-spawn'
@@ -209,10 +210,11 @@ function clearSelectedWindowsRuntimeSnapshot(): void {
 
 function rememberDetectedNodeBinDir(nextBinDir: string | null | undefined): string | null {
   const normalizedNext = String(nextBinDir || '').trim() || null
-  if (normalizeRuntimePathForCompare(detectedNodeBinDir) !== normalizeRuntimePathForCompare(normalizedNext)) {
+  if (detectedNodeBinDirChanged(normalizedNext)) {
     clearSelectedWindowsRuntimeSnapshot()
   }
   detectedNodeBinDir = normalizedNext
+  setDetectedNodeBinDir(normalizedNext)
   return detectedNodeBinDir
 }
 
@@ -1730,6 +1732,7 @@ async function runCliStreamingOnce(args: string[], options: RunCliStreamOptions 
         cwd: managedCwd,
         timeout,
         shell: resolvedCommand.shell,
+        windowsHide: process.platform === 'win32',
         stdio: resolveStdioForCommand(resolvedCommand.command),
       })
     } catch (error) {
@@ -2021,6 +2024,7 @@ async function runShellOnce(
           cwd: normalizedOptions.cwd || resolveManagedSpawnCwd(),
           shell: forceOpenShell ? true : useShell,
           timeout,
+          windowsHide: process.platform === 'win32',
         })
       } catch (error) {
         resolve(createSpawnFailureResult(error))
@@ -2124,6 +2128,7 @@ async function runDirectOnce(
         env: managedEnv,
         cwd: resolveManagedSpawnCwd(),
         timeout,
+        windowsHide: process.platform === 'win32',
       })
     } catch (error) {
       resolve(createSpawnFailureResult(error))
@@ -3807,24 +3812,83 @@ export async function pairingApprove(
   accountId?: string
 ): Promise<PairingApproveResult> {
   const normalizedAccountId = String(accountId || '').trim()
-  const result = await runCli(
-    [
-      'pairing',
-      'approve',
-      channel,
-      code,
-      '--notify',
-      ...(normalizedAccountId ? ['--account', normalizedAccountId] : []),
-    ],
-    MAIN_RUNTIME_POLICY.cli.pairingApproveTimeoutMs,
-    'config-write'
-  )
-  if (result.ok) return result
+  const maskedCode = maskPairingApproveCode(code)
+  await appendEnvCheckDiagnostic('main-pairing-approve-start', {
+    channel: String(channel || '').trim() || null,
+    accountId: normalizedAccountId || null,
+    maskedCode,
+    timeoutMs: null,
+  })
+  try {
+    const result = await runCli(
+      [
+        'pairing',
+        'approve',
+        channel,
+        code,
+        '--notify',
+        ...(normalizedAccountId ? ['--account', normalizedAccountId] : []),
+      ],
+      undefined,
+      'config-write'
+    )
+    const errorCode = result.ok ? null : resolvePairingApproveErrorCode(result) || 'unknown'
 
-  return {
-    ...result,
-    errorCode: resolvePairingApproveErrorCode(result) || 'unknown',
+    await appendEnvCheckDiagnostic('main-pairing-approve-result', {
+      channel: String(channel || '').trim() || null,
+      accountId: normalizedAccountId || null,
+      maskedCode,
+      ok: result.ok,
+      code: result.code,
+      canceled: result.canceled === true,
+      errorCode,
+      stdout: truncatePairingApproveDiagnosticText(result.stdout.trim() || null),
+      stderr: truncatePairingApproveDiagnosticText(result.stderr.trim() || null),
+    })
+
+    if (result.ok) return result
+
+    await appendEnvCheckDiagnostic('main-pairing-approve-failed', {
+      channel: String(channel || '').trim() || null,
+      accountId: normalizedAccountId || null,
+      maskedCode,
+      code: result.code,
+      canceled: result.canceled === true,
+      errorCode,
+      stdout: truncatePairingApproveDiagnosticText(result.stdout.trim() || null),
+      stderr: truncatePairingApproveDiagnosticText(result.stderr.trim() || null),
+    })
+
+    return {
+      ...result,
+      errorCode: errorCode || 'unknown',
+    }
+  } catch (error) {
+    await appendEnvCheckDiagnostic('main-pairing-approve-failed', {
+      channel: String(channel || '').trim() || null,
+      accountId: normalizedAccountId || null,
+      maskedCode,
+      code: null,
+      canceled: false,
+      errorCode: 'unknown',
+      stdout: null,
+      stderr: truncatePairingApproveDiagnosticText(error instanceof Error ? error.message : String(error || '')),
+    })
+    throw error
   }
+}
+
+function maskPairingApproveCode(code: string): string | null {
+  const normalized = String(code || '').trim().toUpperCase()
+  if (!normalized) return null
+  if (normalized.length <= 4) return `${normalized[0] || '*'}***`
+  return `${normalized.slice(0, 2)}***${normalized.slice(-2)}`
+}
+
+function truncatePairingApproveDiagnosticText(value: string | null): string | null {
+  const normalized = String(value || '').trim()
+  if (!normalized) return null
+  return normalized.slice(0, 1_200)
 }
 
 function sanitizeStoreKey(input: string): string {

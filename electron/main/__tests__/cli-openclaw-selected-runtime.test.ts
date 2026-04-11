@@ -111,6 +111,15 @@ function extractGatewayRestartImplSource(cliSource: string): string {
   return cliSource.slice(start, end)
 }
 
+function extractPairingApproveSource(cliSource: string): string {
+  const start = cliSource.indexOf('export async function pairingApprove(')
+  const end = cliSource.indexOf('function sanitizeStoreKey(input: string): string {', start)
+  if (start < 0 || end < 0) {
+    throw new Error('pairingApprove source block not found')
+  }
+  return cliSource.slice(start, end)
+}
+
 describe('checkOpenClaw selected runtime completeness gate', () => {
   it('verifies the selected Windows runtime is complete before trusting a runnable openclaw command', async () => {
     const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
@@ -175,6 +184,13 @@ describe('checkOpenClaw selected runtime completeness gate', () => {
     expect(runCliStreamingOnceSource.indexOf('const activeRuntimeSnapshot =')).toBeLessThan(
       runCliStreamingOnceSource.indexOf('const envFromFile = await readEnvFile({')
     )
+  })
+
+  it('hides Windows console windows for streamed CLI child processes', async () => {
+    const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
+    const runCliStreamingOnceSource = extractRunCliStreamingOnceSource(cliSource)
+
+    expect(runCliStreamingOnceSource).toContain("windowsHide: process.platform === 'win32'")
   })
 
   it('only runs config repair preflight when a command explicitly opts in', async () => {
@@ -292,5 +308,28 @@ describe('checkOpenClaw selected runtime completeness gate', () => {
     expect(cliSource).toContain('readOnly: true,')
     expect(isPluginInstalledOnDiskSource).toContain('await getOpenClawPathsForRead().catch(() => null)')
     expect(isPluginInstalledOnDiskSource).not.toContain('await getOpenClawPaths().catch(() => null)')
+  })
+
+  it('records pairing approval diagnostics with masked input and raw command results', async () => {
+    const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
+    const pairingApproveSource = extractPairingApproveSource(cliSource)
+
+    expect(pairingApproveSource).toContain("appendEnvCheckDiagnostic('main-pairing-approve-start'")
+    expect(pairingApproveSource).toContain("appendEnvCheckDiagnostic('main-pairing-approve-result'")
+    expect(pairingApproveSource).toContain("appendEnvCheckDiagnostic('main-pairing-approve-failed'")
+    expect(pairingApproveSource).toContain('maskedCode')
+    expect(pairingApproveSource).toContain('truncatePairingApproveDiagnosticText(result.stdout.trim() || null)')
+    expect(pairingApproveSource).toContain('truncatePairingApproveDiagnosticText(result.stderr.trim() || null)')
+    expect(pairingApproveSource).toContain('canceled: result.canceled === true')
+    expect(pairingApproveSource).toContain("const errorCode = result.ok ? null : resolvePairingApproveErrorCode(result) || 'unknown'")
+  })
+
+  it('does not apply a dedicated CLI timeout to pairing approval commands', async () => {
+    const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
+    const pairingApproveSource = extractPairingApproveSource(cliSource)
+
+    expect(pairingApproveSource).toContain("timeoutMs: null")
+    expect(pairingApproveSource).toContain("],\n      undefined,\n      'config-write'")
+    expect(pairingApproveSource).not.toContain('MAIN_RUNTIME_POLICY.cli.pairingApproveTimeoutMs')
   })
 })

@@ -9,7 +9,7 @@ const PROVIDER_ENV_KEY_MAP = buildKnownProviderEnvKeyMap()
 
 export type { SetupModelContext } from './ModelCenter'
 
-export default function ApiKeys({ onNext }: { onNext: (context: SetupModelContext) => void }) {
+export default function ApiKeys({ onNext }: { onNext: (context: SetupModelContext) => void | Promise<void> }) {
   return (
     <ModelCenter
       onConfigured={onNext}

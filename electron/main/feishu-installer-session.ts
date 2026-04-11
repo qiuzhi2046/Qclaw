@@ -17,14 +17,16 @@ import {
 import { buildFeishuInstallerPromptHookScript } from './feishu-installer-prompt-hook'
 import { readConfig } from './cli'
 import { probePlatformCommandCapability } from './command-capabilities'
+import { ensureFeishuOfficialPluginReady } from './feishu-official-plugin-state'
+import { buildInstallerCommandEnv } from './installer-command-env'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import {
   FEISHU_OFFICIAL_PLUGIN_ID,
   prepareFeishuInstallerConfig,
 } from './feishu-installer-config'
+import { stopGatewayIfOwned } from './gateway-lifecycle-controller'
 import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
-import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 
@@ -188,6 +190,8 @@ async function prepareConfigForFeishuInstaller(): Promise<void> {
       beforeConfig: config,
       afterConfig: result.config,
       reason: 'channel-connect-onboard-prepare',
+    }, undefined, {
+      applyGatewayPolicy: false,
     })
     if (!writeResult.ok) {
       throw new Error(writeResult.message || '准备飞书安装器配置失败')
@@ -255,6 +259,7 @@ interface ActiveFeishuInstallerSession {
   pendingPromptSocket: Socket | null
   promptBridgeServer: Server | null
   promptSessionToken: string
+  gatewayStoppedForInstall: boolean
 }
 
 let activeSession: ActiveFeishuInstallerSession | null = null
@@ -442,9 +447,10 @@ export async function startFeishuInstallerSession(
     return buildSnapshot()
   }
 
+  const commandEnv = buildInstallerCommandEnv()
   const capability = await probePlatformCommandCapability('npx', {
     platform: process.platform,
-    env: process.env,
+    env: commandEnv,
   })
   if (!capability.available) {
     const errorSessionId = activeSession?.id || randomUUID()
@@ -455,6 +461,23 @@ export async function startFeishuInstallerSession(
       phase: 'exited',
       output: capability.message || 'npx 命令不可用，无法启动飞书官方安装器。',
       code: 1,
+      ok: false,
+      canceled: false,
+      command: [...commandResolution.command],
+      pendingPrompt: null,
+    }
+  }
+
+  const stopGatewayResult = await stopGatewayIfOwned('feishu-installer-start')
+  if (!stopGatewayResult.ok) {
+    const errorSessionId = activeSession?.id || randomUUID()
+    const commandResolution = buildFeishuInstallerCommand()
+    return {
+      active: false,
+      sessionId: errorSessionId,
+      phase: 'exited',
+      output: stopGatewayResult.stderr || stopGatewayResult.stdout || 'Failed to stop gateway before starting the Feishu installer.',
+      code: stopGatewayResult.code ?? 1,
       ok: false,
       canceled: false,
       command: [...commandResolution.command],
@@ -485,12 +508,7 @@ export async function startFeishuInstallerSession(
         platform: process.platform,
       }),
       env: {
-        ...process.env,
-        PATH: buildCliPathWithCandidates({
-          platform: process.platform,
-          currentPath: process.env.PATH || '',
-          env: process.env,
-        }),
+        ...commandEnv,
         NO_COLOR: '1',
         FORCE_COLOR: '0',
         NODE_OPTIONS: appendNodeRequireOption(process.env.NODE_OPTIONS, promptHookPath),
@@ -527,6 +545,7 @@ export async function startFeishuInstallerSession(
       pendingPromptSocket: null,
       promptBridgeServer,
       promptSessionToken: sessionToken,
+      gatewayStoppedForInstall: true,
     }
     setActiveProcess(proc, FEISHU_INSTALLER_CONTROL_DOMAIN)
 
@@ -553,33 +572,48 @@ export async function startFeishuInstallerSession(
       appendOutput('stderr', String(chunk), emit)
     })
 
-    proc.on('close', (code) => {
+    proc.on('close', async (code) => {
       if (!activeSession || activeSession.id !== sessionId) return
-      const npmCacheDirForCleanup = activeSession.npmCacheDir
-      clearPendingPrompt(activeSession, {
+      const session = activeSession
+      const npmCacheDirForCleanup = session.npmCacheDir
+      clearPendingPrompt(session, {
         notify: false,
         abortMessage: 'Feishu installer session has exited.',
       })
-      closePromptBridgeServer(activeSession)
+      closePromptBridgeServer(session)
       clearActiveProcessIfMatch(proc, FEISHU_INSTALLER_CONTROL_DOMAIN)
       const canceled = consumeCanceledProcess(proc, FEISHU_INSTALLER_CONTROL_DOMAIN)
-      activeSession.phase = 'exited'
-      activeSession.code = canceled ? null : code
-      activeSession.ok = code === 0 && !canceled
-      activeSession.canceled = canceled
+      session.phase = 'exited'
+      session.code = canceled ? null : code
+      session.ok = code === 0 && !canceled
+      session.canceled = canceled
+      if (session.ok && session.gatewayStoppedForInstall) {
+        const finalizeResult = await ensureFeishuOfficialPluginReady()
+        if (!finalizeResult.ok) {
+          const details = [finalizeResult.message, finalizeResult.stderr, finalizeResult.stdout]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .join('\n\n')
+          if (details) {
+            session.output += `\n${details}`
+          }
+          session.ok = false
+          session.code = finalizeResult.code ?? 1
+        }
+      }
       emit({
         sessionId,
         type: 'exit',
         phase: 'exited',
-        code: activeSession.code,
-        ok: activeSession.ok,
+        code: session.code,
+        ok: session.ok,
         canceled,
         pendingPrompt: null,
       })
       void appendFeishuInstallerDiag('session-exit', {
         sessionId,
-        code: activeSession.code,
-        ok: activeSession.ok,
+        code: session.code,
+        ok: session.ok,
         canceled,
       })
       void cleanupIsolatedNpmCacheEnv(npmCacheDirForCleanup)

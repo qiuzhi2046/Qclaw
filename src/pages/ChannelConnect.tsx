@@ -752,7 +752,16 @@ export function resolveFeishuPairingTarget(params: {
 export async function ensureGatewayReadyForChannelConnect(
   api: ChannelConnectGatewayReadyApi,
   appendLog: (message: string) => void,
-  options?: { channelId?: string }
+  options?: {
+    channelId?: string
+    acceptFailureResult?: (result: {
+      stateCode?: string
+      safeToRetry?: boolean
+      summary?: string
+      stderr?: string
+      stdout?: string
+    }) => boolean
+  }
 ): Promise<{ ok: boolean; message?: string }> {
   const result = await api.reloadGatewayAfterChannelChange()
   const running = 'running' in result && result.running === true
@@ -791,6 +800,10 @@ export async function ensureGatewayReadyForChannelConnect(
 
       const ensureResult = await api.ensureGatewayRunning({ skipRuntimePrecheck: true })
       if (!ensureResult.ok || ensureResult.running !== true) {
+        if (options?.acceptFailureResult?.(ensureResult)) {
+          return { ok: true }
+        }
+
         return {
           ok: false,
           message: getGatewayReadyFailureMessage(ensureResult),
@@ -815,6 +828,10 @@ export async function ensureGatewayReadyForChannelConnect(
       return { ok: true }
     }
 
+    if (options?.acceptFailureResult?.(result)) {
+      return { ok: true }
+    }
+
     return {
       ok: false,
       message: getGatewayReadyFailureMessage(result),
@@ -831,6 +848,20 @@ export async function ensureGatewayReadyForChannelConnect(
   }
 
   return { ok: true }
+}
+
+export function shouldAllowFeishuLinkPairingAfterGatewayFailure(params: {
+  setupMode: 'create' | 'link'
+  pairingTarget: { accountId?: string | null } | null
+  gatewayFailure: {
+    stateCode?: string
+    safeToRetry?: boolean
+  }
+}): boolean {
+  return params.setupMode === 'link'
+    && Boolean(String(params.pairingTarget?.accountId || '').trim())
+    && params.gatewayFailure.stateCode === 'websocket_1006'
+    && params.gatewayFailure.safeToRetry === true
 }
 
 export function canFinalizeWeixinSetup(params: {
@@ -1770,7 +1801,14 @@ export default function ChannelConnect({
 
       const gatewayReady = await ensureGatewayReadyForChannelConnect(window.api, () => {
         // Keep the wizard UI focused; setup errors are surfaced directly below the form.
-      }, { channelId: 'feishu' })
+      }, {
+        channelId: 'feishu',
+        acceptFailureResult: (result) => shouldAllowFeishuLinkPairingAfterGatewayFailure({
+          setupMode: feishuBotSetupMode,
+          pairingTarget,
+          gatewayFailure: result,
+        }),
+      })
       if (!gatewayReady.ok) {
         throw new Error(
           toUserFacingCliFailureMessage({

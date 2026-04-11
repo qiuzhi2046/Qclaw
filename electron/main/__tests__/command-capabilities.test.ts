@@ -7,6 +7,11 @@ import {
 } from '../command-capabilities'
 import { buildTestEnv } from './test-env'
 
+const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+const { readFile } = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
+const os = process.getBuiltinModule('node:os') as typeof import('node:os')
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+
 describe('getNamedCommandLookupInvocation', () => {
   it('uses where.exe on Windows', () => {
     const invocation = getNamedCommandLookupInvocation('openclaw', {
@@ -137,5 +142,34 @@ describe('probePlatformCommandCapability', () => {
     const second = await probePlatformCommandCapability('openclaw', runtime)
     expect(second.available).toBe(true)
     expect(second.resolvedPath).toBe('/usr/local/bin/openclaw')
+  })
+
+  it('resolves Windows cmd shims from PATH even when where.exe misses them', async () => {
+    resetCommandCapabilityCacheForTests()
+
+    const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qclaw-command-capability-'))
+    const shimPath = path.join(shimDir, 'npx.cmd')
+    fs.writeFileSync(shimPath, '@echo off\r\necho shim\r\n')
+
+    try {
+      const result = await probePlatformCommandCapability('npx', {
+        platform: 'win32',
+        env: buildTestEnv({
+          PATH: shimDir,
+          PATHEXT: '.COM;.EXE;.BAT;.CMD',
+        }),
+      })
+
+      expect(result.available).toBe(true)
+      expect(result.resolvedPath?.toLowerCase()).toBe(shimPath.toLowerCase())
+    } finally {
+      fs.rmSync(shimDir, { recursive: true, force: true })
+    }
+  })
+
+  it('hides Windows console windows while probing named commands', async () => {
+    const source = await readFile(path.join(process.cwd(), 'electron/main/command-capabilities.ts'), 'utf8')
+
+    expect(source).toContain("windowsHide: runtime.platform === 'win32'")
   })
 })

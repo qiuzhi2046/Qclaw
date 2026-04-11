@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { inferOpenClawInstallSource } from '../openclaw-install-discovery'
 
 const fs = process.getBuiltinModule('fs') as typeof import('node:fs')
+const { EventEmitter } = process.getBuiltinModule('node:events') as typeof import('node:events')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { createHash } = process.getBuiltinModule('node:crypto') as typeof import('node:crypto')
@@ -45,6 +46,34 @@ vi.mock('../openclaw-baseline-backup-gate', async () => {
 vi.mock('../openclaw-runtime-paths', () => ({
   resolveRuntimeOpenClawPaths: resolveRuntimeOpenClawPathsMock,
 }))
+
+function createMockSpawnedProcess(result: {
+  code?: number
+  error?: Error
+  stderr?: string
+  stdout?: string
+} = {}) {
+  const proc = new EventEmitter() as EventEmitter & {
+    kill: () => void
+    stderr: EventEmitter
+    stdout: EventEmitter
+  }
+  proc.stdout = new EventEmitter()
+  proc.stderr = new EventEmitter()
+  proc.kill = () => {}
+
+  queueMicrotask(() => {
+    if (result.stdout) proc.stdout.emit('data', result.stdout)
+    if (result.stderr) proc.stderr.emit('data', result.stderr)
+    if (result.error) {
+      proc.emit('error', result.error)
+      return
+    }
+    proc.emit('close', result.code ?? 0)
+  })
+
+  return proc
+}
 
 describe('inferOpenClawInstallSource', () => {
   it('detects Homebrew installs from Cellar paths', () => {
@@ -98,6 +127,7 @@ describe('inferOpenClawInstallSource', () => {
       })
     ).toBe('custom')
   })
+
 })
 
 describe('discoverOpenClawInstallations', () => {
@@ -438,5 +468,77 @@ describe('discoverOpenClawInstallations', () => {
       },
     ])
     expect(result.warnings).toContain('检测到历史 OpenClaw 数据，但当前机器缺少可执行的 OpenClaw 环境。')
+  })
+
+  it('hides Windows console windows when version fallback probes discovered binaries', async () => {
+    vi.resetModules()
+
+    const installDir = makeTempDir()
+    const stateRoot = path.join(installDir, '.openclaw')
+    const binaryPath = path.join(installDir, 'AppData', 'Roaming', 'npm', 'openclaw.cmd')
+
+    fs.mkdirSync(path.dirname(binaryPath), { recursive: true })
+    fs.mkdirSync(stateRoot, { recursive: true })
+    fs.writeFileSync(binaryPath, '@echo off\r\n')
+
+    resolveOpenClawBinaryPathMock.mockResolvedValue(binaryPath)
+    listExecutablePathCandidatesMock.mockImplementation((target: string) => {
+      if (target === 'node') return []
+      return [binaryPath]
+    })
+    readOpenClawPackageInfoMock.mockRejectedValue(new Error('package layout unavailable'))
+    resolveRuntimeOpenClawPathsMock.mockResolvedValue({
+      homeDir: stateRoot,
+      configFile: path.join(stateRoot, 'openclaw.json'),
+      envFile: path.join(stateRoot, '.env'),
+      credentialsDir: path.join(stateRoot, 'credentials'),
+      modelCatalogCacheFile: path.join(stateRoot, 'qclaw-model-catalog-cache.json'),
+      displayHomeDir: stateRoot,
+      displayConfigFile: path.join(stateRoot, 'openclaw.json'),
+      displayEnvFile: path.join(stateRoot, '.env'),
+      displayCredentialsDir: path.join(stateRoot, 'credentials'),
+      displayModelCatalogCacheFile: path.join(stateRoot, 'qclaw-model-catalog-cache.json'),
+    })
+    getBaselineBackupStatusMock.mockResolvedValue(null)
+    getBaselineBackupBypassStatusMock.mockResolvedValue(null)
+
+    const spawnCalls: Array<{
+      args: string[]
+      command: string
+      options: Record<string, unknown>
+    }> = []
+    const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id) => {
+      if (id === 'node:child_process' || id === 'child_process') {
+        const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
+        return {
+          ...actual,
+          spawn: (command: string, args: string[], options: Record<string, unknown>) => {
+            spawnCalls.push({ command, args, options })
+            return createMockSpawnedProcess({
+              code: 0,
+              stdout: '2026.4.10\n',
+            })
+          },
+        }
+      }
+
+      return originalGetBuiltinModule(id)
+    }) as typeof process.getBuiltinModule)
+
+    try {
+      const discoveryModule = await import('../openclaw-install-discovery')
+      const result = await discoveryModule.discoverOpenClawInstallations()
+
+      expect(result.candidates).toHaveLength(1)
+      expect(spawnCalls).toHaveLength(1)
+      expect(spawnCalls[0]?.options).toMatchObject({
+        shell: true,
+        windowsHide: true,
+      })
+    } finally {
+      getBuiltinModuleSpy.mockRestore()
+      vi.resetModules()
+    }
   })
 })

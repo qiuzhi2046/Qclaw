@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as windowsPlatformOps from '../platforms/windows/windows-platform-ops'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
@@ -2045,6 +2046,141 @@ describe('openclaw gateway service', () => {
 
     const result = await ensureGatewayRunning()
 
+    expect(gatewayStartMock).not.toHaveBeenCalled()
+    expect(runCliMock).not.toHaveBeenCalledWith(['gateway', 'install', '--force'], undefined, 'gateway')
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+  })
+
+  itOnWindows('removes a stale startup launcher when the scheduled-task owner is healthy', async () => {
+    const homeDir = await createOpenClawHome()
+    const launcherPath = join(homeDir, 'gateway.cmd')
+    const startupEntryPath = join(
+      homeDir,
+      'AppData',
+      'Roaming',
+      'Microsoft',
+      'Windows',
+      'Start Menu',
+      'Programs',
+      'Startup',
+      'OpenClaw Gateway.cmd'
+    )
+    await fs.promises.mkdir(join(homeDir, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'), { recursive: true })
+    await fs.promises.writeFile(launcherPath, '@echo off\r\n')
+    await fs.promises.writeFile(
+      startupEntryPath,
+      [
+        '@echo off',
+        'rem OpenClaw Gateway (v2026.3.24)',
+        `start "" /min cmd.exe /d /c ${launcherPath}`,
+      ].join('\r\n')
+    )
+
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReturnValue(
+      createAuthoritativeWindowsChannelRuntimeSnapshot({
+        homeDir,
+        ownerKind: 'scheduled-task',
+        ownerLauncherPath: launcherPath,
+        ownerTaskName: '\\OpenClaw Gateway',
+      })
+    )
+    runShellMock.mockResolvedValueOnce({
+      ok: true,
+      stdout: [
+        'TaskName: \\OpenClaw Gateway',
+        `Task To Run: ${launcherPath}`,
+      ].join('\n'),
+      stderr: '',
+      code: 0,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+
+    const result = await ensureGatewayRunning()
+
+    await expect(fs.promises.access(startupEntryPath)).rejects.toBeTruthy()
+    expect(gatewayStartMock).not.toHaveBeenCalled()
+    expect(runCliMock).not.toHaveBeenCalledWith(['gateway', 'install', '--force'], undefined, 'gateway')
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+  })
+
+  itOnWindows('patches a healthy startup-folder launcher after successful ensure', async () => {
+    const ensureHiddenSpy = vi.spyOn(windowsPlatformOps, 'ensureWindowsStartupLauncherHidden')
+    const homeDir = await createOpenClawHome()
+    const launcherPath = join(homeDir, 'gateway.cmd')
+    const startupEntryPath = join(
+      homeDir,
+      'AppData',
+      'Roaming',
+      'Microsoft',
+      'Windows',
+      'Start Menu',
+      'Programs',
+      'Startup',
+      'OpenClaw Gateway.cmd'
+    )
+    await fs.promises.mkdir(
+      join(homeDir, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'),
+      { recursive: true }
+    )
+    await fs.promises.writeFile(launcherPath, '@echo off\r\n')
+    await fs.promises.writeFile(
+      startupEntryPath,
+      [
+        '@echo off',
+        'rem OpenClaw Gateway (v2026.3.24)',
+        `start "" /min cmd.exe /d /c ${launcherPath}`,
+      ].join('\r\n')
+    )
+
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReturnValue(
+      createAuthoritativeWindowsChannelRuntimeSnapshot({
+        homeDir,
+        ownerKind: 'startup-folder',
+        ownerLauncherPath: launcherPath,
+        ownerTaskName: '',
+      })
+    )
+    runShellMock.mockResolvedValueOnce({
+      ok: false,
+      stdout: '',
+      stderr: 'ERROR: The system cannot find the path specified.',
+      code: 1,
+    })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+
+    const result = await ensureGatewayRunning()
+    const startupContent = await fs.promises.readFile(startupEntryPath, 'utf8')
+
+    expect(ensureHiddenSpy).toHaveBeenCalled()
+    expect(ensureHiddenSpy.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        appDataDir: join(homeDir, 'AppData', 'Roaming'),
+        homeDir,
+        launcherIntegrity: expect.objectContaining({
+          launcherPath,
+        }),
+      })
+    )
+    expect(startupContent).toContain('WindowStyle Hidden')
+    expect(startupContent).toContain(`rem QClaw startup launcher target: ${launcherPath}`)
     expect(gatewayStartMock).not.toHaveBeenCalled()
     expect(runCliMock).not.toHaveBeenCalledWith(['gateway', 'install', '--force'], undefined, 'gateway')
     expect(result.ok).toBe(true)

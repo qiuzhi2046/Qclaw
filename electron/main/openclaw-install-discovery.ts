@@ -212,6 +212,7 @@ async function runBinaryVersion(binaryPath: string): Promise<string> {
       env: process.env,
       shell: isWindowsCmd,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: process.platform === 'win32',
     })
 
     let stdout = ''

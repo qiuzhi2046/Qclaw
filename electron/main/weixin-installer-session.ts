@@ -9,8 +9,8 @@ import {
   setActiveProcess,
 } from './command-control'
 import { probePlatformCommandCapability } from './command-capabilities'
+import { buildInstallerCommandEnv } from './installer-command-env'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
-import { buildCliPathWithCandidates } from './runtime-path-discovery'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { listWeixinAccountState } from './weixin-account-state'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
@@ -168,9 +168,10 @@ export async function startWeixinInstallerSession(
     return buildSnapshot()
   }
 
+  const commandEnv = buildInstallerCommandEnv()
   const capability = await probePlatformCommandCapability('npx', {
     platform: process.platform,
-    env: process.env,
+    env: commandEnv,
   })
   if (!capability.available) {
     const errorSessionId = activeSession?.id || randomUUID()
@@ -200,12 +201,7 @@ export async function startWeixinInstallerSession(
       platform: process.platform,
     }),
     env: {
-      ...process.env,
-      PATH: buildCliPathWithCandidates({
-        platform: process.platform,
-        currentPath: process.env.PATH || '',
-        env: process.env,
-      }),
+      ...commandEnv,
       NO_COLOR: '1',
       FORCE_COLOR: '0',
       ...isolatedNpmCache.env,

@@ -1836,6 +1836,10 @@ describe('phase helpers', () => {
     expect(getPhaseAfterCancellation()).toBe('ready')
     expect(getPhaseAfterAuthFailure()).toBe('ready')
   })
+
+  it('catches setup callback failures before leaving the onboarding auth flow', () => {
+    expect(modelCenterSource).toContain("void Promise.resolve(onConfigured(context)).catch((callbackError: any) => {")
+  })
 })
 
 describe('provider config collapse helpers', () => {

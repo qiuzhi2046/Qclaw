@@ -47,7 +47,10 @@ import {
 } from './platforms/windows/windows-runtime-policy'
 import {
   buildWindowsGatewayPreflight,
+  cleanupWindowsStartupLauncherIfScheduledTaskHealthy,
+  ensureWindowsStartupLauncherHidden,
   inspectWindowsGatewayLauncherIntegrity,
+  type WindowsGatewayLauncherIntegrity,
 } from './platforms/windows/windows-platform-ops'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 import { reconcileTrustedPluginAllowlist, sanitizeManagedPluginConfig } from './openclaw-plugin-config'
@@ -902,6 +905,96 @@ function emitEnsureGatewayState(
   }
 }
 
+async function reconcileWindowsStartupLauncherAfterSuccessfulEnsure(
+  homeDir: string | null | undefined,
+  launcherIntegrity?: WindowsGatewayLauncherIntegrity | null
+): Promise<void> {
+  if (process.platform !== 'win32') return
+
+  const normalizedHomeDir = normalizeText(homeDir)
+  if (!normalizedHomeDir) return
+  const derivedAppDataDir = /[\\\/]\.openclaw$/i.test(normalizedHomeDir)
+    ? undefined
+    : `${normalizedHomeDir}\\AppData\\Roaming`
+
+  if (launcherIntegrity?.taskName) {
+    await cleanupWindowsStartupLauncherIfScheduledTaskHealthy({
+      appDataDir: derivedAppDataDir,
+      homeDir: normalizedHomeDir,
+      launcherIntegrity,
+    }).catch(() => undefined)
+    return
+  }
+
+  await ensureWindowsStartupLauncherHidden({
+    appDataDir: derivedAppDataDir,
+    homeDir: normalizedHomeDir,
+    launcherIntegrity,
+  }).catch(() => undefined)
+}
+
+function deriveHealthyScheduledTaskLauncherIntegrity(
+  gatewayOwner:
+    | {
+        ownerKind?: string | null
+        ownerLauncherPath?: string | null
+        ownerTaskName?: string | null
+      }
+    | null
+    | undefined
+): WindowsGatewayLauncherIntegrity | null {
+  if (String(gatewayOwner?.ownerKind || '').trim() !== 'scheduled-task') return null
+
+  const taskName = normalizeText(gatewayOwner?.ownerTaskName)
+  const launcherPath = normalizeText(gatewayOwner?.ownerLauncherPath)
+  if (!taskName || !launcherPath) return null
+
+  return {
+    status: 'healthy',
+    taskName,
+    launcherPath,
+    shouldReinstallService: false,
+  }
+}
+
+function deriveHealthyStartupFolderLauncherIntegrity(
+  gatewayOwner:
+    | {
+        ownerKind?: string | null
+        ownerLauncherPath?: string | null
+      }
+    | null
+    | undefined
+): WindowsGatewayLauncherIntegrity | null {
+  if (String(gatewayOwner?.ownerKind || '').trim() !== 'startup-folder') return null
+
+  const launcherPath = normalizeText(gatewayOwner?.ownerLauncherPath)
+  if (!launcherPath) return null
+
+  return {
+    status: 'healthy',
+    taskName: null,
+    launcherPath,
+    shouldReinstallService: false,
+  }
+}
+
+function deriveHealthyManagedLauncherIntegrity(
+  gatewayOwner:
+    | {
+        ownerKind?: string | null
+        ownerLauncherPath?: string | null
+        ownerTaskName?: string | null
+      }
+    | null
+    | undefined
+): WindowsGatewayLauncherIntegrity | null {
+  return (
+    deriveHealthyScheduledTaskLauncherIntegrity(gatewayOwner)
+    || deriveHealthyStartupFolderLauncherIntegrity(gatewayOwner)
+  )
+}
+
 async function safeGatewayHealth(): Promise<GatewayHealthCheckResult> {
   return gatewayHealth().catch(() => createEmptyHealthCheck())
 }
@@ -1418,6 +1511,15 @@ async function ensureGatewayRunningImpl(
   }
   let reconcileRevision: number | null = null
   let openClawVersion: string | null = null
+  const windowsAuthoritativeRuntimeSnapshot =
+    process.platform === 'win32' ? readAuthoritativeWindowsChannelRuntimeSnapshot() : null
+  const windowsGatewayOwnerHomeDir =
+    process.platform === 'win32'
+      ? normalizeText(windowsAuthoritativeRuntimeSnapshot?.stateDir)
+        || normalizeText((await resolveOpenClawPathsForRead().catch(() => null))?.homeDir)
+        || normalizeText(resolveOpenClawPaths().homeDir)
+      : null
+  let windowsGatewayLauncherIntegrity: WindowsGatewayLauncherIntegrity | null = null
 
   const ensureGatewayRuntimeRevision = async (
     pendingReason: string,
@@ -1480,6 +1582,17 @@ async function ensureGatewayRunningImpl(
         summary: persistedSummary,
       }),
     })
+    if (confirmed) {
+      const cleanupLauncherIntegrity =
+        deriveHealthyManagedLauncherIntegrity(
+          windowsAuthoritativeRuntimeSnapshot?.gatewayOwner
+        )
+        || windowsGatewayLauncherIntegrity
+      await reconcileWindowsStartupLauncherAfterSuccessfulEnsure(
+        windowsGatewayOwnerHomeDir,
+        cleanupLauncherIntegrity
+      )
+    }
   }
 
   if (!options.skipRuntimePrecheck) {
@@ -1981,6 +2094,7 @@ async function ensureGatewayRunningImpl(
     const launcherIntegrity = await inspectWindowsGatewayLauncherIntegrity({
       homeDir: preflightHomeDir,
     }).catch(() => null)
+    windowsGatewayLauncherIntegrity = launcherIntegrity
     const preflight = buildWindowsGatewayPreflight({
       gatewayOwner: authoritativeRuntimeSnapshot?.gatewayOwner || null,
       launcherIntegrity,
@@ -2609,6 +2723,15 @@ async function ensureGatewayRunningImpl(
     progress: 100,
     elapsedMs: ready.elapsedMs,
   })
+  const successfulLauncherIntegrity =
+    deriveHealthyManagedLauncherIntegrity(
+      windowsAuthoritativeRuntimeSnapshot?.gatewayOwner
+    )
+    || windowsGatewayLauncherIntegrity
+  await reconcileWindowsStartupLauncherAfterSuccessfulEnsure(
+    windowsGatewayOwnerHomeDir,
+    successfulLauncherIntegrity
+  )
   const result = buildGatewayEnsureResult(
     {
       ok: true,

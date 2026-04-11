@@ -9,6 +9,9 @@ const DEFAULT_FEISHU_ACCOUNT_ID = 'default'
 const BUILTIN_FEISHU_PLUGIN_ID = 'feishu'
 const LEGACY_FEISHU_PLUGIN_IDS = ['feishu-openclaw-plugin']
 const LEGACY_FEISHU_AGENT_IDS = ['feishu-bot']
+const FEISHU_RUNTIME_DEFAULT_CONNECTION_MODE = 'websocket'
+const FEISHU_RUNTIME_DEFAULT_WEBHOOK_PATH = '/feishu/events'
+const FEISHU_RUNTIME_DEFAULT_REACTION_NOTIFICATIONS = 'own'
 
 export interface FeishuBotItem {
   accountId: string
@@ -69,6 +72,53 @@ function ensureFeishuRoot(config: Record<string, any>): Record<string, any> {
   config.channels = config.channels || {}
   config.channels.feishu = config.channels.feishu || {}
   return config.channels.feishu as Record<string, any>
+}
+
+function normalizeFeishuBlockStreamingCoalesce(blockStreaming: unknown): { enabled: boolean } | undefined {
+  if (typeof blockStreaming !== 'boolean') return undefined
+  return { enabled: blockStreaming }
+}
+
+function alignFeishuAccountConfigWithRuntime(account: Record<string, any>): void {
+  if (!hasOwnRecord(account)) return
+
+  if (!hasOwnRecord(account.blockStreamingCoalesce)) {
+    const nextBlockStreamingCoalesce = normalizeFeishuBlockStreamingCoalesce(account.blockStreaming)
+    if (nextBlockStreamingCoalesce) {
+      account.blockStreamingCoalesce = nextBlockStreamingCoalesce
+    }
+  }
+
+  delete account.blockStreaming
+}
+
+function alignFeishuChannelConfigWithRuntime(feishu: Record<string, any>): void {
+  if (!hasOwnRecord(feishu)) return
+
+  if (!normalizeText(feishu.connectionMode)) {
+    feishu.connectionMode = FEISHU_RUNTIME_DEFAULT_CONNECTION_MODE
+  }
+  if (!normalizeText(feishu.webhookPath)) {
+    feishu.webhookPath = FEISHU_RUNTIME_DEFAULT_WEBHOOK_PATH
+  }
+  if (!normalizeText(feishu.reactionNotifications)) {
+    feishu.reactionNotifications = FEISHU_RUNTIME_DEFAULT_REACTION_NOTIFICATIONS
+  }
+  if (typeof feishu.typingIndicator !== 'boolean') {
+    feishu.typingIndicator = true
+  }
+  if (typeof feishu.resolveSenderNames !== 'boolean') {
+    feishu.resolveSenderNames = true
+  }
+
+  alignFeishuAccountConfigWithRuntime(feishu)
+
+  if (hasOwnRecord(feishu.accounts)) {
+    for (const account of Object.values(feishu.accounts)) {
+      if (!hasOwnRecord(account)) continue
+      alignFeishuAccountConfigWithRuntime(account)
+    }
+  }
 }
 
 function createDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
@@ -328,7 +378,11 @@ export function normalizeFeishuOfficialPluginConfig(
 }
 
 export function reconcileFeishuOfficialPluginConfig(config: Record<string, any> | null): Record<string, any> {
-  return applyFeishuMultiBotIsolation(sanitizeFeishuPluginConfig(config))
+  const next = applyFeishuMultiBotIsolation(sanitizeFeishuPluginConfig(config))
+  if (hasOwnRecord(next.channels?.feishu)) {
+    alignFeishuChannelConfigWithRuntime(next.channels.feishu)
+  }
+  return next
 }
 
 export function removeFeishuBotConfigForPluginState(

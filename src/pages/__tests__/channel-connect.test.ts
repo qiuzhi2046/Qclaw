@@ -24,6 +24,7 @@ import {
   resolveManagedPluginInstallPreflight,
   resolveManagedPluginInstallStrategy,
   restoreCapturedFeishuBotConfig,
+  shouldAllowFeishuLinkPairingAfterGatewayFailure,
   shouldValidateFeishuManualCredentials,
 } from '../ChannelConnect'
 import { getChannelDefinition } from '../../lib/openclaw-channel-registry'
@@ -65,6 +66,14 @@ describe('shouldShowChannelConnectSkipButton', () => {
         forceShowSkip: true,
       })
     ).toBe(true)
+  })
+})
+
+describe('ChannelConnect gateway warmup', () => {
+  it('does not start a background gateway ensure when the page opens', () => {
+    expect(channelConnectSource).not.toMatch(
+      /useEffect\(\(\) => \{[\s\S]{0,1200}ensureGatewayRunning\(\{ skipRuntimePrecheck: true \}\)[\s\S]{0,200}\}, \[\]\)/
+    )
   })
 })
 
@@ -412,6 +421,33 @@ describe('ensureGatewayReadyForChannelConnect', () => {
     expect(getManagedChannelPluginStatus).not.toHaveBeenCalled()
   })
 
+  it('allows a tolerated reload failure to continue when the caller explicitly accepts it', async () => {
+    const reloadGatewayAfterChannelChange = vi.fn().mockResolvedValue({
+      ok: false,
+      running: false,
+      stateCode: 'websocket_1006',
+      safeToRetry: true,
+      summary: '网关与上游的握手连接被异常关闭',
+      stdout: '',
+      stderr: 'websocket 1006',
+      code: 1,
+    })
+
+    const appendLog = vi.fn()
+    const result = await ensureGatewayReadyForChannelConnect(
+      { reloadGatewayAfterChannelChange } as Pick<typeof window.api, 'reloadGatewayAfterChannelChange'>,
+      appendLog,
+      {
+        channelId: 'feishu',
+        acceptFailureResult: (failure) => failure.stateCode === 'websocket_1006' && failure.safeToRetry === true,
+      }
+    )
+
+    expect(result).toEqual({ ok: true })
+    expect(reloadGatewayAfterChannelChange).toHaveBeenCalledTimes(1)
+    expect(appendLog).not.toHaveBeenCalled()
+  })
+
   it('skips targeted managed repair for personal weixin and falls through to strict ensure recovery', async () => {
     const reloadGatewayAfterChannelChange = vi.fn().mockResolvedValue({
       ok: false,
@@ -490,6 +526,45 @@ describe('ensureGatewayReadyForChannelConnect', () => {
     expect(repairManagedChannelPlugin).not.toHaveBeenCalled()
     expect(ensureGatewayRunning).toHaveBeenCalledWith({ skipRuntimePrecheck: true })
     expect(getManagedChannelPluginStatus).toHaveBeenCalledWith('openclaw-weixin')
+  })
+})
+
+describe('shouldAllowFeishuLinkPairingAfterGatewayFailure', () => {
+  it('allows link mode to continue to pairing after a retriable websocket_1006 failure', () => {
+    expect(
+      shouldAllowFeishuLinkPairingAfterGatewayFailure({
+        setupMode: 'link',
+        pairingTarget: { accountId: 'default' },
+        gatewayFailure: {
+          stateCode: 'websocket_1006',
+          safeToRetry: true,
+        },
+      })
+    ).toBe(true)
+  })
+
+  it('keeps create mode and missing pairing targets on the original hard-failure path', () => {
+    expect(
+      shouldAllowFeishuLinkPairingAfterGatewayFailure({
+        setupMode: 'create',
+        pairingTarget: { accountId: 'default' },
+        gatewayFailure: {
+          stateCode: 'websocket_1006',
+          safeToRetry: true,
+        },
+      })
+    ).toBe(false)
+
+    expect(
+      shouldAllowFeishuLinkPairingAfterGatewayFailure({
+        setupMode: 'link',
+        pairingTarget: null,
+        gatewayFailure: {
+          stateCode: 'websocket_1006',
+          safeToRetry: true,
+        },
+      })
+    ).toBe(false)
   })
 })
 

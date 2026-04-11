@@ -36,7 +36,7 @@ describe('install-web-v1 policy manifest', () => {
       },
       window: {
         defaultWidth: 800,
-        defaultHeight: 600,
+        defaultHeight: 630,
         minimumWidth: 640,
         minimumHeight: 480,
         backgroundColor: '#09090b',

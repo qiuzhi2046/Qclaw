@@ -4,13 +4,12 @@ const { readFile } = process.getBuiltinModule('node:fs/promises') as typeof impo
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 function extractRunDirectSource(cliSource: string): string {
-  const matched = cliSource.match(
-    /export async function runDirect\([\s\S]*?\n}\n\nfunction buildCommandCapabilityEnv\(\): NodeJS\.ProcessEnv \{/
-  )
-  if (!matched) {
+  const start = cliSource.indexOf('export async function runDirect(')
+  const end = cliSource.indexOf('function buildCommandCapabilityEnv(', start)
+  if (start < 0 || end < 0) {
     throw new Error('runDirect source block not found')
   }
-  return matched[0]
+  return cliSource.slice(start, end)
 }
 
 function extractRunShellAndDirectSource(cliSource: string): string {
@@ -35,8 +34,16 @@ describe('runDirect permission auto repair wiring', () => {
     const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
     const source = extractRunShellAndDirectSource(cliSource)
 
-    expect(source).toMatch(/try\s*\{\s*const proc = spawn\(/)
+    expect(source).toContain('let proc: ChildProcess')
+    expect(source).toMatch(/try\s*\{\s*proc = spawn\(/)
     expect(source).toMatch(/catch \(error\)/)
-    expect(source).toMatch(/stderr: error instanceof Error \? error\.message : String\(error \|\| ''\)/)
+    expect(source).toContain('resolve(createSpawnFailureResult(error))')
+  })
+
+  it('hides Windows console windows for shell and direct helper spawns', async () => {
+    const cliSource = await readFile(path.join(process.cwd(), 'electron/main/cli.ts'), 'utf8')
+    const source = extractRunShellAndDirectSource(cliSource)
+
+    expect(source).toContain("windowsHide: process.platform === 'win32'")
   })
 })

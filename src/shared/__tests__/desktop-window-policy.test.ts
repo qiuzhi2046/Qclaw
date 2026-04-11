@@ -9,7 +9,7 @@ describe('desktop-window-policy', () => {
   it('centralizes default window sizing, background color, and compatibility prefixes', () => {
     expect(DESKTOP_WINDOW_POLICY).toMatchObject({
       defaultWidth: 800,
-      defaultHeight: 600,
+      defaultHeight: 630,
       minimumWidth: 640,
       minimumHeight: 480,
       backgroundColor: '#09090b',
@@ -27,7 +27,7 @@ describe('desktop-window-policy', () => {
   it('keeps default bounds on normal displays', () => {
     expect(resolveMainWindowBounds({ width: 1440, height: 900 })).toEqual({
       width: 800,
-      height: 600,
+      height: 630,
       minWidth: 640,
       minHeight: 480,
     })

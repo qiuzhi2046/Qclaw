@@ -117,6 +117,7 @@ async function defaultRunCommand(
       env: runtimeEnv,
       shell: isWindowsCmd,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: (options.platform || process.platform) === 'win32',
     })
 
     let stdout = ''

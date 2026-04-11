@@ -238,6 +238,7 @@ function runCommandPathLookup(commandName: string, runtime: CommandLookupRuntime
       env: runtime.env,
       cwd: resolveSafeWorkingDirectory({ env: runtime.env, platform: runtime.platform }),
       timeout: runtime.commandLookupTimeoutMs,
+      windowsHide: runtime.platform === 'win32',
     })
 
     let stdout = ''
@@ -268,6 +269,7 @@ function runDirectCommand(command: string, args: string[], runtime: CommandLooku
       env: runtime.env,
       cwd: resolveSafeWorkingDirectory({ env: runtime.env, platform: runtime.platform }),
       timeout: runtime.commandLookupTimeoutMs,
+      windowsHide: runtime.platform === 'win32',
     })
 
     let stdout = ''

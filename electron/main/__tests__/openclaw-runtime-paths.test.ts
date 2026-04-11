@@ -3,6 +3,36 @@ import { resetRuntimeOpenClawPathsCache, resolveRuntimeOpenClawPaths } from '../
 import { buildWindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-runtime-policy'
 import { buildTestEnv } from './test-env'
 
+const { EventEmitter } = process.getBuiltinModule('node:events') as typeof import('node:events')
+
+function createMockSpawnedProcess(result: {
+  code?: number
+  error?: Error
+  stderr?: string
+  stdout?: string
+} = {}) {
+  const proc = new EventEmitter() as EventEmitter & {
+    kill: () => void
+    stderr: EventEmitter
+    stdout: EventEmitter
+  }
+  proc.stdout = new EventEmitter()
+  proc.stderr = new EventEmitter()
+  proc.kill = () => {}
+
+  queueMicrotask(() => {
+    if (result.stdout) proc.stdout.emit('data', result.stdout)
+    if (result.stderr) proc.stderr.emit('data', result.stderr)
+    if (result.error) {
+      proc.emit('error', result.error)
+      return
+    }
+    proc.emit('close', result.code ?? 0)
+  })
+
+  return proc
+}
+
 describe('resolveRuntimeOpenClawPaths', () => {
   afterEach(() => {
     resetRuntimeOpenClawPathsCache()
@@ -273,5 +303,62 @@ describe('resolveRuntimeOpenClawPaths', () => {
 
     expect(first).toEqual(second)
     expect(runCommand).toHaveBeenCalledTimes(2)
+  })
+
+  it('hides Windows console windows while probing runtime paths through child processes', async () => {
+    vi.resetModules()
+    vi.doMock('../windows-active-runtime', () => ({
+      getSelectedWindowsActiveRuntimeSnapshot: () => null,
+    }))
+
+    const spawnCalls: Array<{
+      args: string[]
+      command: string
+      options: Record<string, unknown>
+    }> = []
+    const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id) => {
+      if (id === 'node:child_process' || id === 'child_process') {
+        const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
+        return {
+          ...actual,
+          spawn: (command: string, args: string[], options: Record<string, unknown>) => {
+            spawnCalls.push({ command, args, options })
+            return createMockSpawnedProcess({ code: 1 })
+          },
+        }
+      }
+
+      return originalGetBuiltinModule(id)
+    }) as typeof process.getBuiltinModule)
+
+    try {
+      const runtimePathsModule = await import('../openclaw-runtime-paths')
+
+      await runtimePathsModule.resolveRuntimeOpenClawPaths({
+        binaryPath: 'C:\\Users\\alice\\AppData\\Roaming\\npm\\openclaw.cmd',
+        cacheTtlMs: 0,
+        env: buildTestEnv({
+          APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+          PATH: 'C:\\Users\\alice\\AppData\\Roaming\\npm',
+          USERPROFILE: 'C:\\Users\\alice',
+        }),
+        platform: 'win32',
+      })
+
+      expect(spawnCalls).toHaveLength(2)
+      expect(spawnCalls[0]?.options).toMatchObject({
+        shell: true,
+        windowsHide: true,
+      })
+      expect(spawnCalls[1]?.options).toMatchObject({
+        shell: true,
+        windowsHide: true,
+      })
+    } finally {
+      getBuiltinModuleSpy.mockRestore()
+      vi.doUnmock('../windows-active-runtime')
+      vi.resetModules()
+    }
   })
 })

@@ -174,6 +174,7 @@ import {
   repairManagedChannelPlugin,
 } from './managed-channel-plugin-lifecycle'
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
+import { installGatewayServiceAfterSuccessfulOnboard } from './onboard-gateway-install'
 import {
   clearChatTranscript,
   createChatSession,
@@ -690,7 +691,13 @@ export function registerIpcHandlers() {
   )
 
   // Onboard
-  ipcMain.handle('setup:onboard', (_e, opts) => runOnboard(opts))
+  ipcMain.handle('setup:onboard', async (_e, opts) => {
+    const result = await runOnboard(opts)
+    if (result.ok) {
+      await installGatewayServiceAfterSuccessfulOnboard()
+    }
+    return result
+  })
 
   // Gateway
   ipcMain.handle('gateway:health', () => gatewayHealth())

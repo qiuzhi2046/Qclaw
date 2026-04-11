@@ -1,4 +1,6 @@
 const childProcess = process.getBuiltinModule('node:child_process') as typeof import('node:child_process')
+const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 
 export type PlatformCommandId =
@@ -269,13 +271,86 @@ function extractFirstNonEmptyLine(text: string): string {
   return ''
 }
 
-function runNamedCommandLookup(invocation: CommandLookupInvocation, env: NodeJS.ProcessEnv): Promise<string> {
+function splitWindowsPathEntries(value: string): string[] {
+  const entries = String(value || '').split(';')
+  const uniqueEntries: string[] = []
+  const seen = new Set<string>()
+
+  for (const entry of entries) {
+    const trimmed = entry.trim()
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    uniqueEntries.push(trimmed)
+  }
+
+  return uniqueEntries
+}
+
+function listWindowsExecutableNameCandidates(commandName: string, env: NodeJS.ProcessEnv): string[] {
+  const trimmedCommand = String(commandName || '').trim()
+  if (!trimmedCommand) return []
+
+  const explicitExt = path.win32.extname(trimmedCommand)
+  if (explicitExt) return [trimmedCommand]
+
+  const rawPathExt = String(env.PATHEXT || '').trim()
+  const pathExts = rawPathExt ? rawPathExt.split(';') : ['.COM', '.EXE', '.BAT', '.CMD']
+  const uniqueCandidates = new Set<string>([trimmedCommand])
+
+  for (const pathExt of pathExts) {
+    const trimmedExt = pathExt.trim()
+    if (!trimmedExt) continue
+    const normalizedExt = trimmedExt.startsWith('.') ? trimmedExt : `.${trimmedExt}`
+    uniqueCandidates.add(`${trimmedCommand}${normalizedExt}`)
+  }
+
+  return Array.from(uniqueCandidates)
+}
+
+function resolveWindowsNamedCommandPath(commandName: string, env: NodeJS.ProcessEnv): string | null {
+  const candidateNames = listWindowsExecutableNameCandidates(commandName, env)
+  if (candidateNames.length === 0) return null
+
+  const hasPathSeparators = /[\\/]/.test(commandName)
+  const searchDirs = hasPathSeparators ? [''] : splitWindowsPathEntries(String(env.PATH || ''))
+
+  for (const searchDir of searchDirs) {
+    for (const candidateName of candidateNames) {
+      const candidatePath = searchDir ? path.win32.join(searchDir, candidateName) : candidateName
+      try {
+        if (fs.existsSync(candidatePath)) {
+          return candidatePath
+        }
+      } catch {
+        // Ignore malformed path candidates and continue probing.
+      }
+    }
+  }
+
+  return null
+}
+
+function runNamedCommandLookup(
+  invocation: CommandLookupInvocation,
+  runtime: Required<CommandCapabilityRuntime>
+): Promise<string> {
+  if (runtime.platform === 'win32') {
+    const commandName = invocation.args[0]
+    const resolvedPath = resolveWindowsNamedCommandPath(commandName, runtime.env)
+    if (resolvedPath) {
+      return Promise.resolve(resolvedPath)
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const child = childProcess.spawn(invocation.command, invocation.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: invocation.shell,
-      env,
-      cwd: resolveSafeWorkingDirectory({ env }),
+      env: runtime.env,
+      cwd: resolveSafeWorkingDirectory({ env: runtime.env, platform: runtime.platform }),
+      windowsHide: runtime.platform === 'win32',
     })
 
     let stdout = ''
@@ -387,7 +462,7 @@ export async function probePlatformCommandCapability(
     const resolveCommandPath =
       options.commandPathResolver ||
       ((commandName: string, lookupInvocation: CommandLookupInvocation) =>
-        runNamedCommandLookup(lookupInvocation, runtime.env))
+        runNamedCommandLookup(lookupInvocation, runtime))
 
     try {
       const resolvedPath = await resolveCommandPath(spec.command, invocation)

@@ -10,6 +10,7 @@ import { buildWindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-
 import { buildTestEnv } from './test-env'
 
 const fs = process.getBuiltinModule('fs') as typeof import('node:fs')
+const { EventEmitter } = process.getBuiltinModule('node:events') as typeof import('node:events')
 const os = process.getBuiltinModule('os') as typeof import('node:os')
 const path = process.getBuiltinModule('path') as typeof import('node:path')
 
@@ -147,6 +148,34 @@ function createPluginPollutionLayout(): {
   }
 }
 
+function createMockSpawnedProcess(result: {
+  code?: number
+  error?: Error
+  stderr?: string
+  stdout?: string
+} = {}) {
+  const proc = new EventEmitter() as EventEmitter & {
+    kill: () => void
+    stderr: EventEmitter
+    stdout: EventEmitter
+  }
+  proc.stdout = new EventEmitter()
+  proc.stderr = new EventEmitter()
+  proc.kill = () => {}
+
+  queueMicrotask(() => {
+    if (result.stdout) proc.stdout.emit('data', result.stdout)
+    if (result.stderr) proc.stderr.emit('data', result.stderr)
+    if (result.error) {
+      proc.emit('error', result.error)
+      return
+    }
+    proc.emit('close', result.code ?? 0)
+  })
+
+  return proc
+}
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
@@ -183,6 +212,83 @@ describe('resolveOpenClawBinaryPath', () => {
     })
 
     expect(resolved).toBe(fallbackBinary)
+  })
+
+  it('hides Windows console windows for command lookup and npm prefix fallback probes', async () => {
+    vi.resetModules()
+    vi.doMock('../windows-active-runtime', () => ({
+      getSelectedWindowsActiveRuntimeSnapshot: () => null,
+    }))
+
+    const spawnCalls: Array<{
+      args: string[]
+      command: string
+      options: Record<string, unknown>
+    }> = []
+    const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id) => {
+      if (id === 'node:child_process' || id === 'child_process') {
+        const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
+        return {
+          ...actual,
+          spawn: (command: string, args: string[], options: Record<string, unknown>) => {
+            spawnCalls.push({ command, args, options })
+
+            if (spawnCalls.length === 1) {
+              return createMockSpawnedProcess({
+                code: 1,
+                stderr: 'INFO: Could not find files for the given pattern(s).',
+              })
+            }
+            if (spawnCalls.length === 2) {
+              return createMockSpawnedProcess({
+                code: 0,
+                stdout: 'C:\\Program Files\\nodejs\\npm.cmd\n',
+              })
+            }
+            return createMockSpawnedProcess({
+              code: 0,
+              stdout: 'C:\\Users\\alice\\AppData\\Roaming\\npm\n',
+            })
+          },
+        }
+      }
+
+      return originalGetBuiltinModule(id)
+    }) as typeof process.getBuiltinModule)
+
+    try {
+      const packageModule = await import('../openclaw-package')
+
+      const resolved = await packageModule.resolveOpenClawBinaryPath({
+        commandLookupTimeoutMs: 1_000,
+        env: buildTestEnv({
+          APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+          PATH: 'C:\\Program Files\\nodejs;C:\\Users\\alice\\AppData\\Roaming\\npm',
+          PATHEXT: '.COM;.EXE;.BAT;.CMD',
+          USERPROFILE: 'C:\\Users\\alice',
+        }),
+        fileExists: (candidatePath: string) =>
+          candidatePath.toLowerCase() === 'c:\\users\\alice\\appdata\\roaming\\npm\\openclaw.cmd',
+        platform: 'win32',
+      })
+
+      expect(resolved.toLowerCase()).toBe('c:\\users\\alice\\appdata\\roaming\\npm\\openclaw.cmd')
+      expect(spawnCalls).toHaveLength(3)
+      expect(spawnCalls[0]?.options).toMatchObject({
+        windowsHide: true,
+      })
+      expect(spawnCalls[1]?.options).toMatchObject({
+        windowsHide: true,
+      })
+      expect(spawnCalls[2]?.options).toMatchObject({
+        windowsHide: true,
+      })
+    } finally {
+      getBuiltinModuleSpy.mockRestore()
+      vi.doUnmock('../windows-active-runtime')
+      vi.resetModules()
+    }
   })
 
   it('prefers the Windows private runtime openclaw shim before the roaming npm shim when command lookup fails', async () => {

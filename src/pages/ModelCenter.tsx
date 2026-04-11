@@ -2487,7 +2487,13 @@ export default function ModelCenter({
         })
         return
       }
-      void Promise.resolve(onConfigured(context))
+      void Promise.resolve(onConfigured(context)).catch((callbackError: any) => {
+        const message = toUserFacingCliFailureMessage({
+          stderr: String(callbackError?.message || '').trim(),
+          fallback: '',
+        })
+        applyAuthFailureState(message ? `认证已完成，但进入下一步失败：${message}` : '认证已完成，但进入下一步失败，请稍后重试。')
+      })
     } catch (e: any) {
       if (cancelRequestedRef.current) {
         applyCanceledState()
