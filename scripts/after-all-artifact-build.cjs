@@ -53,6 +53,8 @@ function parseCodesignDetails(output) {
 }
 
 async function afterAllArtifactBuild(buildResult) {
+  if (process.platform !== 'darwin') return []
+
   const appBundles = findAppBundles(buildResult.outDir)
   if (appBundles.length === 0) return []
 

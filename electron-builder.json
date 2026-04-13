@@ -2,7 +2,6 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.qclawai.qclaw",
   "asar": true,
-  "forceCodeSigning": true,
   "afterSign": "scripts/after-sign-notarize.cjs",
   "afterAllArtifactBuild": "scripts/after-all-artifact-build.cjs",
   "directories": {
@@ -30,6 +29,7 @@
     "icon": "build/icon.icns",
     "category": "public.app-category.developer-tools",
     "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}.${ext}",
+    "forceCodeSigning": true,
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "strictVerify": false,
@@ -47,6 +47,7 @@
     "format": "UDZO"
   },
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
