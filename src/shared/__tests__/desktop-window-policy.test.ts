@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DESKTOP_WINDOW_POLICY,
+  resolveMainWindowBrowserWindowOptions,
   resolveMainWindowBounds,
   shouldDisableHardwareAccelerationForPlatform,
 } from '../desktop-window-policy'
@@ -24,8 +25,32 @@ describe('desktop-window-policy', () => {
     expect(shouldDisableHardwareAccelerationForPlatform('darwin', '6.1.7601')).toBe(false)
   })
 
+  it('uses content-size sizing on Windows so frame chrome does not shrink the viewport', () => {
+    expect(resolveMainWindowBrowserWindowOptions('win32')).toEqual({
+      useContentSize: true,
+    })
+    expect(resolveMainWindowBrowserWindowOptions('darwin')).toEqual({
+      useContentSize: false,
+    })
+  })
+
   it('keeps default bounds on normal displays', () => {
     expect(resolveMainWindowBounds({ width: 1440, height: 900 })).toEqual({
+      width: 800,
+      height: 630,
+      minWidth: 640,
+      minHeight: 480,
+    })
+  })
+
+  it('uses a taller default height on Windows without changing macOS defaults', () => {
+    expect(resolveMainWindowBounds({ width: 1440, height: 900 }, 'win32')).toEqual({
+      width: 800,
+      height: 660,
+      minWidth: 640,
+      minHeight: 480,
+    })
+    expect(resolveMainWindowBounds({ width: 1440, height: 900 }, 'darwin')).toEqual({
       width: 800,
       height: 630,
       minWidth: 640,

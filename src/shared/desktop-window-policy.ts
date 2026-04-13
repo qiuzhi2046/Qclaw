@@ -30,6 +30,12 @@ export interface ResolvedMainWindowBounds {
   minHeight: number
 }
 
+export interface ResolvedMainWindowBrowserWindowOptions {
+  useContentSize: boolean
+}
+
+const WINDOWS_DEFAULT_MAIN_WINDOW_HEIGHT = 660
+
 const desktopPolicy = (installWebPolicy as { desktop?: DesktopManifestPolicy }).desktop
 
 function toPositiveInteger(value: unknown, fallback: number): number {
@@ -95,6 +101,17 @@ export const DESKTOP_WINDOW_POLICY = Object.freeze({
     .filter(Boolean),
 })
 
+function resolveDefaultMainWindowHeight(platform?: string): number {
+  if (platform === 'win32') return WINDOWS_DEFAULT_MAIN_WINDOW_HEIGHT
+  return DESKTOP_WINDOW_POLICY.defaultHeight
+}
+
+export function resolveMainWindowBrowserWindowOptions(platform?: string): ResolvedMainWindowBrowserWindowOptions {
+  return {
+    useContentSize: platform === 'win32',
+  }
+}
+
 export function shouldDisableHardwareAccelerationForPlatform(
   platform: string,
   release: string
@@ -107,9 +124,13 @@ export function shouldDisableHardwareAccelerationForPlatform(
   )
 }
 
-export function resolveMainWindowBounds(workArea?: Partial<WindowWorkAreaSize> | null): ResolvedMainWindowBounds {
+export function resolveMainWindowBounds(
+  workArea?: Partial<WindowWorkAreaSize> | null,
+  platform?: string
+): ResolvedMainWindowBounds {
+  const defaultHeight = resolveDefaultMainWindowHeight(platform)
   const availableWidth = toPositiveInteger(workArea?.width, DESKTOP_WINDOW_POLICY.defaultWidth)
-  const availableHeight = toPositiveInteger(workArea?.height, DESKTOP_WINDOW_POLICY.defaultHeight)
+  const availableHeight = toPositiveInteger(workArea?.height, defaultHeight)
 
   const width = resolveDimension({
     defaultValue: DESKTOP_WINDOW_POLICY.defaultWidth,
@@ -118,7 +139,7 @@ export function resolveMainWindowBounds(workArea?: Partial<WindowWorkAreaSize> |
     safeMargin: DESKTOP_WINDOW_POLICY.safeMargin,
   })
   const height = resolveDimension({
-    defaultValue: DESKTOP_WINDOW_POLICY.defaultHeight,
+    defaultValue: defaultHeight,
     minimumValue: DESKTOP_WINDOW_POLICY.minimumHeight,
     availableValue: availableHeight,
     safeMargin: DESKTOP_WINDOW_POLICY.safeMargin,

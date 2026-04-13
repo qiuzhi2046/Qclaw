@@ -8,6 +8,7 @@ import { runAppExitCleanup } from './app-exit-cleanup'
 import { isAllowedExternalOpenUrl } from '../../src/shared/desktop-url-policy'
 import {
   DESKTOP_WINDOW_POLICY,
+  resolveMainWindowBrowserWindowOptions,
   resolveMainWindowBounds,
   shouldDisableHardwareAccelerationForPlatform,
 } from '../../src/shared/desktop-window-policy'
@@ -83,7 +84,8 @@ function createWindow() {
   })
 
   const workAreaSize = screen.getPrimaryDisplay().workAreaSize
-  const mainWindowBounds = resolveMainWindowBounds(workAreaSize)
+  const mainWindowBounds = resolveMainWindowBounds(workAreaSize, process.platform)
+  const mainWindowBrowserWindowOptions = resolveMainWindowBrowserWindowOptions(process.platform)
 
   const appIcon = process.platform === 'win32'
     ? path.join(process.env.VITE_PUBLIC!, 'favicon.ico')
@@ -105,6 +107,7 @@ function createWindow() {
     minHeight: mainWindowBounds.minHeight,
     titleBarStyle: 'hiddenInset',
     show: false,
+    useContentSize: mainWindowBrowserWindowOptions.useContentSize,
     backgroundColor: DESKTOP_WINDOW_POLICY.backgroundColor,
     webPreferences: { preload },
   })
