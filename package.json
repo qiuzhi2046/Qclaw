@@ -15,6 +15,8 @@
     "package:mac:dir": "npm run check:mac:release-env -- --allow-placeholder-publish --skip-notarize && npm run build:app && QCLAW_SKIP_NOTARIZE=1 node scripts/run-electron-builder.mjs --mac dir --publish never",
     "package:mac": "npm run check:mac:release-env -- --allow-placeholder-publish --skip-notarize && npm run build:app && QCLAW_SKIP_NOTARIZE=1 node scripts/run-electron-builder.mjs --mac --publish never",
     "package:mac:notarized": "npm run check:mac:release-env -- --allow-placeholder-publish && npm run build:app && node scripts/run-electron-builder.mjs --mac --publish never",
+    "package:linux": "npm run build:app && node scripts/run-electron-builder.mjs --linux --publish never",
+    "package:linux:dir": "npm run build:app && node scripts/run-electron-builder.mjs --linux dir --publish never",
     "release:mac": "npm run check:mac:release-env && npm run build:app && node scripts/run-electron-builder.mjs --mac --publish never",
     "release:prepare-cos": "node scripts/prepare-cos-update-release.mjs",
     "preview": "vite preview",
