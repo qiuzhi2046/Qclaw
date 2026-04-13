@@ -52,6 +52,7 @@ import {
 } from './openclaw-elevated-lifecycle-transaction'
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
+import { writeWindowsManagedOpenClawRuntimeMarker } from './platforms/windows/windows-runtime-policy'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
@@ -956,9 +957,20 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
       }
     }
 
-    const activatedManagedRuntime = await activateManagedRuntimeAfterQclawOwnedUpgrade(check.activeCandidate)
+    const markerWritten = process.platform === 'win32'
+      ? await writeWindowsManagedOpenClawRuntimeMarker().catch(() => ({ ok: false }))
+      : { ok: false }
+    const effectiveInstallSource =
+      markerWritten.ok && !isQclawOwnedUpgradeSource(check.activeCandidate.installSource)
+        ? 'qclaw-managed' as const
+        : check.activeCandidate.installSource
+
+    const activatedManagedRuntime = await activateManagedRuntimeAfterQclawOwnedUpgrade({
+      ...check.activeCandidate,
+      installSource: effectiveInstallSource,
+    })
     const activationWarnings =
-      process.platform === 'win32' && isQclawOwnedUpgradeSource(check.activeCandidate.installSource) && !activatedManagedRuntime
+      process.platform === 'win32' && isQclawOwnedUpgradeSource(effectiveInstallSource) && !activatedManagedRuntime
         ? ['OpenClaw 已写入 Qclaw 托管运行时，但当前会话未能自动切换到新的托管运行时。']
         : []
     const versionCheck = await checkOpenClaw()
@@ -985,7 +997,7 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
         blocked: false,
         currentVersion: upgradedVersion || check.currentVersion,
         targetVersion: check.targetVersion,
-        installSource: check.activeCandidate.installSource,
+        installSource: effectiveInstallSource,
         backupCreated,
         gatewayWasRunning,
         gatewayRestored: Boolean(gatewayWasRunning ? gatewayRestoreResult.ok : true),
@@ -1000,7 +1012,7 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
       blocked: false,
       currentVersion: upgradedVersion || check.currentVersion,
       targetVersion: check.targetVersion,
-      installSource: check.activeCandidate.installSource,
+      installSource: effectiveInstallSource,
       backupCreated,
       gatewayWasRunning,
       gatewayRestored: Boolean(gatewayWasRunning ? gatewayRestoreResult.ok : true),

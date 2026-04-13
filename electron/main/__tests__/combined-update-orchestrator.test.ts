@@ -75,8 +75,8 @@ describe('combined update orchestrator', () => {
     runOpenClawUpgradeMock.mockResolvedValue({
       ok: true,
       blocked: false,
-      currentVersion: '2026.4.11',
-      targetVersion: '2026.4.11',
+      currentVersion: '2026.4.12',
+      targetVersion: '2026.4.12',
       installSource: 'npm-global',
       backupCreated: null,
       gatewayWasRunning: false,
@@ -103,7 +103,7 @@ describe('combined update orchestrator', () => {
       ok: false,
       activeCandidate: null,
       currentVersion: '2026.4.10',
-      targetVersion: '2026.4.11',
+      targetVersion: '2026.4.12',
       latestCheck: null,
       policyState: 'below_min',
       enforcement: 'manual_block',
@@ -114,7 +114,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请在原安装位置手动切换到 2026.4.11',
+      manualHint: '请在原安装位置手动切换到 2026.4.12',
       errorCode: 'manual_only',
     })
 
@@ -128,7 +128,7 @@ describe('combined update orchestrator', () => {
       ok: false,
       activeCandidate: null,
       currentVersion: '2026.3.25',
-      targetVersion: '2026.4.11',
+      targetVersion: '2026.4.12',
       latestCheck: null,
       policyState: 'above_max',
       enforcement: 'manual_block',
@@ -139,7 +139,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请手动回退到 2026.4.11',
+      manualHint: '请手动回退到 2026.4.12',
       errorCode: 'manual_only',
     })
 
@@ -153,7 +153,7 @@ describe('combined update orchestrator', () => {
       ok: true,
       activeCandidate: null,
       currentVersion: '2026.3.21',
-      targetVersion: '2026.4.11',
+      targetVersion: '2026.4.12',
       latestCheck: null,
       policyState: 'below_min',
       enforcement: 'auto_correct',
@@ -176,7 +176,7 @@ describe('combined update orchestrator', () => {
       ok: false,
       activeCandidate: null,
       currentVersion: '2026.3.25',
-      targetVersion: '2026.4.11',
+      targetVersion: '2026.4.12',
       latestCheck: null,
       policyState: 'above_max',
       enforcement: 'manual_block',
@@ -187,7 +187,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请手动回退到 2026.4.11',
+      manualHint: '请手动回退到 2026.4.12',
       errorCode: 'manual_only',
     })
 

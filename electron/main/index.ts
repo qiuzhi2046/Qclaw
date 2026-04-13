@@ -18,6 +18,7 @@ import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
 import { sanitizeNodeOptionsForElectron } from './node-options'
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import { shouldBypassAppExitCleanupOnQuit } from './qclaw-update-install-lifecycle'
+import { healMissingManagedRuntimeMarker } from './platforms/windows/windows-runtime-policy'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
@@ -273,11 +274,14 @@ function createTray() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerIpcHandlers()
   void appendEnvCheckDiagnostic('main-ipc-handlers-registered', {
     userDataDir: app.getPath('userData'),
   })
+  if (process.platform === 'win32') {
+    await healMissingManagedRuntimeMarker().catch(() => undefined)
+  }
   createWindow()
   createTray()
 })

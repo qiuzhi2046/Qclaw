@@ -144,7 +144,7 @@ function createModernManifestPackageRoot(): string {
     JSON.stringify(
       {
         name: 'openclaw',
-        version: '2026.4.11-test',
+        version: '2026.4.12-test',
       },
       null,
       2

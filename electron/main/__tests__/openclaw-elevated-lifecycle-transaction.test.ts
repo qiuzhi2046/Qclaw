@@ -204,7 +204,7 @@ describe('openclaw-elevated-lifecycle-transaction', () => {
   it('returns lifecycle_failed_environment_repaired when the privileged command fails but repair and verification succeed', async () => {
     const result = await runMacOpenClawElevatedLifecycleTransaction({
       operation: 'upgrade',
-      lifecycleCommand: "npm 'install' '-g' 'openclaw@2026.4.11'",
+      lifecycleCommand: "npm 'install' '-g' 'openclaw@2026.4.12'",
       prompt: 'prompt',
       timeoutMs: 1000,
       controlDomain: 'upgrade',

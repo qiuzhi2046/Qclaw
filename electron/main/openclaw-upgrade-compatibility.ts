@@ -60,6 +60,7 @@ export function detectOpenClawVersionBand(version: string | null | undefined): O
   if (compareOpenClawVersions(normalized, '2026.3.24') <= 0) return 'openclaw_2026_3_23_to_2026_3_24'
   if (compareOpenClawVersions(normalized, '2026.4.10') <= 0) return 'openclaw_2026_3_25_to_2026_4_10'
   if (compareOpenClawVersions(normalized, '2026.4.11') === 0) return 'openclaw_2026_4_11'
+  if (compareOpenClawVersions(normalized, '2026.4.12') === 0) return 'openclaw_2026_4_12'
   return 'unknown_future'
 }
 
@@ -109,7 +110,7 @@ function buildWarningCodes(
     }
   }
 
-  if (currentBand === 'openclaw_2026_3_25_to_2026_4_10' || currentBand === 'openclaw_2026_4_11') {
+  if (currentBand === 'openclaw_2026_3_25_to_2026_4_10' || currentBand === 'openclaw_2026_4_11' || currentBand === 'openclaw_2026_4_12') {
     if (status === 'upgrade_detected' || status === 'downgrade_detected') {
       warnings.push('runtime_reconcile_required')
     }

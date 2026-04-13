@@ -12,7 +12,7 @@ function createCombinedUpdateCheck(
     openclaw: {
       ok: true,
       activeCandidate: null,
-      currentVersion: '2026.4.11',
+      currentVersion: '2026.4.12',
       targetVersion: null,
       latestCheck: null,
       policyState: 'supported_target',
@@ -49,18 +49,18 @@ describe('UpdateCenter summaries', () => {
       summarizeOpenClaw(
         createCombinedUpdateCheck({
           currentVersion: '2026.4.10',
-          targetVersion: '2026.4.11',
+          targetVersion: '2026.4.12',
           enforcement: 'manual_block',
           blocksContinue: true,
           canSelfHeal: false,
           canAutoUpgrade: false,
           policyState: 'below_min',
           targetAction: 'upgrade',
-          manualHint: '请在原安装位置手动切换到 2026.4.11',
+          manualHint: '请在原安装位置手动切换到 2026.4.12',
           errorCode: 'manual_only',
         })
       )
-    ).toContain('手动调整到 2026.4.11')
+    ).toContain('手动调整到 2026.4.12')
   })
 
   it('keeps auto-correct summaries pointing users back to startup repair', () => {
@@ -72,7 +72,7 @@ describe('UpdateCenter summaries', () => {
           policyState: 'below_min',
         })
       )
-    ).toContain('启动阶段会先自动修复到 2026.4.11')
+    ).toContain('启动阶段会先自动修复到 2026.4.12')
   })
 
   it('summarizes qclaw updates from current to available version', () => {

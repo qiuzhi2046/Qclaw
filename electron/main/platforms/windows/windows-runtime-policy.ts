@@ -1,6 +1,7 @@
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+import { atomicWriteJson } from '../../atomic-write'
 
 export interface WindowsSelectedRuntimeSnapshotFields {
   hostPackageRoot: string
@@ -228,6 +229,55 @@ export function buildWindowsManagedOpenClawRuntimeMarker(
     nodeVersion: path.win32.basename(nodeRuntimePaths.nodeVersionDir),
     schema: 'qclaw-managed-openclaw-runtime',
   }
+}
+
+export async function writeWindowsManagedOpenClawRuntimeMarker(
+  options: ResolveWindowsPrivateNodeRuntimePathsOptions = {}
+): Promise<{ ok: boolean; markerPath: string; error?: string }> {
+  const paths = resolveWindowsPrivateOpenClawRuntimePaths(options)
+  const markerPath = paths.runtimeMarkerPath
+
+  try {
+    await fs.promises.access(paths.openclawExecutable)
+    await fs.promises.access(paths.packageJsonPath)
+    const pkg = JSON.parse(await fs.promises.readFile(paths.packageJsonPath, 'utf8')) as { name?: string }
+    if (String(pkg.name || '').trim() !== 'openclaw') {
+      return { ok: false, markerPath, error: 'package.json name is not openclaw' }
+    }
+  } catch {
+    return { ok: false, markerPath, error: 'managed path not populated' }
+  }
+
+  const marker = buildWindowsManagedOpenClawRuntimeMarker(options)
+  try {
+    await atomicWriteJson(markerPath, marker)
+    return { ok: true, markerPath }
+  } catch (error) {
+    return {
+      ok: false,
+      markerPath,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+export async function healMissingManagedRuntimeMarker(
+  options: ResolveWindowsPrivateNodeRuntimePathsOptions = {}
+): Promise<{ healed: boolean; markerPath: string }> {
+  if (process.platform !== 'win32') return { healed: false, markerPath: '' }
+
+  const paths = resolveWindowsPrivateOpenClawRuntimePaths(options)
+  const markerPath = paths.runtimeMarkerPath
+
+  try {
+    await fs.promises.access(markerPath)
+    return { healed: false, markerPath }
+  } catch {
+    // marker missing, attempt heal
+  }
+
+  const result = await writeWindowsManagedOpenClawRuntimeMarker(options)
+  return { healed: result.ok, markerPath }
 }
 
 function normalizeOpenClawVersionProbe(value: string | null | undefined): string | null {

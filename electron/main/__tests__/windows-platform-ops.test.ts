@@ -85,7 +85,7 @@ describe('classifyWindowsStartupLauncherScript', () => {
   it('classifies the legacy minimized cmd startup launcher as patchable', () => {
     const script = [
       '@echo off',
-      'rem OpenClaw Gateway (v2026.4.11)',
+      'rem OpenClaw Gateway (v2026.4.12)',
       'start "" /min cmd.exe /d /c C:\\Users\\demo\\.openclaw\\gateway.cmd',
     ].join('\r\n')
 
@@ -101,7 +101,7 @@ describe('classifyWindowsStartupLauncherScript', () => {
     const launcherPath = 'C:\\Users\\demo\\.openclaw\\gateway.cmd'
     const script = [
       '@echo off',
-      'rem OpenClaw Gateway (v2026.4.11)',
+      'rem OpenClaw Gateway (v2026.4.12)',
       'rem QClaw patched: keep Startup fallback compatible while hiding the long-lived shell window.',
       `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$scriptPath = '${launcherPath}'; Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$scriptPath -WindowStyle Hidden" || start "" /min cmd.exe /d /c "${launcherPath}"`,
       `rem QClaw startup launcher target: ${launcherPath}`,
@@ -159,7 +159,7 @@ describe('classifyWindowsStartupLauncherScript', () => {
 describe('buildHiddenWindowsStartupLauncherScript', () => {
   it('builds a hidden launcher with fallback and an explicit target marker', () => {
     const script = buildHiddenWindowsStartupLauncherScript({
-      description: 'OpenClaw Gateway (v2026.4.11)',
+      description: 'OpenClaw Gateway (v2026.4.12)',
       scriptPath: 'C:\\Users\\demo\\.openclaw\\gateway.cmd',
     })
 
@@ -183,7 +183,7 @@ describe('ensureWindowsStartupLauncherHidden', () => {
       fileExists: (targetPath) => targetPath === startupEntryPath || targetPath === launcherPath,
       readFile: async (targetPath) =>
         targetPath === startupEntryPath
-          ? ['@echo off', 'rem OpenClaw Gateway (v2026.4.11)', `start "" /min cmd.exe /d /c ${launcherPath}`].join('\r\n')
+          ? ['@echo off', 'rem OpenClaw Gateway (v2026.4.12)', `start "" /min cmd.exe /d /c ${launcherPath}`].join('\r\n')
           : '',
       writeFile: async (_targetPath, content) => {
         written = content
@@ -214,7 +214,7 @@ describe('ensureWindowsStartupLauncherHidden', () => {
         readFile: async () =>
           [
             '@echo off',
-            'rem OpenClaw Gateway (v2026.4.11)',
+            'rem OpenClaw Gateway (v2026.4.12)',
             'rem QClaw patched: keep Startup fallback compatible while hiding the long-lived shell window.',
             `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$scriptPath = '${launcherPath}'; Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$scriptPath -WindowStyle Hidden" || start "" /min cmd.exe /d /c "${launcherPath}"`,
             `rem QClaw startup launcher target: ${launcherPath}`,
@@ -327,7 +327,7 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
           targetPath === startupEntryPath
             ? [
                 '@echo off',
-                'rem OpenClaw Gateway (v2026.4.11)',
+                'rem OpenClaw Gateway (v2026.4.12)',
                 `start "" /min cmd.exe /d /c ${launcherPath}`,
               ].join('\r\n')
             : '',
@@ -361,7 +361,7 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
           targetPath === startupEntryPath
             ? [
                 '@echo off',
-                'rem OpenClaw Gateway (v2026.4.11)',
+                'rem OpenClaw Gateway (v2026.4.12)',
                 `start "" /min cmd.exe /d /c ${launcherPath}`,
               ].join('\r\n')
             : '',
@@ -417,7 +417,7 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
         readFile: async () =>
           [
             '@echo off',
-            'rem OpenClaw Gateway (v2026.4.11)',
+            'rem OpenClaw Gateway (v2026.4.12)',
             'rem QClaw patched: keep Startup fallback compatible while hiding the long-lived shell window.',
             `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$scriptPath = '${launcherPath}'; Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$scriptPath -WindowStyle Hidden" || start "" /min cmd.exe /d /c "${launcherPath}"`,
             `rem QClaw startup launcher target: ${launcherPath}`,

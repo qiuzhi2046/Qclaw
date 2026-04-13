@@ -381,7 +381,7 @@ describe('createEnvCheckRestartState', () => {
     ).toBe('plugin repair failed because node is unavailable')
   })
 
-  it('treats 2026.4.11 as the minimum supported openclaw version after stripping suffixes', () => {
+  it('treats 2026.4.12 as the minimum supported openclaw version after stripping suffixes', () => {
     const isSupportedOpenClawVersion = (
       EnvCheckModule as typeof EnvCheckModule & {
         isSupportedOpenClawVersion?: (version: string) => boolean
@@ -389,10 +389,10 @@ describe('createEnvCheckRestartState', () => {
     ).isSupportedOpenClawVersion
 
     expect(isSupportedOpenClawVersion).toBeTypeOf('function')
-    expect(isSupportedOpenClawVersion?.('2026.4.11')).toBe(true)
-    expect(isSupportedOpenClawVersion?.('2026.4.11-2')).toBe(true)
+    expect(isSupportedOpenClawVersion?.('2026.4.12')).toBe(true)
+    expect(isSupportedOpenClawVersion?.('2026.4.12-2')).toBe(true)
     expect(isSupportedOpenClawVersion?.('2026.4.10')).toBe(false)
-    expect(isSupportedOpenClawVersion?.('2026.4.12')).toBe(false)
+    expect(isSupportedOpenClawVersion?.('2026.4.13')).toBe(false)
     expect(isSupportedOpenClawVersion?.('2026.3.21')).toBe(false)
     expect(isSupportedOpenClawVersion?.('2026.3.25')).toBe(false)
   })
@@ -407,7 +407,7 @@ describe('createEnvCheckRestartState', () => {
             binaryPath: '/usr/local/bin/openclaw',
             resolvedBinaryPath: '/usr/local/lib/node_modules/openclaw/openclaw.mjs',
             packageRoot: '/usr/local/lib/node_modules/openclaw',
-            version: '2026.4.11',
+            version: '2026.4.12',
             installSource: 'npm-global',
             isPathActive: true,
             configPath: '/Users/test/.openclaw/openclaw.json',
@@ -434,7 +434,7 @@ describe('createEnvCheckRestartState', () => {
           binaryPath: '/usr/local/bin/openclaw',
           resolvedBinaryPath: '/usr/local/lib/node_modules/openclaw/openclaw.mjs',
           packageRoot: '/usr/local/lib/node_modules/openclaw',
-          version: '2026.4.11',
+          version: '2026.4.12',
           installSource: 'npm-global',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -446,7 +446,7 @@ describe('createEnvCheckRestartState', () => {
           baselineBackup: null,
           baselineBackupBypass: null,
         },
-        currentVersion: '2026.4.11',
+        currentVersion: '2026.4.12',
         targetVersion: null,
         latestCheck: null,
         policyState: 'supported_target',
@@ -517,7 +517,7 @@ describe('createEnvCheckRestartState', () => {
           baselineBackupBypass: null,
         },
         currentVersion: '2026.3.25',
-        targetVersion: '2026.4.11',
+        targetVersion: '2026.4.12',
         latestCheck: null,
         policyState: 'above_max',
         enforcement: 'manual_block',
@@ -528,7 +528,7 @@ describe('createEnvCheckRestartState', () => {
         upToDate: false,
         gatewayRunning: false,
         warnings: [],
-        manualHint: '请在原安装位置手动切换到 2026.4.11',
+        manualHint: '请在原安装位置手动切换到 2026.4.12',
         errorCode: 'manual_only',
       }
     )
@@ -536,7 +536,7 @@ describe('createEnvCheckRestartState', () => {
     expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(true)
-    expect(gateState.manualHint).toContain('2026.4.11')
+    expect(gateState.manualHint).toContain('2026.4.12')
   })
 
   it('builds a clear consent message before automatic openclaw correction runs', () => {
@@ -562,7 +562,7 @@ describe('createEnvCheckRestartState', () => {
         ok: false,
         activeCandidate: null,
         currentVersion: '2026.3.28',
-        targetVersion: '2026.4.11',
+        targetVersion: '2026.4.12',
         latestCheck: null,
         policyState: 'above_max',
         enforcement: 'auto_correct',
@@ -577,7 +577,7 @@ describe('createEnvCheckRestartState', () => {
     })
 
     expect(message).toContain('当前版本：2026.3.28')
-    expect(message).toContain('目标版本：2026.4.11')
+    expect(message).toContain('目标版本：2026.4.12')
     expect(message).toContain('自动回退 OpenClaw')
     expect(message).toContain('Qclaw 将立即退出')
   })
@@ -632,7 +632,7 @@ describe('createEnvCheckRestartState', () => {
           baselineBackupBypass: null,
         },
         currentVersion: '2026.4.10',
-        targetVersion: '2026.4.11',
+        targetVersion: '2026.4.12',
         latestCheck: null,
         policyState: 'below_min',
         enforcement: 'manual_block',
@@ -643,7 +643,7 @@ describe('createEnvCheckRestartState', () => {
         upToDate: false,
         gatewayRunning: false,
         warnings: [],
-        manualHint: '请在原安装位置手动切换到 2026.4.11',
+        manualHint: '请在原安装位置手动切换到 2026.4.12',
         errorCode: 'manual_only',
       }
     )
@@ -651,7 +651,7 @@ describe('createEnvCheckRestartState', () => {
     expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(true)
-    expect(gateState.manualHint).toContain('2026.4.11')
+    expect(gateState.manualHint).toContain('2026.4.12')
   })
 
   it('shows manual openclaw hints for blocking external installs while suppressing qclaw-owned runtimes', () => {

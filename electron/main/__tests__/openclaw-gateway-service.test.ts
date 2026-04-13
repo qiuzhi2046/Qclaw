@@ -2100,7 +2100,7 @@ describe('openclaw gateway service', () => {
       startupEntryPath,
       [
         '@echo off',
-        'rem OpenClaw Gateway (v2026.4.11)',
+        'rem OpenClaw Gateway (v2026.4.12)',
         `start "" /min cmd.exe /d /c ${launcherPath}`,
       ].join('\r\n')
     )
@@ -2167,7 +2167,7 @@ describe('openclaw gateway service', () => {
         startupEntryPath,
         [
           '@echo off',
-          'rem OpenClaw Gateway (v2026.4.11)',
+          'rem OpenClaw Gateway (v2026.4.12)',
           `start "" /min cmd.exe /d /c ${launcherPath}`,
         ].join('\r\n')
       )

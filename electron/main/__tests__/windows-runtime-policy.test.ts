@@ -301,12 +301,12 @@ describe('prepareWindowsManagedOpenClawRuntimeCandidate', () => {
       },
       {
         access: async () => undefined,
-        probeVersion: async () => 'OpenClaw 2026.4.11 (cff6dc9)',
+        probeVersion: async () => 'OpenClaw 2026.4.12 (cff6dc9)',
         readTextFile: async (targetPath: string) => {
           if (targetPath === expectedPaths.packageJsonPath) {
             return JSON.stringify({
               name: 'openclaw',
-              version: '2026.4.11',
+              version: '2026.4.12',
             })
           }
           if (targetPath === expectedPaths.runtimeMarkerPath) {
@@ -318,7 +318,7 @@ describe('prepareWindowsManagedOpenClawRuntimeCandidate', () => {
     )
 
     expect(result.ok).toBe(true)
-    expect(result.version).toBe('2026.4.11')
+    expect(result.version).toBe('2026.4.12')
     expect(result.marker).toEqual(expectedMarker)
     expect(result.paths).toEqual(expectedPaths)
     expect(result.snapshot).toMatchObject({

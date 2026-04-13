@@ -13,6 +13,7 @@ import { applyEnvFileUpdates } from './env-file'
 import { createOAuthOutputScanner, shouldAutoOpenBrowserForArgs } from './oauth-browser'
 import { normalizeAuthChoice } from './openclaw-spawn'
 import { resolveStdioForCommand } from './cli-process'
+import { writeWindowsManagedOpenClawRuntimeMarker } from './platforms/windows/windows-runtime-policy'
 import { buildMacDeveloperToolsProbeEnv } from './mac-developer-tools'
 import {
   probePlatformCommandCapability,
@@ -5571,6 +5572,10 @@ async function finalizeInstallResult(
 ): Promise<CliResult> {
   if (!installResult.ok) {
     return installResult
+  }
+
+  if (process.platform === 'win32' && expectations.expectOpenClaw) {
+    await writeWindowsManagedOpenClawRuntimeMarker().catch(() => undefined)
   }
 
   await refreshEnvironment().catch(() => ({ ok: false }))

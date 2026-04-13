@@ -283,7 +283,7 @@ describe('openclaw backup index', () => {
           binaryPath: '/tmp/openclaw-managed',
           resolvedBinaryPath: '/tmp/openclaw-managed',
           packageRoot: '/tmp',
-          version: '2026.4.11',
+          version: '2026.4.12',
           installSource: 'custom',
           isPathActive: true,
           configPath,
@@ -324,7 +324,7 @@ describe('openclaw backup index', () => {
           backupType: 'upgrade-preflight',
           installFingerprint: 'fingerprint-fallback-visible',
           candidate: {
-            version: '2026.4.11',
+            version: '2026.4.12',
           },
         },
         null,

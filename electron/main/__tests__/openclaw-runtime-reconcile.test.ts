@@ -48,11 +48,11 @@ describe('openclaw runtime reconcile store', () => {
     await recordObservedOpenClawVersion('2026.3.11', {
       seenAt: '2026-03-23T10:00:00.000Z',
     })
-    const store = await recordObservedOpenClawVersion('v2026.4.11', {
+    const store = await recordObservedOpenClawVersion('v2026.4.12', {
       seenAt: '2026-03-23T10:05:00.000Z',
     })
 
-    expect(store.lastSeenOpenClawVersion).toBe('2026.4.11')
+    expect(store.lastSeenOpenClawVersion).toBe('2026.4.12')
     expect(store.lastSeenVersionBand).toBe('openclaw_2026_4_11')
     expect(store.lastCompatibility.status).toBe('upgrade_detected')
     expect(store.lastCompatibility.previousVersion).toBe('2026.3.11')

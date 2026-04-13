@@ -35,7 +35,7 @@ function writeManagedRuntimeVerificationArtifacts(baseDir: string, packageRoot: 
     path.join(packageRoot, 'package.json'),
     JSON.stringify({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
     }, null, 2)
   )
   fs.writeFileSync(
@@ -313,7 +313,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot: path.join(installDir, 'lib', 'node_modules', 'openclaw'),
       packageJsonPath: path.join(installDir, 'lib', 'node_modules', 'openclaw', 'package.json'),
       binaryPath,
@@ -366,7 +366,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot: path.join(installDir, 'lib', 'node_modules', 'openclaw'),
       packageJsonPath: path.join(installDir, 'lib', 'node_modules', 'openclaw', 'package.json'),
       binaryPath,
@@ -533,7 +533,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot,
       packageJsonPath: path.join(packageRoot, 'package.json'),
       binaryPath,
@@ -597,7 +597,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot,
       packageJsonPath: path.join(packageRoot, 'package.json'),
       binaryPath,
@@ -664,7 +664,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot,
       packageJsonPath: path.join(packageRoot, 'package.json'),
       binaryPath,
@@ -719,7 +719,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot,
       packageJsonPath: path.join(packageRoot, 'package.json'),
       binaryPath,
@@ -741,7 +741,7 @@ describe('discoverOpenClawInstallations', () => {
     getBaselineBackupBypassStatusMock.mockResolvedValue(null)
 
     const installFingerprint = createHash('sha256')
-      .update([binaryPath, packageRoot, '2026.4.11', path.join(stateRoot, 'openclaw.json'), stateRoot].join('\n'))
+      .update([binaryPath, packageRoot, '2026.4.12', path.join(stateRoot, 'openclaw.json'), stateRoot].join('\n'))
       .digest('hex')
 
     const { discoverOpenClawInstallations } = await import('../openclaw-install-discovery')
@@ -782,7 +782,7 @@ describe('discoverOpenClawInstallations', () => {
       path.join(packageRoot, 'package.json'),
       JSON.stringify({
         name: 'openclaw',
-        version: '2026.4.11',
+        version: '2026.4.12',
       }, null, 2)
     )
 
@@ -793,7 +793,7 @@ describe('discoverOpenClawInstallations', () => {
     })
     readOpenClawPackageInfoMock.mockResolvedValue({
       name: 'openclaw',
-      version: '2026.4.11',
+      version: '2026.4.12',
       packageRoot,
       packageJsonPath: path.join(packageRoot, 'package.json'),
       binaryPath,

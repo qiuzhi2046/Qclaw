@@ -31,7 +31,7 @@ describe('openclaw upgrade compatibility', () => {
 
   it('marks unaudited future versions as conservative mode', () => {
     const assessment = assessOpenClawUpgradeCompatibility({
-      currentVersion: '2026.4.12',
+      currentVersion: '2026.4.13',
       previousVersion: '2026.3.22',
       assessedAt: '2026-03-23T10:00:00.000Z',
     })
@@ -62,18 +62,18 @@ describe('openclaw upgrade compatibility', () => {
     expect(assessment.summary).toContain('doctor --fix')
   })
 
-  it('treats the pinned 2026.4.11 target as an audited downgrade destination', () => {
+  it('treats the pinned 2026.4.12 target as an audited downgrade destination', () => {
     const assessment = assessOpenClawUpgradeCompatibility({
-      currentVersion: '2026.4.11',
-      previousVersion: '2026.4.12',
+      currentVersion: '2026.4.12',
+      previousVersion: '2026.4.13',
       assessedAt: '2026-03-29T10:00:00.000Z',
     })
 
     expect(assessment.status).toBe('downgrade_detected')
-    expect(assessment.currentBand).toBe('openclaw_2026_4_11')
+    expect(assessment.currentBand).toBe('openclaw_2026_4_12')
     expect(assessment.conservativeMode).toBe(false)
     expect(assessment.warningCodes).toContain('runtime_reconcile_required')
+    expect(assessment.summary).toContain('2026.4.13')
     expect(assessment.summary).toContain('2026.4.12')
-    expect(assessment.summary).toContain('2026.4.11')
   })
 })
