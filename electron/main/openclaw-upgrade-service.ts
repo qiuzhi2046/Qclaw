@@ -357,6 +357,107 @@ function isUserManagedInstall(candidate: OpenClawInstallCandidate): boolean {
     .every((value) => isPathInsideHome(value))
 }
 
+function parseOpenClawRenameConflict(output: string): {
+  packagePath: string
+  destPath: string
+} | null {
+  const text = String(output || '')
+  if (!/\bENOTEMPTY\b/i.test(text) || !/\brename\b/i.test(text)) return null
+
+  let packagePath = ''
+  let destPath = ''
+
+  for (const line of text.split(/\r?\n/g)) {
+    const pathMatch = line.match(/^npm error path\s+(.+)$/i)
+    if (pathMatch?.[1]) {
+      packagePath = pathMatch[1].trim()
+      continue
+    }
+
+    const destMatch = line.match(/^npm error dest\s+(.+)$/i)
+    if (destMatch?.[1]) {
+      destPath = destMatch[1].trim()
+      continue
+    }
+
+    const renameMatch = line.match(/ENOTEMPTY: .*rename ['"](.+?)['"] -> ['"](.+?)['"]/i)
+    if (renameMatch) {
+      packagePath ||= String(renameMatch[1] || '').trim()
+      destPath ||= String(renameMatch[2] || '').trim()
+    }
+  }
+
+  return packagePath || destPath ? { packagePath, destPath } : null
+}
+
+function isSafeOpenClawCleanupTarget(packageRoot: string, targetPath: string): boolean {
+  const normalizedPackageRoot = String(packageRoot || '').trim()
+  const normalizedTarget = String(targetPath || '').trim()
+  if (!normalizedPackageRoot || !normalizedTarget) return false
+  if (!isPathInsideHome(normalizedPackageRoot) || !isPathInsideHome(normalizedTarget)) return false
+
+  const packageDirName = path.basename(normalizedPackageRoot)
+  if (packageDirName !== 'openclaw') return false
+
+  if (normalizePathSignature(normalizedTarget) === normalizePathSignature(normalizedPackageRoot)) {
+    return true
+  }
+
+  return (
+    normalizePathSignature(path.dirname(normalizedTarget)) ===
+      normalizePathSignature(path.dirname(normalizedPackageRoot)) &&
+    /^openclaw-[0-9a-z._-]+$/i.test(path.basename(normalizedTarget))
+  )
+}
+
+function resolveOpenClawRenameCleanupTargets(
+  candidate: OpenClawInstallCandidate,
+  result: Awaited<ReturnType<typeof runShell>>
+): string[] {
+  if (!isUserManagedInstall(candidate) || result.ok) return []
+
+  const packageRoot = String(candidate.packageRoot || '').trim()
+  if (!packageRoot || !isSafeOpenClawCleanupTarget(packageRoot, packageRoot)) return []
+
+  const renameConflict = parseOpenClawRenameConflict(
+    `${String(result.stderr || '')}\n${String(result.stdout || '')}`
+  )
+  if (!renameConflict) return []
+
+  if (
+    renameConflict.packagePath &&
+    normalizePathSignature(renameConflict.packagePath) !== normalizePathSignature(packageRoot)
+  ) {
+    return []
+  }
+
+  if (!renameConflict.destPath || !isSafeOpenClawCleanupTarget(packageRoot, renameConflict.destPath)) {
+    return []
+  }
+
+  // For npm ENOTEMPTY rename conflicts, the actionable residue is the randomly
+  // suffixed target directory. Removing the active package root would be more
+  // destructive and can leave the CLI uninstalled if the retry fails for a
+  // different reason.
+  return [renameConflict.destPath]
+}
+
+async function removeOpenClawRenameConflictTargets(
+  cleanupTargets: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    for (const targetPath of dedupeNonEmptyPaths(cleanupTargets)) {
+      await rm(targetPath, { recursive: true, force: true })
+    }
+    return { ok: true }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 function dedupeNonEmptyPaths(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)))
 }
@@ -470,6 +571,54 @@ async function runNpmUpgradeWithMirrorFallback(
       'upgrade'
     )
   )
+  return attachOpenClawMirrorFailureDetails(result, attempts, {
+    operationLabel: 'OpenClaw 升级',
+    version: targetVersion,
+  })
+}
+
+async function runUserManagedNpmUpgradeWithConflictCleanup(
+  candidate: OpenClawInstallCandidate,
+  npmCommand: string,
+  targetVersion: string,
+  npmCommandOptions: OpenClawNpmCommandOptions
+) {
+  const { result, attempts } = await runOpenClawNpmRegistryFallback(async (mirror) => {
+    const args = buildOpenClawInstallArgs(targetVersion, mirror.registryUrl, npmCommandOptions)
+    let attemptResult = await runShell(
+      npmCommand,
+      args,
+      MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs,
+      'upgrade'
+    )
+
+    const cleanupTargets = resolveOpenClawRenameCleanupTargets(candidate, attemptResult)
+    if (cleanupTargets.length === 0) {
+      return attemptResult
+    }
+
+    const cleanupResult = await removeOpenClawRenameConflictTargets(cleanupTargets)
+    if (!cleanupResult.ok) {
+      return {
+        ...attemptResult,
+        stderr: [
+          String(attemptResult.stderr || '').trim(),
+          `检测到旧的 OpenClaw npm 安装残留，但自动清理失败：${cleanupResult.error || '未知错误'}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      }
+    }
+
+    attemptResult = await runShell(
+      npmCommand,
+      args,
+      MAIN_RUNTIME_POLICY.node.installOpenClawTimeoutMs,
+      'upgrade'
+    )
+    return attemptResult
+  })
+
   return attachOpenClawMirrorFailureDetails(result, attempts, {
     operationLabel: 'OpenClaw 升级',
     version: targetVersion,
@@ -674,7 +823,14 @@ async function runSourceAwareUpgrade(
     return maybeAttachUpgradeMirrorDetails(result, targetVersion)
   }
 
-  const upgradeResult = await runNpmUpgradeWithMirrorFallback(npmCommand, targetVersion, npmCommandOptions)
+  const upgradeResult = isUserManagedInstall(candidate)
+    ? await runUserManagedNpmUpgradeWithConflictCleanup(
+        candidate,
+        npmCommand,
+        targetVersion,
+        npmCommandOptions
+      )
+    : await runNpmUpgradeWithMirrorFallback(npmCommand, targetVersion, npmCommandOptions)
   if (
     !upgradeResult.ok &&
     isOpenClawInstallPermissionFailureResult(upgradeResult) &&
