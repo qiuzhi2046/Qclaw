@@ -360,6 +360,68 @@ async function maybeAttemptPermissionRepair(
     }
   }
 
+  if (resolvedDependencies.platform === 'win32') {
+    // Windows: use icacls to grant current user full control on blocked directories
+    const currentUser = resolvedDependencies.currentUser.username || '%USERNAME%'
+    const icaclsCommands = repairRoots
+      .map((repairRoot) => `icacls "${repairRoot}" /grant:r "${currentUser}:(OI)(CI)F" /T /C /Q`)
+      .join(' && ')
+
+    const repairResult = await resolvedDependencies.runPrivilegedRepair({
+      command: icaclsCommands,
+      prompt: [
+        'Qclaw 检测到 OpenClaw 配置或运行目录权限异常。',
+        '',
+        'Qclaw 需要修复这些目录的访问权限，才能继续当前操作。',
+        '',
+        '点击"是"以管理员权限继续。',
+      ].join('\n'),
+      controlDomain: context.controlDomain || 'global',
+    })
+
+    if (!repairResult.ok) {
+      return {
+        attempted: true,
+        repaired: false,
+        message: buildRepairFailureMessage({
+          blockedProbes: blockedEntries.map((entry) => entry.probe),
+          repairRoots,
+          reason: [
+            'Windows 权限修复失败。',
+            '如需手动修复，请以管理员身份运行 PowerShell 执行：',
+            ...repairRoots.map((root) => `icacls "${root}" /grant:r "${currentUser}:(OI)(CI)F" /T /C /Q`),
+          ].join('\n'),
+        }),
+      }
+    }
+
+    const verificationProbes = await Promise.all(
+      blockedEntries.map(async ({ path }) => ({
+        path,
+        probe: await resolvedDependencies.probePath(path),
+      }))
+    )
+    const remainingBlocked = verificationProbes.filter(
+      ({ probe }) => !probe.writable || probe.ownerMatchesCurrentUser === false
+    )
+    if (remainingBlocked.length > 0) {
+      return {
+        attempted: true,
+        repaired: false,
+        message: buildRepairFailureMessage({
+          blockedProbes: remainingBlocked.map((entry) => entry.probe),
+          repairRoots,
+          reason: 'Qclaw 已尝试自动修复，但仍有目录权限异常。',
+        }),
+      }
+    }
+
+    return {
+      attempted: true,
+      repaired: true,
+    }
+  }
+
   if (resolvedDependencies.platform !== 'darwin') {
     return {
       attempted: false,
