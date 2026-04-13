@@ -381,7 +381,7 @@ describe('createEnvCheckRestartState', () => {
     ).toBe('plugin repair failed because node is unavailable')
   })
 
-  it('treats 2026.3.22 as the minimum supported openclaw version after stripping suffixes', () => {
+  it('treats 2026.4.11 as the minimum supported openclaw version after stripping suffixes', () => {
     const isSupportedOpenClawVersion = (
       EnvCheckModule as typeof EnvCheckModule & {
         isSupportedOpenClawVersion?: (version: string) => boolean
@@ -389,15 +389,15 @@ describe('createEnvCheckRestartState', () => {
     ).isSupportedOpenClawVersion
 
     expect(isSupportedOpenClawVersion).toBeTypeOf('function')
-    expect(isSupportedOpenClawVersion?.('2026.3.22')).toBe(true)
-    expect(isSupportedOpenClawVersion?.('2026.3.22-2')).toBe(true)
-    expect(isSupportedOpenClawVersion?.('2026.3.23-7')).toBe(true)
-    expect(isSupportedOpenClawVersion?.('2026.3.24')).toBe(true)
+    expect(isSupportedOpenClawVersion?.('2026.4.11')).toBe(true)
+    expect(isSupportedOpenClawVersion?.('2026.4.11-2')).toBe(true)
+    expect(isSupportedOpenClawVersion?.('2026.4.10')).toBe(false)
+    expect(isSupportedOpenClawVersion?.('2026.4.12')).toBe(false)
     expect(isSupportedOpenClawVersion?.('2026.3.21')).toBe(false)
     expect(isSupportedOpenClawVersion?.('2026.3.25')).toBe(false)
   })
 
-  it('maps supported-but-not-pinned installs into an optional upgrade gate', () => {
+  it('maps the pinned version into a non-blocking passing gate', () => {
     const gateState = buildOpenClawGateState(
       {
         status: 'installed',
@@ -407,7 +407,7 @@ describe('createEnvCheckRestartState', () => {
             binaryPath: '/usr/local/bin/openclaw',
             resolvedBinaryPath: '/usr/local/lib/node_modules/openclaw/openclaw.mjs',
             packageRoot: '/usr/local/lib/node_modules/openclaw',
-            version: '2026.3.23',
+            version: '2026.4.11',
             installSource: 'npm-global',
             isPathActive: true,
             configPath: '/Users/test/.openclaw/openclaw.json',
@@ -434,7 +434,7 @@ describe('createEnvCheckRestartState', () => {
           binaryPath: '/usr/local/bin/openclaw',
           resolvedBinaryPath: '/usr/local/lib/node_modules/openclaw/openclaw.mjs',
           packageRoot: '/usr/local/lib/node_modules/openclaw',
-          version: '2026.3.23',
+          version: '2026.4.11',
           installSource: 'npm-global',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -446,25 +446,25 @@ describe('createEnvCheckRestartState', () => {
           baselineBackup: null,
           baselineBackupBypass: null,
         },
-        currentVersion: '2026.3.23',
-        targetVersion: '2026.3.24',
+        currentVersion: '2026.4.11',
+        targetVersion: null,
         latestCheck: null,
-        policyState: 'supported_not_target',
-        enforcement: 'optional_upgrade',
-        targetAction: 'upgrade',
+        policyState: 'supported_target',
+        enforcement: 'none',
+        targetAction: 'none',
         blocksContinue: false,
-        canSelfHeal: true,
-        canAutoUpgrade: true,
-        upToDate: false,
+        canSelfHeal: false,
+        canAutoUpgrade: false,
+        upToDate: true,
         gatewayRunning: false,
         warnings: [],
       }
     )
 
-    expect(gateState.canUpgrade).toBe(true)
+    expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(false)
-    expect(gateState.statusLabel).toContain('2026.3.24')
+    expect(gateState.statusLabel).toBe('')
   })
 
   it('maps unsupported high versions into a manual blocker when the source cannot self-heal', () => {
@@ -517,7 +517,7 @@ describe('createEnvCheckRestartState', () => {
           baselineBackupBypass: null,
         },
         currentVersion: '2026.3.25',
-        targetVersion: '2026.3.24',
+        targetVersion: '2026.4.11',
         latestCheck: null,
         policyState: 'above_max',
         enforcement: 'manual_block',
@@ -528,7 +528,7 @@ describe('createEnvCheckRestartState', () => {
         upToDate: false,
         gatewayRunning: false,
         warnings: [],
-        manualHint: '请在原安装位置手动切换到 2026.3.24',
+        manualHint: '请在原安装位置手动切换到 2026.4.11',
         errorCode: 'manual_only',
       }
     )
@@ -536,7 +536,7 @@ describe('createEnvCheckRestartState', () => {
     expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(true)
-    expect(gateState.manualHint).toContain('2026.3.24')
+    expect(gateState.manualHint).toContain('2026.4.11')
   })
 
   it('builds a clear consent message before automatic openclaw correction runs', () => {
@@ -562,7 +562,7 @@ describe('createEnvCheckRestartState', () => {
         ok: false,
         activeCandidate: null,
         currentVersion: '2026.3.28',
-        targetVersion: '2026.3.24',
+        targetVersion: '2026.4.11',
         latestCheck: null,
         policyState: 'above_max',
         enforcement: 'auto_correct',
@@ -577,12 +577,12 @@ describe('createEnvCheckRestartState', () => {
     })
 
     expect(message).toContain('当前版本：2026.3.28')
-    expect(message).toContain('目标版本：2026.3.24')
+    expect(message).toContain('目标版本：2026.4.11')
     expect(message).toContain('自动回退 OpenClaw')
     expect(message).toContain('Qclaw 将立即退出')
   })
 
-  it('keeps supported custom installs non-blocking while requiring manual upgrade outside the app', () => {
+  it('blocks below-min custom installs and requires manual upgrade outside the app', () => {
     const gateState = buildOpenClawGateState(
       {
         status: 'installed',
@@ -592,7 +592,7 @@ describe('createEnvCheckRestartState', () => {
             binaryPath: '/opt/tools/openclaw/bin/openclaw',
             resolvedBinaryPath: '/opt/tools/openclaw/bin/openclaw',
             packageRoot: '/opt/tools/openclaw',
-            version: '2026.3.23',
+            version: '2026.4.10',
             installSource: 'custom',
             isPathActive: true,
             configPath: '/Users/test/.openclaw/openclaw.json',
@@ -613,13 +613,13 @@ describe('createEnvCheckRestartState', () => {
         defaultBackupDirectory: '~/Documents/Qclaw Lite Backups',
       },
       {
-        ok: true,
+        ok: false,
         activeCandidate: {
           candidateId: 'candidate-1',
           binaryPath: '/opt/tools/openclaw/bin/openclaw',
           resolvedBinaryPath: '/opt/tools/openclaw/bin/openclaw',
           packageRoot: '/opt/tools/openclaw',
-          version: '2026.3.23',
+          version: '2026.4.10',
           installSource: 'custom',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -631,26 +631,27 @@ describe('createEnvCheckRestartState', () => {
           baselineBackup: null,
           baselineBackupBypass: null,
         },
-        currentVersion: '2026.3.23',
-        targetVersion: '2026.3.24',
+        currentVersion: '2026.4.10',
+        targetVersion: '2026.4.11',
         latestCheck: null,
-        policyState: 'supported_not_target',
+        policyState: 'below_min',
         enforcement: 'manual_block',
         targetAction: 'upgrade',
-        blocksContinue: false,
+        blocksContinue: true,
         canSelfHeal: false,
         canAutoUpgrade: false,
         upToDate: false,
         gatewayRunning: false,
         warnings: [],
-        manualHint: '请在原安装位置手动切换到 2026.3.24',
+        manualHint: '请在原安装位置手动切换到 2026.4.11',
+        errorCode: 'manual_only',
       }
     )
 
     expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
-    expect(gateState.blocksContinue).toBe(false)
-    expect(gateState.manualHint).toContain('2026.3.24')
+    expect(gateState.blocksContinue).toBe(true)
+    expect(gateState.manualHint).toContain('2026.4.11')
   })
 
   it('shows manual openclaw hints for blocking external installs while suppressing qclaw-owned runtimes', () => {

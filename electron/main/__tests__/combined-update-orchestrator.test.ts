@@ -75,8 +75,8 @@ describe('combined update orchestrator', () => {
     runOpenClawUpgradeMock.mockResolvedValue({
       ok: true,
       blocked: false,
-      currentVersion: '2026.3.24',
-      targetVersion: '2026.3.24',
+      currentVersion: '2026.4.11',
+      targetVersion: '2026.4.11',
       installSource: 'npm-global',
       backupCreated: null,
       gatewayWasRunning: false,
@@ -98,27 +98,29 @@ describe('combined update orchestrator', () => {
     })
   })
 
-  it('allows combined update only for the optional upgrade to the pinned openclaw version', async () => {
+  it('blocks combined update when openclaw is below the minimum supported version', async () => {
     checkOpenClawUpgradeMock.mockResolvedValue({
-      ok: true,
+      ok: false,
       activeCandidate: null,
-      currentVersion: '2026.3.23',
-      targetVersion: '2026.3.24',
+      currentVersion: '2026.4.10',
+      targetVersion: '2026.4.11',
       latestCheck: null,
-      policyState: 'supported_not_target',
-      enforcement: 'optional_upgrade',
+      policyState: 'below_min',
+      enforcement: 'manual_block',
       targetAction: 'upgrade',
-      blocksContinue: false,
-      canSelfHeal: true,
-      canAutoUpgrade: true,
+      blocksContinue: true,
+      canSelfHeal: false,
+      canAutoUpgrade: false,
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
+      manualHint: '请在原安装位置手动切换到 2026.4.11',
+      errorCode: 'manual_only',
     })
 
     const result = await checkCombinedUpdate()
 
-    expect(result.canRun).toBe(true)
+    expect(result.canRun).toBe(false)
   })
 
   it('does not allow combined update for manual_block states', async () => {
@@ -126,7 +128,7 @@ describe('combined update orchestrator', () => {
       ok: false,
       activeCandidate: null,
       currentVersion: '2026.3.25',
-      targetVersion: '2026.3.24',
+      targetVersion: '2026.4.11',
       latestCheck: null,
       policyState: 'above_max',
       enforcement: 'manual_block',
@@ -137,7 +139,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请手动回退到 2026.3.24',
+      manualHint: '请手动回退到 2026.4.11',
       errorCode: 'manual_only',
     })
 
@@ -151,7 +153,7 @@ describe('combined update orchestrator', () => {
       ok: true,
       activeCandidate: null,
       currentVersion: '2026.3.21',
-      targetVersion: '2026.3.24',
+      targetVersion: '2026.4.11',
       latestCheck: null,
       policyState: 'below_min',
       enforcement: 'auto_correct',
@@ -174,7 +176,7 @@ describe('combined update orchestrator', () => {
       ok: false,
       activeCandidate: null,
       currentVersion: '2026.3.25',
-      targetVersion: '2026.3.24',
+      targetVersion: '2026.4.11',
       latestCheck: null,
       policyState: 'above_max',
       enforcement: 'manual_block',
@@ -185,7 +187,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请手动回退到 2026.3.24',
+      manualHint: '请手动回退到 2026.4.11',
       errorCode: 'manual_only',
     })
 

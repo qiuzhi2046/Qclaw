@@ -392,7 +392,7 @@ describe('discoverOpenClawCapabilities', () => {
       })
     )
     const runCommand = vi.fn(async (args: string[]) => {
-      if (args[0] === '--version') return ok('OpenClaw 2026.3.22 (4dcc39c)')
+      if (args[0] === '--version') return ok('OpenClaw 2026.4.11 (4dcc39c)')
       if (args[0] === '--help') {
         return ok('Usage: openclaw [options] [command]\nCommands:\n  onboard\n  models\n')
       }

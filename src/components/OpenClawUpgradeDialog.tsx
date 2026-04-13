@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Group, Loader, Modal, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import type { OpenClawUpgradeCheckResult, OpenClawUpgradeRunResult } from '../shared/openclaw-phase4'
+import { PINNED_OPENCLAW_VERSION } from '../shared/openclaw-version-policy'
 
 export default function OpenClawUpgradeDialog({
   open,
@@ -100,19 +101,13 @@ export default function OpenClawUpgradeDialog({
 
           {check.policyState === 'supported_target' && (
             <Alert color="green" variant="light" mt="md">
-              当前 OpenClaw 已是受支持上限版本，无需再升级。
-            </Alert>
-          )}
-
-          {check.policyState === 'supported_not_target' && (
-            <Alert color="blue" variant="light" mt="md">
-              当前版本受支持，可按需升级到 {check.targetVersion || '2026.3.24'}。
+              当前版本符合要求，无需再升级。
             </Alert>
           )}
 
           {check.enforcement === 'auto_correct' && (
             <Alert color="yellow" variant="light" mt="md">
-              当前版本超出受支持策略，请先回到环境检查页，由启动阶段完成备份后再自动修复到 {check.targetVersion || '2026.3.24'}。
+              当前版本超出受支持策略，请先回到环境检查页，由启动阶段完成备份后再自动修复到 {check.targetVersion || PINNED_OPENCLAW_VERSION}。
             </Alert>
           )}
 

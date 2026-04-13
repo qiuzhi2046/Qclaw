@@ -147,7 +147,7 @@ describe('openclaw upgrade service', () => {
     buildMacNpmCommandMock.mockReset()
     runMacOpenClawElevatedLifecycleTransactionMock.mockReset()
     gatewayHealthMock.mockResolvedValue({ running: true, raw: '{}' })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
     discoverOpenClawForEnvCheckMock.mockImplementation(() => discoverOpenClawInstallationsMock())
     activateManagedWindowsRuntimeSnapshotFromExistingRuntimeMock.mockResolvedValue(null)
     gatewayStartMock.mockResolvedValue({ ok: true, stdout: '', stderr: '', code: 0 })
@@ -265,13 +265,13 @@ describe('openclaw upgrade service', () => {
     const result = await checkOpenClawUpgrade()
 
     expect(result.currentVersion).toBe('1.0.0')
-    expect(result.targetVersion).toBe('2026.3.24')
+    expect(result.targetVersion).toBe('2026.4.11')
     expect(result.policyState).toBe('below_min')
     expect(result.enforcement).toBe('manual_block')
     expect(result.targetAction).toBe('upgrade')
     expect(result.canAutoUpgrade).toBe(false)
     expect(result.errorCode).toBe('manual_only')
-    expect(result.manualHint).toContain('2026.3.24')
+    expect(result.manualHint).toContain('2026.4.11')
   })
 
   it('allows supported-range installs to continue without depending on latest lookup', async () => {
@@ -282,7 +282,7 @@ describe('openclaw upgrade service', () => {
           binaryPath: '/usr/local/bin/openclaw',
           resolvedBinaryPath: '/usr/local/bin/openclaw',
           packageRoot: '/usr/local/lib/node_modules/openclaw',
-          version: '2026.3.23',
+          version: '2026.4.11',
           installSource: 'npm-global',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -301,10 +301,10 @@ describe('openclaw upgrade service', () => {
     const result = await checkOpenClawUpgrade()
 
     expect(result.ok).toBe(true)
-    expect(result.policyState).toBe('supported_not_target')
-    expect(result.enforcement).toBe('optional_upgrade')
-    expect(result.targetAction).toBe('upgrade')
-    expect(result.targetVersion).toBe('2026.3.24')
+    expect(result.policyState).toBe('supported_target')
+    expect(result.enforcement).toBe('none')
+    expect(result.targetAction).toBe('none')
+    expect(result.targetVersion).toBeNull()
     expect(result.errorCode).toBeUndefined()
   })
 
@@ -323,7 +323,7 @@ describe('openclaw upgrade service', () => {
           binaryPath: '/private/runtime/openclaw.cmd',
           resolvedBinaryPath: '/private/runtime/openclaw.cmd',
           packageRoot: '/private/runtime/node_modules/openclaw',
-          version: '2026.3.24',
+          version: '2026.4.11',
           installSource: 'npm-global',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -360,7 +360,7 @@ describe('openclaw upgrade service', () => {
           binaryPath: '/private/runtime/openclaw.cmd',
           resolvedBinaryPath: '/private/runtime/openclaw.cmd',
           packageRoot: '/private/runtime/node_modules/openclaw',
-          version: '2026.3.24',
+          version: '2026.4.11',
           installSource: 'npm-global',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -405,7 +405,7 @@ describe('openclaw upgrade service', () => {
     expect(result.warnings).toContain('global-discovery')
   })
 
-  it('keeps supported custom installs usable while withholding in-app upgrade execution', async () => {
+  it('keeps custom installs usable while withholding in-app upgrade execution', async () => {
     discoverOpenClawInstallationsMock.mockResolvedValue({
       candidates: [
         {
@@ -413,7 +413,7 @@ describe('openclaw upgrade service', () => {
           binaryPath: '/opt/tools/openclaw/bin/openclaw',
           resolvedBinaryPath: '/opt/tools/openclaw/bin/openclaw',
           packageRoot: '/opt/tools/openclaw',
-          version: '2026.3.23',
+          version: '2026.4.10',
           installSource: 'custom',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -431,14 +431,14 @@ describe('openclaw upgrade service', () => {
 
     const result = await checkOpenClawUpgrade()
 
-    expect(result.ok).toBe(true)
-    expect(result.policyState).toBe('supported_not_target')
+    expect(result.ok).toBe(false)
+    expect(result.policyState).toBe('below_min')
     expect(result.enforcement).toBe('manual_block')
     expect(result.targetAction).toBe('upgrade')
-    expect(result.blocksContinue).toBe(false)
+    expect(result.blocksContinue).toBe(true)
     expect(result.canAutoUpgrade).toBe(false)
-    expect(result.errorCode).toBeUndefined()
-    expect(result.manualHint).toContain('2026.3.24')
+    expect(result.errorCode).toBe('manual_only')
+    expect(result.manualHint).toContain('2026.4.11')
   })
 
   it('activates the managed Windows runtime before verifying a qclaw-bundled auto-correction result', async () => {
@@ -483,7 +483,7 @@ describe('openclaw upgrade service', () => {
       stateDir: 'C:\\Users\\test\\.openclaw',
       userDataDir: 'C:\\Users\\test\\AppData\\Roaming\\Qclaw',
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
 
     const result = await runOpenClawUpgrade()
 
@@ -494,7 +494,7 @@ describe('openclaw upgrade service', () => {
     })
     expect(checkOpenClawMock).toHaveBeenCalled()
     expect(result.ok).toBe(true)
-    expect(result.currentVersion).toBe('2026.3.24')
+    expect(result.currentVersion).toBe('2026.4.11')
   })
 
   it('reuses Windows env-check discovery when running an upgrade', async () => {
@@ -617,7 +617,7 @@ describe('openclaw upgrade service', () => {
       stateDir: 'C:\\Users\\test\\.openclaw',
       userDataDir: 'C:\\Users\\test\\AppData\\Roaming\\Qclaw',
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
 
     await runOpenClawUpgrade()
 
@@ -629,6 +629,8 @@ describe('openclaw upgrade service', () => {
   })
 
   it('allows Windows Qclaw-managed installs to enter auto-correct when the pinned version drifts', async () => {
+    if (process.platform !== 'win32') return
+
     discoverOpenClawInstallationsMock.mockResolvedValue({
       candidates: [
         {
@@ -636,7 +638,7 @@ describe('openclaw upgrade service', () => {
           binaryPath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
           resolvedBinaryPath: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
           packageRoot: 'C:\\Users\\test\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw',
-          version: '2026.3.25',
+          version: '2026.4.12',
           installSource: 'qclaw-managed',
           isPathActive: true,
           configPath: 'C:\\Users\\test\\.openclaw\\openclaw.json',
@@ -721,7 +723,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-18T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -733,7 +735,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawMock.mockResolvedValue({
       installed: true,
-      version: '2026.3.24',
+      version: '2026.4.11',
     })
 
     const result = await runOpenClawUpgrade()
@@ -746,7 +748,7 @@ describe('openclaw upgrade service', () => {
       expect.arrayContaining([
         'install',
         '-g',
-        'openclaw@2026.3.24',
+        'openclaw@2026.4.11',
         '--registry=https://registry.npmmirror.com',
         '--userconfig=/tmp/openclaw-installer/npm/user.npmrc',
         '--globalconfig=/tmp/openclaw-installer/npm/global.npmrc',
@@ -787,7 +789,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-18T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -806,7 +808,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawMock.mockResolvedValue({
       installed: true,
-      version: '2026.3.24',
+      version: '2026.4.11',
     })
 
     const result = await runOpenClawUpgrade()
@@ -849,7 +851,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-23T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -862,7 +864,7 @@ describe('openclaw upgrade service', () => {
       ownerMatchesCurrentUser: false,
     }))
     runDirectMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', code: 0 })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
 
     const result = await runOpenClawUpgrade()
 
@@ -909,7 +911,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-23T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -921,7 +923,7 @@ describe('openclaw upgrade service', () => {
       code: 1,
     })
     runDirectMock.mockResolvedValueOnce({ ok: true, stdout: '', stderr: '', code: 0 })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
 
     const result = await runOpenClawUpgrade()
 
@@ -958,7 +960,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-18T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -1001,7 +1003,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-18T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -1064,7 +1066,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-18T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -1137,7 +1139,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.22',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-24T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -1147,7 +1149,7 @@ describe('openclaw upgrade service', () => {
       stderr: '',
       code: 0,
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
     runDoctorMock
       .mockResolvedValueOnce({
         ok: false,
@@ -1204,7 +1206,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-24T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -1214,7 +1216,7 @@ describe('openclaw upgrade service', () => {
       stderr: '',
       code: 0,
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
     runDoctorMock.mockResolvedValue({
       ok: true,
       stdout: 'doctor ok',
@@ -1256,7 +1258,7 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-24T10:00:00.000Z',
       source: 'npm-registry',
     })
@@ -1266,7 +1268,7 @@ describe('openclaw upgrade service', () => {
       stderr: '',
       code: 0,
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
     runDoctorMock
       .mockResolvedValueOnce({
         ok: false,
@@ -1357,7 +1359,7 @@ describe('openclaw upgrade service', () => {
         stderr: '',
         code: 0,
       })
-      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
       runDoctorMock
         .mockResolvedValueOnce({
           ok: false,
@@ -1392,7 +1394,7 @@ describe('openclaw upgrade service', () => {
     }
   })
 
-  it('restores config-only env and credentials snapshots when doctor fix fails after an in-range upgrade', async () => {
+  it('restores full-state env and credentials snapshots when doctor fix fails after a below-min upgrade', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-upgrade-config-rollback-'))
     const stateRoot = path.join(tempRoot, 'live-home')
     const backupArchive = path.join(tempRoot, 'backup')
@@ -1419,7 +1421,7 @@ describe('openclaw upgrade service', () => {
             binaryPath: '/usr/local/bin/openclaw',
             resolvedBinaryPath: '/usr/local/lib/node_modules/openclaw/openclaw.mjs',
             packageRoot: '/usr/local/lib/node_modules/openclaw',
-            version: '2026.3.23',
+            version: '2026.4.10',
             installSource: 'npm-global',
             isPathActive: true,
             configPath: path.join(stateRoot, 'openclaw.json'),
@@ -1452,7 +1454,7 @@ describe('openclaw upgrade service', () => {
         stderr: '',
         code: 0,
       })
-      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
       runDoctorMock
         .mockResolvedValueOnce({
           ok: false,
@@ -1472,7 +1474,7 @@ describe('openclaw upgrade service', () => {
       expect(result.ok).toBe(false)
       expect(createManagedBackupArchiveMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          copyMode: 'config-only',
+          copyMode: 'full-state',
         })
       )
       await expect(fs.readFile(path.join(stateRoot, '.env'), 'utf8')).resolves.toContain('API_KEY=restored')
@@ -1552,7 +1554,7 @@ describe('openclaw upgrade service', () => {
         stderr: '',
         code: 0,
       })
-      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
       runDoctorMock
         .mockResolvedValueOnce({
           ok: false,
@@ -1602,11 +1604,11 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-24T10:00:00.000Z',
       source: 'npm-registry',
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
 
     const result = await runOpenClawUpgrade()
 
@@ -1614,7 +1616,7 @@ describe('openclaw upgrade service', () => {
     expect(buildMacNpmCommandMock).toHaveBeenCalled()
     const adminInstallCall = buildMacNpmCommandMock.mock.calls.at(0) as unknown[] | undefined
     const adminInstallArgs = (adminInstallCall?.[0] as string[] | undefined) || []
-    expect(adminInstallArgs).toEqual(expect.arrayContaining(['install', '-g', 'openclaw@2026.3.24']))
+    expect(adminInstallArgs).toEqual(expect.arrayContaining(['install', '-g', 'openclaw@2026.4.11']))
     expect(adminInstallArgs).not.toContain('--cache=/tmp/openclaw-installer/npm/cache')
     expect(adminInstallArgs.find((arg: string) => arg.startsWith('--cache='))).toBe(
       '--cache=/private/tmp/qclaw-openclaw-admin-npm-upgrade-fallback/cache'
@@ -1647,11 +1649,11 @@ describe('openclaw upgrade service', () => {
     })
     checkOpenClawLatestVersionMock.mockResolvedValue({
       ok: true,
-      latestVersion: '2026.3.24',
+      latestVersion: '2026.4.11',
       checkedAt: '2026-03-24T10:00:00.000Z',
       source: 'npm-registry',
     })
-    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+    checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.4.11' })
 
     const result = await runOpenClawUpgrade()
 

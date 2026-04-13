@@ -8,6 +8,8 @@ export type OpenClawVersionBand =
   | 'openclaw_2026_3_14_to_2026_3_21'
   | 'openclaw_2026_3_22'
   | 'openclaw_2026_3_23_to_2026_3_24'
+  | 'openclaw_2026_3_25_to_2026_4_10'
+  | 'openclaw_2026_4_11'
   | 'unknown_future'
 
 export type UpgradeCompatibilityStatus =

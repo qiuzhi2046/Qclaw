@@ -132,7 +132,7 @@ function createPluginPollutionLayout(): {
     JSON.stringify(
       {
         name: 'openclaw',
-        version: '2026.3.24',
+        version: '2026.4.11',
         bin: { openclaw: 'dist/openclaw.mjs' },
       },
       null,

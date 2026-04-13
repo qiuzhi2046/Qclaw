@@ -68,7 +68,7 @@ describe('openclaw-download-fallbacks', () => {
     const commands = buildOpenClawManualInstallCommands()
 
     expect(commands).toHaveLength(OPENCLAW_NPM_REGISTRY_MIRRORS.length)
-    expect(commands[0]).toContain('openclaw@2026.3.24')
+    expect(commands[0]).toContain('openclaw@2026.4.11')
     expect(commands.every((command) => !command.includes('openclaw@latest'))).toBe(true)
   })
 

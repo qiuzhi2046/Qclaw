@@ -12,16 +12,16 @@ function createCombinedUpdateCheck(
     openclaw: {
       ok: true,
       activeCandidate: null,
-      currentVersion: '2026.3.23',
-      targetVersion: '2026.3.24',
+      currentVersion: '2026.4.11',
+      targetVersion: null,
       latestCheck: null,
-      policyState: 'supported_not_target',
-      enforcement: 'optional_upgrade',
-      targetAction: 'upgrade',
+      policyState: 'supported_target',
+      enforcement: 'none',
+      targetAction: 'none',
       blocksContinue: false,
-      canSelfHeal: true,
-      canAutoUpgrade: true,
-      upToDate: false,
+      canSelfHeal: false,
+      canAutoUpgrade: false,
+      upToDate: true,
       gatewayRunning: false,
       warnings: [],
       ...overrides,
@@ -40,25 +40,27 @@ function createCombinedUpdateCheck(
 }
 
 describe('UpdateCenter summaries', () => {
-  it('keeps supported optional openclaw upgrades summarized as a version hop', () => {
-    expect(summarizeOpenClaw(createCombinedUpdateCheck())).toBe('2026.3.23 → 2026.3.24')
+  it('reports the pinned version as conforming when policyState is supported_target', () => {
+    expect(summarizeOpenClaw(createCombinedUpdateCheck())).toBe('当前版本符合要求')
   })
 
-  it('keeps manual-block summaries aligned with env-check wording', () => {
+  it('reports below-min installs as requiring manual adjustment', () => {
     expect(
       summarizeOpenClaw(
         createCombinedUpdateCheck({
+          currentVersion: '2026.4.10',
+          targetVersion: '2026.4.11',
           enforcement: 'manual_block',
           blocksContinue: true,
           canSelfHeal: false,
           canAutoUpgrade: false,
-          policyState: 'above_max',
-          targetAction: 'downgrade',
-          manualHint: '请手动回退到 2026.3.24',
+          policyState: 'below_min',
+          targetAction: 'upgrade',
+          manualHint: '请在原安装位置手动切换到 2026.4.11',
           errorCode: 'manual_only',
         })
       )
-    ).toContain('手动调整到 2026.3.24')
+    ).toContain('手动调整到 2026.4.11')
   })
 
   it('keeps auto-correct summaries pointing users back to startup repair', () => {
@@ -70,7 +72,7 @@ describe('UpdateCenter summaries', () => {
           policyState: 'below_min',
         })
       )
-    ).toContain('启动阶段会先自动修复到 2026.3.24')
+    ).toContain('启动阶段会先自动修复到 2026.4.11')
   })
 
   it('summarizes qclaw updates from current to available version', () => {

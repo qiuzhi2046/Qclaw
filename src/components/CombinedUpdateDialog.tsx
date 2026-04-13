@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Group, Loader, Modal, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import type { CombinedUpdateCheckResult, CombinedUpdateRunResult } from '../shared/openclaw-phase4'
+import { PINNED_OPENCLAW_VERSION } from '../shared/openclaw-version-policy'
 
 export default function CombinedUpdateDialog({
   open,
@@ -91,7 +92,7 @@ export default function CombinedUpdateDialog({
               <Stack gap={8} mt="md">
                 <Text size="sm">当前版本：{check.openclaw.currentVersion || '未知'}</Text>
                 <Text size="sm">目标版本：{check.openclaw.targetVersion || '未知'}</Text>
-                <Text size="sm">组合更新资格：{openclawCanRunInCombined ? '可升级到 2026.3.24' : '当前不支持组合更新'}</Text>
+                <Text size="sm">组合更新资格：{openclawCanRunInCombined ? `可升级到 ${PINNED_OPENCLAW_VERSION}` : '当前不支持组合更新'}</Text>
               </Stack>
             </Paper>
 

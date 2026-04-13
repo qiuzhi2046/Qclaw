@@ -1,5 +1,6 @@
 import { pollWithBackoff } from '../../src/shared/polling'
 import type { ReconcileActionSummary } from '../../src/shared/gateway-runtime-reconcile-state'
+import { PINNED_OPENCLAW_VERSION } from '../../src/shared/openclaw-version-policy'
 import { UI_RUNTIME_DEFAULTS } from '../../src/shared/runtime-policies'
 import { classifyGatewayRuntimeState } from '../../src/shared/gateway-runtime-diagnostics'
 import {
@@ -1769,8 +1770,8 @@ async function ensureGatewayRunningImpl(
     await persistGatewayRuntimeReconcile({
       result,
       summary:
-        openClawVersion && openClawVersion.includes('2026.3.22')
-          ? '网关已确认可用，当前 3.22 主链路的运行状态已通过健康探针确认。'
+        openClawVersion && openClawVersion.includes(PINNED_OPENCLAW_VERSION)
+          ? `网关已确认可用，当前 ${PINNED_OPENCLAW_VERSION} 主链路的运行状态已通过健康探针确认。`
           : '网关已确认可用，运行状态已通过健康探针确认。',
     })
     emitGatewayBootstrapState(options, {

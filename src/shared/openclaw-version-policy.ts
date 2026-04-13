@@ -1,9 +1,9 @@
 import type { OpenClawInstallSource } from './openclaw-phase1'
 import { compareLooseVersions } from './openclaw-phase1'
 
-export const MIN_SUPPORTED_OPENCLAW_VERSION = '2026.3.22'
-export const MAX_SUPPORTED_OPENCLAW_VERSION = '2026.3.24'
-export const PINNED_OPENCLAW_VERSION = '2026.3.24'
+export const MIN_SUPPORTED_OPENCLAW_VERSION = '2026.4.11'
+export const MAX_SUPPORTED_OPENCLAW_VERSION = '2026.4.11'
+export const PINNED_OPENCLAW_VERSION = '2026.4.11'
 
 export type OpenClawVersionPolicyState =
   | 'below_min'

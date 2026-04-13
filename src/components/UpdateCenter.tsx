@@ -2,21 +2,16 @@ import { useEffect, useState } from 'react'
 import { ActionIcon, Alert, Button, Group, Loader, Modal, Text, Tooltip } from '@mantine/core'
 import { IconRefresh } from '@tabler/icons-react'
 import type { CombinedUpdateCheckResult } from '../shared/openclaw-phase4'
+import { PINNED_OPENCLAW_VERSION } from '../shared/openclaw-version-policy'
 import CombinedUpdateDialog from './CombinedUpdateDialog'
 import OpenClawUpgradeDialog from './OpenClawUpgradeDialog'
 import QClawUpdateDialog from './QClawUpdateDialog'
 
 export function summarizeOpenClaw(check: CombinedUpdateCheckResult | null): string {
   if (!check) return '读取中...'
-  if (check.openclaw.policyState === 'supported_target') return '当前已是受支持上限版本'
-  if (check.openclaw.policyState === 'supported_not_target' && check.openclaw.targetVersion) {
-    if (check.openclaw.enforcement === 'manual_block') {
-      return `如需升级请手动切换到 ${check.openclaw.targetVersion}`
-    }
-    return `${check.openclaw.currentVersion || '未知'} → ${check.openclaw.targetVersion}`
-  }
-  if (check.openclaw.enforcement === 'manual_block') return '当前版本需手动调整到 2026.3.24'
-  if (check.openclaw.enforcement === 'auto_correct') return '启动阶段会先自动修复到 2026.3.24'
+  if (check.openclaw.policyState === 'supported_target') return '当前版本符合要求'
+  if (check.openclaw.enforcement === 'manual_block') return `当前版本需手动调整到 ${PINNED_OPENCLAW_VERSION}`
+  if (check.openclaw.enforcement === 'auto_correct') return `启动阶段会先自动修复到 ${PINNED_OPENCLAW_VERSION}`
   return '无法确认 OpenClaw 版本状态'
 }
 
