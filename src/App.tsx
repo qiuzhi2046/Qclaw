@@ -15,6 +15,7 @@ import ChannelsPage from './pages/ChannelsPage'
 import ModelsPage from './pages/ModelsPage'
 import SettingsPage from './pages/SettingsPage'
 import SkillsPage from './pages/SkillsPage'
+import KnowledgeBasePage from './pages/KnowledgeBasePage'
 import AboutModal from './components/AboutModal'
 import GatewayBootstrapGate from './pages/GatewayBootstrapGate'
 import {
@@ -726,6 +727,7 @@ function App() {
             <Route path="/channels" element={<ChannelsPage />} />
             <Route path="/models" element={<ModelsPage />} />
             <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/knowledge" element={<KnowledgeBasePage />} />
             <Route
               path="/settings"
               element={

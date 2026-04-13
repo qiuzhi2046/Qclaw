@@ -18,6 +18,8 @@
       "modelsExplain": "这里可以管理日常使用的大模型接口。",
       "skills": "查看、安装和管理可用 Skills。",
       "skillsExplain": "可以把 Skill 理解为给 Agent 的一份“说明书”，Agent 会按这份说明调用工具并执行操作。",
+      "knowledge": "管理本地知识库，连接 Git 仓库一键同步。",
+      "knowledgeExplain": "将本地 Markdown 文件夹挂载为 OpenClaw 知识库，AI 会在对话时自动搜索参考。",
       "settings": "打开全局设置、偏好项和运行配置。"
     }
   },
@@ -76,6 +78,14 @@
       "bundled": "这类 Skills 随 OpenClaw 一起安装。",
       "workspace": "这类 Skills 只在当前工作区生效，适合放项目专用能力。"
     }
+  },
+  "knowledgePage": {
+    "overview": "知识库让 OpenClaw 能参考你的本地 Markdown 文档来回答问题。选择一个文件夹，它会被自动注册为记忆搜索路径。",
+    "addFolder": "选择一个本地文件夹作为知识库来源，支持 Markdown 文档。",
+    "gitConfig": "配置 Git 仓库地址后，可以一键同步远程的最新内容。",
+    "syncButton": "拉取远程更新 + 推送本地变更到 Git 仓库。",
+    "removeKb": "移除知识库连接（不会删除原始文件夹中的文件）。",
+    "refresh": "刷新知识库列表和状态。"
   },
   "settingsPage": {
     "updateCenter": "打开升级中心，查看并处理可用更新。",
