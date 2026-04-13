@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Group, Loader, Modal, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import type { QClawUpdateActionResult, QClawUpdateStatus } from '../shared/openclaw-phase4'
 
@@ -36,6 +36,7 @@ export default function QClawUpdateDialog({
   const [openingDownloadUrl, setOpeningDownloadUrl] = useState(false)
   const [actionResult, setActionResult] = useState<QClawUpdateActionResult | null>(null)
   const [error, setError] = useState('')
+  const installTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refreshStatus = async (activeCheck = false) => {
     setLoading(true)
@@ -52,6 +53,10 @@ export default function QClawUpdateDialog({
 
   useEffect(() => {
     if (!open) return
+    if (installTimerRef.current) {
+      clearTimeout(installTimerRef.current)
+      installTimerRef.current = null
+    }
     setActionResult(null)
     void refreshStatus(true)
   }, [open])
@@ -128,7 +133,7 @@ export default function QClawUpdateDialog({
           )}
 
           {actionResult?.message && (
-            <Alert color="green" variant="light" mt="md">
+            <Alert color={actionResult.ok ? 'green' : 'red'} variant="light" mt="md">
               {actionResult.message}
             </Alert>
           )}
@@ -241,6 +246,12 @@ export default function QClawUpdateDialog({
       if (!result.ok) {
         setInstalling(false)
         await tryOpenManualFallback(`自动安装不可用，已为你打开 ${manualInstallerLabel} 下载链接，请改为手动安装。`)
+      } else {
+        installTimerRef.current = setTimeout(() => {
+          setInstalling(false)
+          setError('安装器启动超时，请尝试手动安装。')
+          installTimerRef.current = null
+        }, 30_000)
       }
     } catch (e: any) {
       const fallbackOpened = await tryOpenManualFallback(

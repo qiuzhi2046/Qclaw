@@ -149,14 +149,14 @@ function toAbsoluteDownloadUrl(rawUrl: string, feedUrl?: string): string | undef
 
   try {
     const absoluteUrl = new URL(normalizedUrl)
-    if (absoluteUrl.protocol !== 'https:' && absoluteUrl.protocol !== 'http:') return undefined
+    if (absoluteUrl.protocol !== 'https:') return undefined
     return absoluteUrl.toString()
   } catch {
     const baseUrl = normalizeFeedBase(feedUrl)
     if (!baseUrl) return undefined
     try {
       const absoluteUrl = new URL(normalizedUrl, baseUrl)
-      if (absoluteUrl.protocol !== 'https:' && absoluteUrl.protocol !== 'http:') return undefined
+      if (absoluteUrl.protocol !== 'https:') return undefined
       return absoluteUrl.toString()
     } catch {
       return undefined
@@ -211,7 +211,7 @@ function selectManualDownloadUrl(info: UpdateInfo, feedUrl?: string): string | u
 function isAllowedExternalUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+    return parsed.protocol === 'https:'
   } catch {
     return false
   }
@@ -508,10 +508,11 @@ export async function downloadQClawUpdate(): Promise<QClawUpdateActionResult> {
       message: 'Qclaw Lite 更新包下载中...',
     })
     await getAutoUpdater().downloadUpdate()
+    const finalStatus = cloneStatus()
     return {
       ok: true,
-      status: cloneStatus(),
-      message: cloneStatus().message || 'Qclaw Lite 更新包下载完成。',
+      status: finalStatus,
+      message: finalStatus.message || 'Qclaw Lite 更新包下载完成。',
     }
   } catch (error) {
     const errorCode = classifyUpdaterError(error)
@@ -564,7 +565,19 @@ export async function installQClawUpdate(): Promise<QClawUpdateActionResult> {
   })
 
   setImmediate(() => {
-    runQClawUpdateInstall(getAutoUpdater(), process.platform)
+    try {
+      runQClawUpdateInstall(getAutoUpdater(), process.platform)
+    } catch (error) {
+      const errorCode = classifyUpdaterError(error)
+      setStatus({
+        ok: false,
+        status: 'error',
+        progressPercent: null,
+        error: error instanceof Error ? error.message : String(error),
+        errorCode,
+        message: explainUpdaterError(errorCode, 'Qclaw 安装更新时发生错误。'),
+      })
+    }
   })
 
   return {
