@@ -248,18 +248,9 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
     return buildClassification(typed, 'config_invalid', '网关配置不完整或格式无效', false, reasonDetail)
   }
 
-  if (/\b1006\b|abnormal closure|gateway closed|websocket/i.test(corpus)) {
-    return buildClassification(typed, 'websocket_1006', '网关与上游的握手连接被异常关闭', true, reasonDetail)
-  }
-
-  if (
-    /\bapi[_ -]?key\b|oauth|unauthorized|forbidden|not logged in|credential|auth(?:entication)?|login|expired/i.test(
-      corpus
-    )
-  ) {
-    return buildClassification(typed, 'auth_missing', '当前机器缺少可用的模型认证信息', false, reasonDetail)
-  }
-
+  // Plugin load failures are checked BEFORE the broad websocket_1006 pattern (item 5).
+  // A plugin crash often causes websocket_1006 as a secondary symptom; surfacing the
+  // plugin error is more actionable than "abnormal closure".
   if (isPluginAllowlistWarning(corpus)) {
     return buildClassification(
       typed,
@@ -270,8 +261,20 @@ export function classifyGatewayRuntimeState(input: unknown): GatewayRuntimeClass
     )
   }
 
-  if (/plugins?\.allow|plugin not found|failed to load plugin|manifest|export id/i.test(corpus)) {
+  if (/plugins?\.allow|plugin not found|failed to load plugin|failed to load from|manifest|export id/i.test(corpus)) {
     return buildClassification(typed, 'plugin_load_failure', '网关依赖的插件没有正常加载', false, reasonDetail)
+  }
+
+  if (/\b1006\b|abnormal closure|gateway closed|websocket/i.test(corpus)) {
+    return buildClassification(typed, 'websocket_1006', '网关与上游的握手连接被异常关闭', true, reasonDetail)
+  }
+
+  if (
+    /\bapi[_ -]?key\b|oauth|unauthorized|forbidden|not logged in|credential|auth(?:entication)?|login|expired/i.test(
+      corpus
+    )
+  ) {
+    return buildClassification(typed, 'auth_missing', '当前机器缺少可用的模型认证信息', false, reasonDetail)
   }
 
   if (/config|openclaw\.json|provider|model|missing required|invalid|parse|json/i.test(corpus)) {

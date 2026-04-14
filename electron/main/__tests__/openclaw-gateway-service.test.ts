@@ -162,7 +162,7 @@ vi.mock('../../../src/shared/polling', () => ({
   pollWithBackoff: pollWithBackoffMock,
 }))
 
-import { ensureGatewayRunning } from '../openclaw-gateway-service'
+import { classifyServiceInstallFailure, ensureGatewayRunning } from '../openclaw-gateway-service'
 
 describe('openclaw gateway service', () => {
   const itOnWindows = process.platform === 'win32' ? it : it.skip
@@ -2433,5 +2433,84 @@ describe('openclaw gateway service', () => {
     expect(strictResult.ok).toBe(true)
     expect(checkNodeMock).toHaveBeenCalledTimes(1)
     expect(gatewayStartMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('classifyServiceInstallFailure', () => {
+  it('detects English "Access is denied"', () => {
+    expect(
+      classifyServiceInstallFailure({
+        ok: false,
+        stdout: '',
+        stderr: 'Gateway install failed: Error: schtasks create failed: Access is denied.',
+        code: 1,
+      })
+    ).toBe('access-denied')
+  })
+
+  it('detects English "Access Denied" variant', () => {
+    expect(
+      classifyServiceInstallFailure({
+        ok: false,
+        stdout: '',
+        stderr: 'schtasks: ERROR: Access Denied',
+        code: 1,
+      })
+    ).toBe('access-denied')
+  })
+
+  it('detects Chinese "拒绝访问" error message', () => {
+    expect(
+      classifyServiceInstallFailure({
+        ok: false,
+        stdout: '',
+        stderr: 'Gateway install failed: Error: schtasks create failed: 错误: 拒绝访问。',
+        code: 1,
+      })
+    ).toBe('access-denied')
+  })
+
+  it('detects GBK garbled output via schtasks create failed + exit code 1', () => {
+    expect(
+      classifyServiceInstallFailure({
+        ok: false,
+        stdout: '',
+        stderr: 'Gateway install failed: Error: schtasks create failed: \ufffd\ufffd: \u00dc\u00be\ufffd\ufffd\u00ca\u00a1\ufffd',
+        code: 1,
+      })
+    ).toBe('access-denied')
+  })
+
+  it('returns "other" for non-permission errors', () => {
+    expect(
+      classifyServiceInstallFailure({
+        ok: false,
+        stdout: '',
+        stderr: 'Gateway install failed: Error: task name already exists',
+        code: 1,
+      })
+    ).toBe('other')
+  })
+
+  it('returns "other" for null/undefined result', () => {
+    expect(classifyServiceInstallFailure(null)).toBe('other')
+    expect(classifyServiceInstallFailure(undefined)).toBe('other')
+  })
+
+  it('returns "other" for empty output', () => {
+    expect(
+      classifyServiceInstallFailure({ ok: false, stdout: '', stderr: '', code: 1 })
+    ).toBe('other')
+  })
+
+  it('detects access-denied in stdout when stderr is empty', () => {
+    expect(
+      classifyServiceInstallFailure({
+        ok: false,
+        stdout: 'Error: Access is denied',
+        stderr: '',
+        code: 1,
+      })
+    ).toBe('access-denied')
   })
 })

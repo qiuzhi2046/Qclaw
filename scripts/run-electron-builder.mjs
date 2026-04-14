@@ -11,7 +11,7 @@ const updatePublishUrl = localPublishUrl || String(process.env.QCLAW_UPDATE_PUBL
 const builderArgs = [
   ...forwardedArgs,
   `-c.extraMetadata.version=${version}`,
-  ...(updatePublishUrl ? [`-c.publish.url=${updatePublishUrl}`] : []),
+  ...(updatePublishUrl ? [`-c.publish.url="${updatePublishUrl}"`] : []),
 ]
 
 console.log(

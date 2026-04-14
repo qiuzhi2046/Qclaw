@@ -1,6 +1,7 @@
 import {
   createDefaultOpenClawRuntimeReconcileStore,
   type GatewayBlockingReason,
+  type GatewayLauncherMode,
   type OpenClawRuntimeReconcileStore,
   type ReconcileActionSummary,
   type RuntimeReconcileStateCode,
@@ -154,6 +155,14 @@ export function resolveRuntimeReconcileStateCode(
   return safeToRetry ? 'degraded' : 'blocked'
 }
 
+function sanitizeGatewayLauncherMode(value: unknown): GatewayLauncherMode | null {
+  const normalized = String(value || '').trim()
+  if (normalized === 'schtasks' || normalized === 'startup-fallback') {
+    return normalized
+  }
+  return null
+}
+
 function sanitizeStore(value: unknown): OpenClawRuntimeReconcileStore {
   const fallback = createDefaultOpenClawRuntimeReconcileStore()
   if (!value || typeof value !== 'object') return fallback
@@ -220,6 +229,7 @@ function sanitizeStore(value: unknown): OpenClawRuntimeReconcileStore {
             .map(sanitizeReconcileActionSummary)
             .filter((item): item is ReconcileActionSummary => Boolean(item))
         : [],
+      launcherMode: sanitizeGatewayLauncherMode(runtimeRecord.launcherMode),
     },
   }
 }
@@ -334,6 +344,7 @@ export async function confirmRuntimeReconcile(params: {
   stateCode?: Exclude<RuntimeReconcileStateCode, 'idle' | 'pending' | 'in_progress'>
   actions?: ReconcileActionSummary[]
   appliedRevision?: number
+  launcherMode?: GatewayLauncherMode | null
 }): Promise<OpenClawRuntimeReconcileStore> {
   const confirmedAt = String(params.confirmedAt || new Date().toISOString())
   const store = await readOpenClawRuntimeReconcileStore()
@@ -341,6 +352,10 @@ export async function confirmRuntimeReconcile(params: {
     params.revision,
     Math.max(store.runtime.desiredRevision, store.runtime.appliedRevision)
   )
+  const resolvedLauncherMode =
+    params.launcherMode !== undefined
+      ? sanitizeGatewayLauncherMode(params.launcherMode)
+      : store.runtime.launcherMode
 
   if (params.confirmed) {
     const nextAppliedRevision = Math.max(
@@ -375,6 +390,7 @@ export async function confirmRuntimeReconcile(params: {
             ? `运行状态修订 ${nextAppliedRevision} 已确认生效。`
             : `运行状态修订 ${nextAppliedRevision} 已部分生效，仍有待确认的变更。`),
         lastActions: params.actions ? [...params.actions] : store.runtime.lastActions,
+        launcherMode: resolvedLauncherMode,
       },
     })
   }
@@ -396,6 +412,7 @@ export async function confirmRuntimeReconcile(params: {
       lastReconcileSummary:
         params.summary || `运行状态修订 ${revision} 尚未确认完成，当前阻塞原因为 ${blockingReason}。`,
       lastActions: params.actions ? [...params.actions] : store.runtime.lastActions,
+      launcherMode: resolvedLauncherMode,
     },
   })
 }

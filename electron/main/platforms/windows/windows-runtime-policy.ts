@@ -73,6 +73,7 @@ export interface ResolveWindowsPrivateNodeRuntimePathsOptions {
 export interface SelectAuthoritativeWindowsActiveRuntimeSnapshotDependencies {
   env?: NodeJS.ProcessEnv
   isSnapshotComplete?: (snapshot: WindowsActiveRuntimeSnapshot) => Promise<boolean>
+  preferPrivate?: boolean
 }
 
 export interface WindowsManagedOpenClawRuntimeMarker {
@@ -368,16 +369,25 @@ export async function prepareWindowsManagedOpenClawRuntimeCandidate(
     errors.push(error instanceof Error ? error.message : String(error))
   }
 
+  let packageVersion: string | null = null
+
   try {
-    const packageJson = JSON.parse(await readTextFile(paths.packageJsonPath)) as { name?: string }
+    const packageJson = JSON.parse(await readTextFile(paths.packageJsonPath)) as {
+      name?: string
+      version?: string
+    }
     if (String(packageJson.name || '').trim() !== 'openclaw') {
       errors.push('Managed OpenClaw runtime package.json is not the openclaw package.')
+    } else {
+      packageVersion = normalizeOpenClawVersionProbe(packageJson.version)
     }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error))
   }
 
-  const version = normalizeOpenClawVersionProbe(await probeVersion(paths.openclawExecutable).catch(() => ''))
+  const version =
+    normalizeOpenClawVersionProbe(await probeVersion(paths.openclawExecutable).catch(() => '')) ||
+    packageVersion
   if (!version) {
     errors.push('Managed OpenClaw runtime version probe failed.')
   }
@@ -513,7 +523,8 @@ export async function selectAuthoritativeWindowsActiveRuntimeSnapshot(
       : 'external'
 
     if (leftFamily !== rightFamily) {
-      return leftFamily === 'external' ? -1 : 1
+      const preferredFamily = dependencies.preferPrivate ? 'private' : 'external'
+      return leftFamily === preferredFamily ? -1 : 1
     }
 
     const leftActive = Boolean(left.isPathActive)

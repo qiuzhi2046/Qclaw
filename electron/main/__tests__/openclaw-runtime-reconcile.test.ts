@@ -157,4 +157,114 @@ describe('openclaw runtime reconcile store', () => {
     expect(store.version).toBe(1)
     expect(store.runtime.desiredRevision).toBe(0)
   })
+
+  it('passes launcherMode through confirmRuntimeReconcile when confirmed', async () => {
+    await issueDesiredRuntimeRevision('gateway-bootstrap', 'service_install', {
+      requestedAt: '2026-04-14T10:00:00.000Z',
+    })
+
+    const confirmed = await confirmRuntimeReconcile({
+      confirmed: true,
+      revision: 1,
+      confirmedAt: '2026-04-14T10:01:00.000Z',
+      blockingReason: 'none',
+      safeToRetry: true,
+      summary: '网关已通过 Startup 启动器恢复运行。',
+      launcherMode: 'startup-fallback',
+    })
+
+    expect(confirmed.runtime.stateCode).toBe('ready')
+    expect(confirmed.runtime.launcherMode).toBe('startup-fallback')
+  })
+
+  it('passes launcherMode through confirmRuntimeReconcile when not confirmed', async () => {
+    await issueDesiredRuntimeRevision('gateway-bootstrap', 'service_install', {
+      requestedAt: '2026-04-14T10:00:00.000Z',
+    })
+
+    const failed = await confirmRuntimeReconcile({
+      confirmed: false,
+      revision: 1,
+      confirmedAt: '2026-04-14T10:01:00.000Z',
+      blockingReason: 'service_generation_stale',
+      safeToRetry: false,
+      summary: '网关后台服务重建失败',
+      launcherMode: null,
+    })
+
+    expect(failed.runtime.stateCode).toBe('blocked')
+    expect(failed.runtime.launcherMode).toBeNull()
+  })
+
+  it('preserves existing launcherMode when not provided in params', async () => {
+    await issueDesiredRuntimeRevision('gateway-bootstrap', 'service_install', {
+      requestedAt: '2026-04-14T10:00:00.000Z',
+    })
+    await confirmRuntimeReconcile({
+      confirmed: true,
+      revision: 1,
+      confirmedAt: '2026-04-14T10:01:00.000Z',
+      blockingReason: 'none',
+      safeToRetry: true,
+      launcherMode: 'startup-fallback',
+    })
+
+    const store = await readOpenClawRuntimeReconcileStore()
+    expect(store.runtime.launcherMode).toBe('startup-fallback')
+
+    await issueDesiredRuntimeRevision('config', 'config_changed', {
+      requestedAt: '2026-04-14T10:02:00.000Z',
+    })
+    const confirmed = await confirmRuntimeReconcile({
+      confirmed: true,
+      revision: 2,
+      confirmedAt: '2026-04-14T10:03:00.000Z',
+      blockingReason: 'none',
+      safeToRetry: true,
+    })
+
+    expect(confirmed.runtime.launcherMode).toBe('startup-fallback')
+  })
+
+  it('sanitizes invalid launcherMode values to null', async () => {
+    const storePath = resolveOpenClawRuntimeReconcileStorePath()
+    await fs.mkdir(path.dirname(storePath), { recursive: true })
+    await fs.writeFile(
+      storePath,
+      JSON.stringify({
+        version: 1,
+        lastSeenOpenClawVersion: null,
+        runtime: { launcherMode: 'bogus-value' },
+      }),
+      'utf8'
+    )
+
+    const store = await readOpenClawRuntimeReconcileStore()
+    expect(store.runtime.launcherMode).toBeNull()
+  })
+
+  it('persists blockingDetail with service-install source', async () => {
+    await issueDesiredRuntimeRevision('gateway-bootstrap', 'service_install', {
+      requestedAt: '2026-04-14T10:00:00.000Z',
+    })
+
+    const failed = await confirmRuntimeReconcile({
+      confirmed: false,
+      revision: 1,
+      confirmedAt: '2026-04-14T10:01:00.000Z',
+      blockingReason: 'service_generation_stale',
+      blockingDetail: {
+        source: 'service-install',
+        code: 'access_denied',
+        message: '创建 Windows 计划任务被拒绝，需要管理员权限',
+      },
+      safeToRetry: false,
+      summary: '网关后台服务重建失败',
+    })
+
+    expect(failed.runtime.blockingDetail).toMatchObject({
+      source: 'service-install',
+      code: 'access_denied',
+    })
+  })
 })

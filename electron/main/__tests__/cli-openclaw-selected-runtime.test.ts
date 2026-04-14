@@ -177,6 +177,10 @@ describe('checkOpenClaw selected runtime completeness gate', () => {
 
     expect(cliSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-preparing-managed-runtime'")
     expect(cliSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-verifying-managed-runtime'")
+    expect(cliSource).toContain("probeVersion: async (binaryPath: string) => {")
+    expect(cliSource).toContain("runCliWithBinary(")
+    expect(cliSource).toContain("['--version']")
+    expect(cliSource).toContain("MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs")
     expect(discoverSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-selection-decision'")
     expect(discoverSource).toContain("appendEnvCheckDiagnostic('main-windows-runtime-selection-result'")
     expect(discoverSource).toContain('activeCandidateSource: activeDiscoveryCandidate?.installSource || null')

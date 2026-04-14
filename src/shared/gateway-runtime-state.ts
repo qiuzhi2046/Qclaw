@@ -55,7 +55,7 @@ export interface GatewayControlUiAppDiagnostics {
 }
 
 export interface GatewayRuntimeReasonDetail {
-  source: 'control-ui-app'
+  source: 'control-ui-app' | 'service-install'
   code: string
   message: string
   rawMessage?: string

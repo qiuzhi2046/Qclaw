@@ -332,6 +332,43 @@ describe('prepareWindowsManagedOpenClawRuntimeCandidate', () => {
     })
   })
 
+  it('falls back to package.json version metadata when the CLI version probe returns empty', async () => {
+    const env = buildTestEnv({
+      LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+      QCLAW_USER_DATA_DIR: 'C:\\Users\\alice\\AppData\\Local\\Qclaw',
+    })
+    const expectedPaths = resolveWindowsPrivateOpenClawRuntimePaths({ env })
+    const expectedMarker = buildWindowsManagedOpenClawRuntimeMarker({ env })
+
+    const result = await prepareWindowsManagedOpenClawRuntimeCandidate(
+      {
+        configPath: 'C:\\Users\\alice\\.openclaw\\openclaw.json',
+        env,
+        stateDir: 'C:\\Users\\alice\\.openclaw',
+      },
+      {
+        access: async () => undefined,
+        probeVersion: async () => '',
+        readTextFile: async (targetPath: string) => {
+          if (targetPath === expectedPaths.packageJsonPath) {
+            return JSON.stringify({
+              name: 'openclaw',
+              version: '2026.4.12',
+            })
+          }
+          if (targetPath === expectedPaths.runtimeMarkerPath) {
+            return JSON.stringify(expectedMarker)
+          }
+          throw new Error(`unexpected read: ${targetPath}`)
+        },
+      }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.version).toBe('2026.4.12')
+    expect(result.snapshot?.openclawPath).toBe(expectedPaths.openclawExecutable)
+  })
+
   it('rejects incomplete managed runtime layouts instead of treating them as healthy', async () => {
     const env = buildTestEnv({
       LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',

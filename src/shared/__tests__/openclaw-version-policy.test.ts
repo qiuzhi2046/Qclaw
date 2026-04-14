@@ -23,6 +23,12 @@ describe('openclaw version policy', () => {
     expect(classifyOpenClawVersionLockState('v2026.4.12-2')).toBe('supported_target')
   })
 
+  it('classifies OpenClaw CLI full version output correctly', () => {
+    expect(classifyOpenClawVersionLockState('OpenClaw 2026.4.12 (cff6dc9)')).toBe('supported_target')
+    expect(classifyOpenClawVersionLockState('OpenClaw 2026.4.10 (abc1234)')).toBe('below_min')
+    expect(classifyOpenClawVersionLockState('OpenClaw 2026.4.13 (def5678)')).toBe('above_max')
+  })
+
   it('only auto-corrects sources that can be safely pinned in place', () => {
     expect(supportsPinnedOpenClawCorrection('npm-global')).toBe(true)
     expect(supportsPinnedOpenClawCorrection('nvm')).toBe(true)

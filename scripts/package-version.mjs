@@ -168,6 +168,46 @@ function normalizeState(parsed, statePath) {
   }
 }
 
+const LOCK_PID_FILE = 'pid'
+
+function writeLockPid(lockPath) {
+  try {
+    writeFileSync(`${lockPath}/${LOCK_PID_FILE}`, String(process.pid))
+  } catch {
+    // non-critical: best-effort, lock is still held via the directory
+  }
+}
+
+function readLockPid(lockPath) {
+  try {
+    const value = Number(readFileSync(`${lockPath}/${LOCK_PID_FILE}`, 'utf8').trim())
+    return Number.isInteger(value) && value > 0 ? value : null
+  } catch {
+    return null
+  }
+}
+
+function isProcessAlive(pid) {
+  if (!pid || !Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function tryRemoveStaleLock(lockPath) {
+  const pid = readLockPid(lockPath)
+  if (isProcessAlive(pid)) return false
+  try {
+    rmSync(lockPath, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function withPackageVersionLock(options, action) {
   const lockPath = resolvePackageVersionLockPath(options)
   const timeoutMs = resolveLockTimeoutMs(options)
@@ -176,9 +216,11 @@ function withPackageVersionLock(options, action) {
   for (;;) {
     try {
       mkdirSync(lockPath)
+      writeLockPid(lockPath)
       break
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+        if (tryRemoveStaleLock(lockPath)) continue
         if (Date.now() - startedAt >= timeoutMs) {
           fail(`等待打包版本锁超时：${lockPath}`)
         }

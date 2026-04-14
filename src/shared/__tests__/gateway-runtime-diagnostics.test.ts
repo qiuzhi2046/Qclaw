@@ -104,6 +104,19 @@ describe('classifyGatewayRuntimeState', () => {
     expect(result.summary).toBe('Gateway 与上游的握手连接被异常关闭')
   })
 
+  it('prioritizes plugin_load_failure over websocket_1006 when both patterns match', () => {
+    const result = classifyGatewayRuntimeState({
+      stderr: [
+        '[plugins] openclaw-lark failed to load from C:\\Users\\test\\.openclaw\\extensions\\openclaw-lark\\index.js:',
+        "Error: Cannot find module 'D:/qclaw/resources/openclaw/dist/plugin-sdk/index.js/channel-status'",
+        '[openclaw] Failed to start CLI: Error: gateway closed (1006 abnormal closure)',
+      ].join('\n'),
+    })
+
+    expect(result.stateCode).toBe('plugin_load_failure')
+    expect(result.safeToRetry).toBe(false)
+  })
+
   it('classifies foreign port owners as port_conflict_foreign_process', () => {
     const result = classifyGatewayRuntimeState({
       stderr: 'Port 18789 is already in use',

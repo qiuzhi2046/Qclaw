@@ -120,6 +120,7 @@ export const api = {
   // Gateway
   gatewayHealth: () => ipcRenderer.invoke('gateway:health'),
   getOpenClawRuntimeReconcileState: () => ipcRenderer.invoke('gateway:runtime-reconcile:state:get'),
+  requestGatewayServiceElevation: () => ipcRenderer.invoke('gateway:service:elevate'),
   gatewayForceRestart: () => ipcRenderer.invoke('gateway:force-restart'),
   reloadGatewayAfterModelChange: () => ipcRenderer.invoke('gateway:reload-after-model-change'),
   reloadGatewayAfterChannelChange: () => ipcRenderer.invoke('gateway:reload-after-channel-change'),

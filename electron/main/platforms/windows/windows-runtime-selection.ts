@@ -49,6 +49,7 @@ export function rankWindowsActiveRuntimeDiscoveryCandidates(
   candidates: WindowsActiveRuntimeDiscoveryCandidate[],
   options: {
     env?: NodeJS.ProcessEnv
+    preferPrivate?: boolean
   } = {}
 ): WindowsActiveRuntimeDiscoveryCandidate[] {
   return [...candidates].sort((left, right) => {
@@ -56,7 +57,8 @@ export function rankWindowsActiveRuntimeDiscoveryCandidates(
     const rightFamily = classifyWindowsActiveRuntimeSnapshotFamily(right.snapshot, options)
 
     if (leftFamily !== rightFamily) {
-      return leftFamily === 'external' ? -1 : 1
+      const preferredFamily = options.preferPrivate ? 'private' : 'external'
+      return leftFamily === preferredFamily ? -1 : 1
     }
 
     const leftActive = Boolean(left.isPathActive)

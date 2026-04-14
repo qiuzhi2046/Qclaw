@@ -1,5 +1,5 @@
 import type { OpenClawInstallSource } from './openclaw-phase1'
-import { compareLooseVersions } from './openclaw-phase1'
+import { compareLooseVersions, normalizeVersionCore } from './openclaw-phase1'
 
 export const MIN_SUPPORTED_OPENCLAW_VERSION = '2026.4.12'
 export const MAX_SUPPORTED_OPENCLAW_VERSION = '2026.4.12'
@@ -33,17 +33,6 @@ export interface OpenClawVersionEnforcementResult {
   targetVersion: string | null
   blocksContinue: boolean
   canSelfHeal: boolean
-}
-
-function normalizeVersionCore(value: string | null | undefined): string {
-  if (value?.startsWith("OpenClaw")) {
-    return value.match(/\d{4}\.\d+\.\d+/)?.[0] || value;
-  }
-  return String(value || '')
-    .trim()
-    .replace(/^v/i, '')
-    .split('-')[0]
-    .trim()
 }
 
 function normalizePathSignature(value: string | null | undefined): string {

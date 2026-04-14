@@ -223,9 +223,12 @@ function normalizeVersionPart(raw: string): number | null {
   return Number.parseInt(trimmed, 10)
 }
 
-function normalizeVersionCore(value: string): string {
-  return String(value || '')
-    .trim()
+export function normalizeVersionCore(value: string | null | undefined): string {
+  const trimmed = String(value || '').trim()
+  if (trimmed.startsWith('OpenClaw')) {
+    return trimmed.match(/\d{4}\.\d+\.\d+/)?.[0] || trimmed
+  }
+  return trimmed
     .replace(/^v/i, '')
     .split('-')[0]
     .trim()

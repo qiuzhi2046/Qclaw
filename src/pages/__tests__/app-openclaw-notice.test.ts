@@ -178,6 +178,134 @@ describe('buildOpenClaw322Notice', () => {
     expect(notice?.message).toContain('当前归因：升级后的配置尚未完全兼容。')
   })
 
+  it('shows startup-fallback notice and elevation action when launcherMode is startup-fallback and gateway is healthy', () => {
+    const notice = buildOpenClaw322Notice({
+      runtimeStore: {
+        version: 1,
+        lastSeenOpenClawVersion: '2026.4.12',
+        lastSeenVersionBand: 'openclaw_2026_4_12',
+        lastSeenAt: '2026-04-14T00:00:00.000Z',
+        lastCompatibility: {
+          status: 'steady_state',
+          currentVersion: '2026.4.12',
+          currentBand: 'openclaw_2026_4_12',
+          previousVersion: '2026.4.12',
+          previousBand: 'openclaw_2026_4_12',
+          conservativeMode: false,
+          warningCodes: [],
+          summary: 'OpenClaw 版本维持在 2026.4.12。',
+          assessedAt: '2026-04-14T00:00:00.000Z',
+        },
+        runtime: {
+          stateCode: 'ready',
+          desiredRevision: 1,
+          appliedRevision: 1,
+          pendingReasons: [],
+          lastMutationSource: 'gateway-bootstrap',
+          blockingReason: 'none',
+          blockingDetail: null,
+          safeToRetry: true,
+          lastReconcileAt: '2026-04-14T00:00:00.000Z',
+          lastReconcileSummary: '运行状态修订 1 已确认生效。',
+          lastActions: [],
+          launcherMode: 'startup-fallback',
+        },
+      },
+      capabilities: null,
+      gatewayRunning: true,
+    })
+
+    expect(notice).not.toBeNull()
+    expect(notice?.title).toContain('使用临时启动器运行')
+    expect(notice?.color).toBe('yellow')
+    expect(notice?.message).toContain('Startup 启动器')
+    expect(notice?.showElevationAction).toBe(true)
+  })
+
+  it('returns null when launcherMode is schtasks and gateway is healthy', () => {
+    const notice = buildOpenClaw322Notice({
+      runtimeStore: {
+        version: 1,
+        lastSeenOpenClawVersion: '2026.4.12',
+        lastSeenVersionBand: 'openclaw_2026_4_12',
+        lastSeenAt: '2026-04-14T00:00:00.000Z',
+        lastCompatibility: {
+          status: 'steady_state',
+          currentVersion: '2026.4.12',
+          currentBand: 'openclaw_2026_4_12',
+          previousVersion: '2026.4.12',
+          previousBand: 'openclaw_2026_4_12',
+          conservativeMode: false,
+          warningCodes: [],
+          summary: 'OpenClaw 版本维持在 2026.4.12。',
+          assessedAt: '2026-04-14T00:00:00.000Z',
+        },
+        runtime: {
+          stateCode: 'ready',
+          desiredRevision: 1,
+          appliedRevision: 1,
+          pendingReasons: [],
+          lastMutationSource: 'gateway-bootstrap',
+          blockingReason: 'none',
+          blockingDetail: null,
+          safeToRetry: true,
+          lastReconcileAt: '2026-04-14T00:00:00.000Z',
+          lastReconcileSummary: '运行状态修订 1 已确认生效。',
+          lastActions: [],
+          launcherMode: 'schtasks',
+        },
+      },
+      capabilities: null,
+      gatewayRunning: true,
+    })
+
+    expect(notice).toBeNull()
+  })
+
+  it('shows access_denied detail when service install fails with access denied', () => {
+    const notice = buildOpenClaw322Notice({
+      runtimeStore: {
+        version: 1,
+        lastSeenOpenClawVersion: '2026.4.12',
+        lastSeenVersionBand: 'openclaw_2026_4_12',
+        lastSeenAt: '2026-04-14T00:00:00.000Z',
+        lastCompatibility: {
+          status: 'steady_state',
+          currentVersion: '2026.4.12',
+          currentBand: 'openclaw_2026_4_12',
+          previousVersion: '2026.4.12',
+          previousBand: 'openclaw_2026_4_12',
+          conservativeMode: false,
+          warningCodes: [],
+          summary: 'OpenClaw 版本维持在 2026.4.12。',
+          assessedAt: '2026-04-14T00:00:00.000Z',
+        },
+        runtime: {
+          stateCode: 'degraded',
+          desiredRevision: 2,
+          appliedRevision: 1,
+          pendingReasons: ['service_install'],
+          lastMutationSource: 'gateway-bootstrap',
+          blockingReason: 'service_generation_stale',
+          blockingDetail: {
+            source: 'service-install',
+            code: 'access_denied',
+            message: '创建 Windows 计划任务被拒绝，需要管理员权限',
+          },
+          safeToRetry: false,
+          lastReconcileAt: '2026-04-14T00:00:00.000Z',
+          lastReconcileSummary: '网关后台服务重建失败',
+          lastActions: [],
+        },
+      },
+      capabilities: null,
+      gatewayRunning: false,
+    })
+
+    expect(notice).not.toBeNull()
+    expect(notice?.message).toContain('管理员权限')
+  })
+
   it('keeps the legacy 3.22 title for 3.22-band runtimes', () => {
     const notice = buildOpenClaw322Notice({
       runtimeStore: {

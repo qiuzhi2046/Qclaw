@@ -1703,6 +1703,7 @@ interface ElectronApi {
   // Gateway
   gatewayHealth: () => Promise<GatewayHealthCheckResult>
   getOpenClawRuntimeReconcileState: () => Promise<OpenClawRuntimeReconcileStore>
+  requestGatewayServiceElevation: () => Promise<{ ok: boolean; message: string }>
   gatewayForceRestart: () => Promise<CliResult>
   reloadGatewayAfterModelChange: () => Promise<GatewayReloadResult>
   reloadGatewayAfterChannelChange: () => Promise<GatewayReloadResult>

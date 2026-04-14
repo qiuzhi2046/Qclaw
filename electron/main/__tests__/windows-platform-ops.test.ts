@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../cli', () => ({
   runShell: vi.fn(),
@@ -9,6 +9,7 @@ import {
   buildWindowsGatewayPreflight,
   classifyWindowsStartupLauncherScript,
   cleanupWindowsStartupLauncherIfScheduledTaskHealthy,
+  elevateGatewayServiceInstall,
   ensureWindowsStartupLauncherHidden,
   inspectWindowsGatewayLauncherIntegrity,
   probeWindowsPortOwner,
@@ -476,5 +477,160 @@ describe('cleanupWindowsStartupLauncherIfScheduledTaskHealthy', () => {
     ).resolves.toBe(true)
 
     expect(unlinkFile).toHaveBeenCalledWith(startupEntryPath)
+  })
+})
+
+describe('writeStartupLauncherFallback', () => {
+  let writeStartupLauncherFallback: typeof import('../platforms/windows/windows-platform-ops').writeStartupLauncherFallback
+
+  beforeAll(async () => {
+    ;({ writeStartupLauncherFallback } = await import(
+      '../platforms/windows/windows-platform-ops'
+    ))
+  })
+
+  const homeDir = 'C:\\Users\\test\\.openclaw'
+  const appDataDir = 'C:\\Users\\test\\AppData\\Roaming'
+  const expectedStartupPath =
+    'C:\\Users\\test\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\OpenClaw Gateway.cmd'
+
+  it('writes startup launcher when gateway.cmd exists', async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined)
+    const result = await writeStartupLauncherFallback({
+      homeDir,
+      appDataDir,
+      fileExists: (p) => p === `${homeDir}\\gateway.cmd`,
+      writeFile,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.startupEntryPath).toBe(expectedStartupPath)
+    expect(result.launcherPath).toBe(`${homeDir}\\gateway.cmd`)
+    expect(writeFile).toHaveBeenCalledWith(expectedStartupPath, expect.stringContaining('gateway.cmd'))
+  })
+
+  it('returns ok:false when gateway.cmd does not exist', async () => {
+    const writeFile = vi.fn()
+    const result = await writeStartupLauncherFallback({
+      homeDir,
+      appDataDir,
+      fileExists: () => false,
+      writeFile,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.launcherPath).toBe(`${homeDir}\\gateway.cmd`)
+    expect(writeFile).not.toHaveBeenCalled()
+  })
+
+  it('returns ok:false when startup path cannot be resolved', async () => {
+    const writeFile = vi.fn()
+    const result = await writeStartupLauncherFallback({
+      homeDir: '',
+      fileExists: () => true,
+      writeFile,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.startupEntryPath).toBeNull()
+    expect(writeFile).not.toHaveBeenCalled()
+  })
+
+  it('generates script recognizable by inspectWindowsGatewayLauncherIntegrity', async () => {
+    let writtenContent = ''
+    const writeFile = vi.fn().mockImplementation((_path: string, content: string) => {
+      writtenContent = content
+    })
+
+    await writeStartupLauncherFallback({
+      homeDir,
+      appDataDir,
+      fileExists: () => true,
+      writeFile,
+    })
+
+    // The script should contain the gateway.cmd path in a format that
+    // extractStartupLauncherPath can parse (regex: /[A-Za-z]:\\[^"\r\n]+?\.cmd\b/)
+    const pathMatch = writtenContent.match(/[A-Za-z]:\\[^"\r\n]+?\.cmd\b/gi)
+    expect(pathMatch).not.toBeNull()
+    expect(pathMatch!.pop()).toBe(`${homeDir}\\gateway.cmd`)
+  })
+})
+
+describe('elevateGatewayServiceInstall', () => {
+  it('returns ok when elevated gateway install succeeds', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      stdout: '',
+      stderr: '',
+      code: 0,
+    })
+
+    const result = await elevateGatewayServiceInstall({
+      openclawBinaryPath: 'C:\\Users\\test\\.openclaw\\openclaw.cmd',
+      runShell,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.cancelled).toBe(false)
+    expect(runShell).toHaveBeenCalledWith(
+      'powershell.exe',
+      expect.arrayContaining(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', expect.stringContaining('Start-Process')]),
+      expect.any(Number),
+      'gateway'
+    )
+  })
+
+  it('detects UAC cancellation via exit code 1223', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      stdout: '',
+      stderr: '',
+      code: 1223,
+    })
+
+    const result = await elevateGatewayServiceInstall({
+      openclawBinaryPath: 'C:\\Users\\test\\.openclaw\\openclaw.cmd',
+      runShell,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.cancelled).toBe(true)
+  })
+
+  it('returns failure with stderr when elevated install fails', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      stdout: '',
+      stderr: 'schtasks create failed: some error',
+      code: 1,
+    })
+
+    const result = await elevateGatewayServiceInstall({
+      openclawBinaryPath: 'C:\\Users\\test\\.openclaw\\openclaw.cmd',
+      runShell,
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.cancelled).toBe(false)
+    expect(result.message).toContain('schtasks create failed')
+  })
+
+  it('escapes single quotes in binary path', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      stdout: '',
+      stderr: '',
+      code: 0,
+    })
+
+    await elevateGatewayServiceInstall({
+      openclawBinaryPath: "C:\\Users\\it's\\openclaw.cmd",
+      runShell,
+    })
+
+    const psCommand = runShell.mock.calls[0][1][runShell.mock.calls[0][1].length - 1]
+    expect(psCommand).toContain("it''s")
+    expect(psCommand).not.toContain("it's\\")
   })
 })

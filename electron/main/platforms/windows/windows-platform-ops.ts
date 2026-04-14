@@ -67,6 +67,12 @@ interface WindowsGatewayPreflight {
   shouldReinstallService: boolean
 }
 
+export interface WriteStartupLauncherFallbackResult {
+  ok: boolean
+  launcherPath: string | null
+  startupEntryPath: string | null
+}
+
 interface WindowsListeningPortRecord {
   LocalAddress?: string
   LocalPort?: number | string
@@ -601,5 +607,91 @@ export function buildWindowsGatewayPreflight(
     shouldReinstallService: Boolean(input.launcherIntegrity?.shouldReinstallService),
     shouldAttemptPortRecovery:
       owner?.kind === 'foreign' || owner?.kind === 'gateway' || owner?.kind === 'openclaw',
+  }
+}
+
+export async function writeStartupLauncherFallback(params: {
+  homeDir: string
+  appDataDir?: string
+  fileExists?: (targetPath: string) => boolean | Promise<boolean>
+  writeFile?: (targetPath: string, content: string) => Promise<void>
+}): Promise<WriteStartupLauncherFallbackResult> {
+  const startupEntryPath = resolveWindowsStartupLauncherPath(params.homeDir, params.appDataDir)
+  if (!startupEntryPath) {
+    return { ok: false, startupEntryPath: null, launcherPath: null }
+  }
+
+  const launcherPath = `${params.homeDir}\\gateway.cmd`
+  const fileExists = params.fileExists || defaultFileExists
+  if (!(await fileExists(launcherPath))) {
+    return { ok: false, startupEntryPath, launcherPath }
+  }
+
+  const script = buildHiddenWindowsStartupLauncherScript({ scriptPath: launcherPath })
+  const writeFile = params.writeFile || defaultWriteFile
+  await writeFile(startupEntryPath, script)
+  return { ok: true, startupEntryPath, launcherPath }
+}
+
+export interface ElevateGatewayServiceInstallResult {
+  ok: boolean
+  cancelled: boolean
+  message: string
+}
+
+/**
+ * Runs `openclaw gateway install --force` with UAC elevation via PowerShell
+ * `Start-Process -Verb RunAs`. Shows the native Windows UAC prompt.
+ *
+ * If the user cancels the UAC prompt, returns `{ ok: false, cancelled: true }`.
+ */
+export async function elevateGatewayServiceInstall(params: {
+  openclawBinaryPath: string
+  runShell?: RunShellLike
+}): Promise<ElevateGatewayServiceInstallResult> {
+  const runner = params.runShell || runShell
+  const escapedPath = params.openclawBinaryPath.replace(/'/g, "''")
+
+  // PowerShell script that runs the gateway install command with UAC elevation.
+  // Start-Process -Verb RunAs triggers the native Windows UAC prompt.
+  // -Wait blocks until the elevated process exits.
+  // -PassThru returns a process object so we can read ExitCode.
+  // On UAC cancel, Start-Process throws — we catch and exit 1223 (ERROR_CANCELLED).
+  // We invoke the binary directly via -FilePath instead of routing through cmd.exe
+  // to avoid double-quote injection risks in the argument string.
+  const psCommand = [
+    '$ErrorActionPreference = "Stop";',
+    'try {',
+    `  $p = Start-Process -FilePath '${escapedPath}' -ArgumentList 'gateway','install','--force' -Verb RunAs -Wait -PassThru -WindowStyle Hidden;`,
+    '  exit $p.ExitCode',
+    '} catch {',
+    '  if ($_.Exception.Message -match "canceled|cancelled|1223") { exit 1223 }',
+    '  exit 1',
+    '}',
+  ].join('\n')
+
+  const result = await runner(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCommand],
+    MAIN_RUNTIME_POLICY.cli.defaultCommandTimeoutMs,
+    'gateway'
+  )
+
+  if (result.ok && result.code === 0) {
+    return { ok: true, cancelled: false, message: 'Gateway 服务已成功以管理员权限安装。' }
+  }
+
+  // Exit code 1223 = ERROR_CANCELLED (user dismissed UAC prompt)
+  if (result.code === 1223) {
+    return { ok: false, cancelled: true, message: '用户取消了管理员权限请求。' }
+  }
+
+  const stderr = String(result.stderr || '').trim()
+  return {
+    ok: false,
+    cancelled: false,
+    message: stderr
+      ? `以管理员权限安装失败：${stderr.slice(0, 300)}`
+      : '以管理员权限安装失败。',
   }
 }

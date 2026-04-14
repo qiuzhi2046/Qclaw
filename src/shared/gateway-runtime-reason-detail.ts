@@ -25,6 +25,15 @@ export function describeGatewayRuntimeReasonDetail(
 ): string | null {
   if (!detail) return null
 
+  if (detail.source === 'service-install') {
+    switch (detail.code) {
+      case 'access_denied':
+        return '创建 Windows 计划任务被拒绝，需要管理员权限才能完成服务安装'
+      default:
+        return detail.message || `服务安装失败：${detail.code}`
+    }
+  }
+
   switch (detail.code) {
     case 'device_token_mismatch':
       return '控制界面与本地网关的 device token 不一致'
@@ -72,12 +81,12 @@ export function sanitizeGatewayRuntimeReasonDetail(
   const message = String(record.message || '').trim()
   const rawMessage = String(record.rawMessage || '').trim()
 
-  if (source !== 'control-ui-app' || !code || !message) {
+  if ((source !== 'control-ui-app' && source !== 'service-install') || !code || !message) {
     return null
   }
 
   return {
-    source: 'control-ui-app',
+    source: source as 'control-ui-app' | 'service-install',
     code,
     message,
     rawMessage: rawMessage || undefined,

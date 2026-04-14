@@ -168,7 +168,7 @@ function describeBlockingReason(reason: GatewayBlockingReason): string {
 
 export function buildOpenClaw322Notice(
   snapshot: OpenClawEntryCompatibilitySnapshot
-): { title: string; message: string; color: 'blue' | 'yellow' | 'red' } | null {
+): { title: string; message: string; color: 'blue' | 'yellow' | 'red'; showElevationAction?: boolean } | null {
   const runtimeStore = snapshot.runtimeStore
   const runtime = runtimeStore?.runtime || null
   const compatibility = runtimeStore?.lastCompatibility || null
@@ -177,6 +177,7 @@ export function buildOpenClaw322Notice(
   const messageParts: string[] = []
   let title = 'OpenClaw 3.22 兼容提示'
   let color: 'blue' | 'yellow' | 'red' = 'yellow'
+  let showElevationAction = false
 
   const displayVersion = normalizeOpenClawVersionDisplay(compatibility?.currentVersion)
   const is322Band = compatibility?.currentBand === 'openclaw_2026_3_22'
@@ -191,11 +192,12 @@ export function buildOpenClaw322Notice(
       runtime?.stateCode === 'degraded' ||
       runtime?.stateCode === 'blocked'
     )
+  const startupFallbackActive = Boolean(runtime?.launcherMode === 'startup-fallback')
   const authRegistryDegraded = Boolean(
     capabilities && (!capabilities.authRegistry.ok || String(capabilities.authRegistry.message || '').trim())
   )
 
-  if (!is322Band && !runtimeNeedsAttention && !authRegistryDegraded) {
+  if (!is322Band && !runtimeNeedsAttention && !authRegistryDegraded && !startupFallbackActive) {
     return null
   }
 
@@ -246,10 +248,22 @@ export function buildOpenClaw322Notice(
     }
   }
 
+  if (startupFallbackActive) {
+    if (!runtimeNeedsAttention) {
+      title = `${titleBase} 使用临时启动器运行`
+      color = 'yellow'
+    }
+    messageParts.push(
+      '网关当前通过 Windows Startup 启动器运行，建议升级为计划任务以获得更稳定的体验。'
+    )
+    showElevationAction = true
+  }
+
   return {
     title,
     message: messageParts.join(' '),
     color,
+    showElevationAction,
   }
 }
 
@@ -794,10 +808,36 @@ function App() {
       return
     }
 
+    const noticeMessage = notice.showElevationAction
+      ? (
+        <>
+          {notice.message}
+          {' '}
+          <button
+            type="button"
+            onClick={() => {
+              void window.api.requestGatewayServiceElevation().catch(() => undefined)
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'inherit',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              padding: 0,
+              font: 'inherit',
+            }}
+          >
+            升级为计划任务（需要管理员权限）
+          </button>
+        </>
+      )
+      : notice.message
+
     notifications.show({
       id: OPENCLAW_322_NOTICE_ID,
       title: notice.title,
-      message: notice.message,
+      message: noticeMessage,
       color: notice.color,
       autoClose: false,
       withCloseButton: true,

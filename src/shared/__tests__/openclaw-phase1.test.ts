@@ -68,6 +68,15 @@ describe('compareLooseVersions', () => {
     expect(compareLooseVersions('2026.3.23-2', '2026.3.22')).toBe(1)
     expect(compareLooseVersions('2026.3.21-9', '2026.3.22')).toBe(-1)
   })
+
+  it('handles OpenClaw CLI version format with prefix and commit hash', () => {
+    expect(compareLooseVersions('OpenClaw 2026.4.12 (cff6dc9)', '2026.4.12')).toBe(0)
+    expect(compareLooseVersions('OpenClaw 2026.4.11 (abc1234)', '2026.4.12')).toBe(-1)
+    expect(compareLooseVersions('OpenClaw 2026.4.13 (def5678)', '2026.4.12')).toBe(1)
+    expect(compareLooseVersions('OpenClaw 2026.3.12', '2026.3.12')).toBe(0)
+    expect(compareLooseVersions('OpenClaw 2026.4.12 (cff6dc9)', 'OpenClaw 2026.4.12 (abc1234)')).toBe(0)
+    expect(compareLooseVersions('OpenClaw 2026.3.23-2 (7ffe7e4)', '2026.3.23')).toBe(0)
+  })
 })
 
 describe('openclaw install source guards', () => {

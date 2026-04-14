@@ -51,6 +51,7 @@ import {
   cleanupWindowsStartupLauncherIfScheduledTaskHealthy,
   ensureWindowsStartupLauncherHidden,
   inspectWindowsGatewayLauncherIntegrity,
+  writeStartupLauncherFallback,
   type WindowsGatewayLauncherIntegrity,
 } from './platforms/windows/windows-platform-ops'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
@@ -139,6 +140,30 @@ interface EnsureGatewayRunningOptions {
 const GATEWAY_SERVICE_NOT_LOADED_PATTERN = /\bgateway service (?:not loaded|missing)\b/i
 const UNKNOWN_MANAGED_CHANNEL_ID_PATTERN =
   /channels\.([A-Za-z0-9._-]+): unknown channel id: ([A-Za-z0-9._-]+)/gi
+
+export type ServiceInstallFailureClass = 'access-denied' | 'other'
+
+export function classifyServiceInstallFailure(
+  result: Partial<CliResult> | null | undefined
+): ServiceInstallFailureClass {
+  const output = combineCliOutput(result)
+
+  // English: "Access is denied" / "Access Denied"
+  if (/access\s+(?:is\s+)?denied/i.test(output)) return 'access-denied'
+
+  // Chinese: 拒绝访问 (displayed correctly when system locale matches)
+  if (output.includes('拒绝访问')) return 'access-denied'
+
+  // GBK garbled fallback: Windows Chinese schtasks emits GBK-encoded stderr that
+  // becomes garbled through the Node.js UTF-8 pipe.  The English fragment
+  // "schtasks create failed" survives encoding corruption, and exit code 1 is the
+  // standard schtasks permission-denied exit code — together they form a reliable signal.
+  if (/schtasks\s+create\s+failed/i.test(output) && result?.code === 1) {
+    return 'access-denied'
+  }
+
+  return 'other'
+}
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
@@ -1558,6 +1583,8 @@ async function ensureGatewayRunningImpl(
     return reconcileRevision
   }
 
+  let gatewayLauncherMode: 'schtasks' | 'startup-fallback' | null = null
+
   const persistGatewayRuntimeReconcile = async (params: {
     result: Pick<
       GatewayEnsureRunningResult,
@@ -1582,6 +1609,7 @@ async function ensureGatewayRunningImpl(
         outcome: confirmed ? 'succeeded' : 'failed',
         summary: persistedSummary,
       }),
+      launcherMode: gatewayLauncherMode,
     })
     if (confirmed) {
       const cleanupLauncherIntegrity =
@@ -2109,6 +2137,25 @@ async function ensureGatewayRunningImpl(
       launcherStatus: launcherIntegrity?.status || null,
       launcherPath: launcherIntegrity?.launcherPath || null,
     })
+
+    // Item 4: detect path mismatch between launcher and actual running process
+    const runningProcessCommand = String(preflightPortOwner.command || '').trim()
+    const expectedLauncherPath = String(launcherIntegrity?.launcherPath || '').trim().toLowerCase()
+    if (
+      runningProcessCommand &&
+      expectedLauncherPath &&
+      (preflightPortOwner.kind === 'gateway' || preflightPortOwner.kind === 'openclaw') &&
+      !runningProcessCommand.toLowerCase().includes(expectedLauncherPath)
+    ) {
+      await appendEnvCheckDiagnostic('gateway-ensure-runtime-path-mismatch', {
+        expectedLauncherPath: launcherIntegrity?.launcherPath || null,
+        runningProcessCommand: runningProcessCommand.slice(0, 500),
+        portOwnerKind: preflightPortOwner.kind,
+        portOwnerPid: preflightPortOwner.pid || null,
+        warning: '当前端口上运行的 OpenClaw 进程路径与 gateway.cmd 指向的路径不一致，可能存在旧 runtime 抢占或并行干扰。',
+      })
+    }
+
     context.portOwner = preflightPortOwner
 
     if (preflight.shouldAttemptPortRecovery) {
@@ -2179,34 +2226,69 @@ async function ensureGatewayRunningImpl(
         code: installGatewayResult.code,
         stderr: String(installGatewayResult.stderr || '').slice(0, 400),
       })
+      const usedStartupFallback = !installGatewayResult.ok
       if (!installGatewayResult.ok) {
-        appendGatewayEvidence(context, {
-          source: 'service',
-          message: '网关服务重建失败',
-          detail: combineCliOutput(installGatewayResult),
+        const installFailureClass = classifyServiceInstallFailure(installGatewayResult)
+        await appendEnvCheckDiagnostic('gateway-ensure-install-failure-class', {
+          failureClass: installFailureClass,
+          branch: 'reinstall-service',
         })
-        const result = buildGatewayEnsureResult(
-          installGatewayResult,
-          {
-            running: false,
-            autoInstalledGatewayService,
-            ...installedFlags,
-          },
-          context,
-          {
-            stateCode: 'service_install_failed',
-            summary: '网关后台服务重建失败',
-          }
-        )
-        await persistGatewayRuntimeReconcile({ result })
-        return result
+
+        let startupFallbackSucceeded = false
+        if (installFailureClass === 'access-denied' && preflightHomeDir) {
+          const fallback = await writeStartupLauncherFallback({
+            homeDir: preflightHomeDir,
+          }).catch(() => ({ ok: false, startupEntryPath: null, launcherPath: null }))
+          await appendEnvCheckDiagnostic('gateway-ensure-startup-fallback-result', {
+            ok: fallback.ok,
+            startupEntryPath: fallback.startupEntryPath,
+            launcherPath: fallback.launcherPath,
+            launcherMode: fallback.ok ? 'startup-fallback' : null,
+            branch: 'reinstall-service',
+          })
+          startupFallbackSucceeded = fallback.ok
+        }
+
+        if (startupFallbackSucceeded) {
+          gatewayLauncherMode = 'startup-fallback'
+        }
+
+        if (!startupFallbackSucceeded) {
+          appendGatewayEvidence(context, {
+            source: 'service',
+            message: '网关服务重建失败',
+            detail: combineCliOutput(installGatewayResult),
+          })
+          const result = buildGatewayEnsureResult(
+            installGatewayResult,
+            {
+              running: false,
+              autoInstalledGatewayService,
+              ...installedFlags,
+            },
+            context,
+            {
+              stateCode: 'service_install_failed',
+              summary: '网关后台服务重建失败',
+              reasonDetail: installFailureClass === 'access-denied'
+                ? { source: 'service-install', code: 'access_denied', message: '创建 Windows 计划任务被拒绝，需要管理员权限' }
+                : undefined,
+            }
+          )
+          await persistGatewayRuntimeReconcile({ result })
+          return result
+        }
+      } else {
+        gatewayLauncherMode = 'schtasks'
       }
 
       autoInstalledGatewayService = true
       emitGatewayBootstrapState(options, {
         phase: 'start-command',
         title: '正在重新启动网关',
-        detail: '网关后台服务已重建完成，正在再次启动网关。',
+        detail: usedStartupFallback
+          ? '已通过 Startup 启动器恢复，正在启动网关。'
+          : '网关后台服务已重建完成，正在再次启动网关。',
         progress: 56,
       })
       recordGatewayAction(context, 'start-gateway', ['gateway', 'start'])
@@ -2267,26 +2349,62 @@ async function ensureGatewayRunningImpl(
       stderr: String(installGatewayResult.stderr || '').slice(0, 400),
     })
     if (!installGatewayResult.ok) {
-      appendGatewayEvidence(context, {
-        source: 'service',
-        message: '网关服务补装失败',
-        detail: combineCliOutput(installGatewayResult),
+      const installFailureClass = classifyServiceInstallFailure(installGatewayResult)
+      await appendEnvCheckDiagnostic('gateway-ensure-install-failure-class', {
+        failureClass: installFailureClass,
+        branch: 'service-not-loaded',
       })
-      const result = buildGatewayEnsureResult(
-        installGatewayResult,
-        {
-          running: false,
-          autoInstalledGatewayService,
-          ...installedFlags,
-        },
-        context,
-        {
-          stateCode: 'service_install_failed',
-          summary: '网关后台服务补装失败',
-        }
-      )
-      await persistGatewayRuntimeReconcile({ result })
-      return result
+
+      let startupFallbackSucceeded = false
+      if (
+        installFailureClass === 'access-denied'
+        && process.platform === 'win32'
+        && gatewayStartPreflightHomeDir
+      ) {
+        const fallback = await writeStartupLauncherFallback({
+          homeDir: gatewayStartPreflightHomeDir,
+        }).catch(() => ({ ok: false, startupEntryPath: null, launcherPath: null }))
+        await appendEnvCheckDiagnostic('gateway-ensure-startup-fallback-result', {
+          ok: fallback.ok,
+          startupEntryPath: fallback.startupEntryPath,
+          launcherPath: fallback.launcherPath,
+          launcherMode: fallback.ok ? 'startup-fallback' : null,
+          branch: 'service-not-loaded',
+        })
+        startupFallbackSucceeded = fallback.ok
+      }
+
+      if (startupFallbackSucceeded) {
+        gatewayLauncherMode = 'startup-fallback'
+      }
+
+      if (!startupFallbackSucceeded) {
+        appendGatewayEvidence(context, {
+          source: 'service',
+          message: '网关服务补装失败',
+          detail: combineCliOutput(installGatewayResult),
+        })
+        const result = buildGatewayEnsureResult(
+          installGatewayResult,
+          {
+            running: false,
+            autoInstalledGatewayService,
+            ...installedFlags,
+          },
+          context,
+          {
+            stateCode: 'service_install_failed',
+            summary: '网关后台服务补装失败',
+            reasonDetail: installFailureClass === 'access-denied'
+              ? { source: 'service-install', code: 'access_denied', message: '创建 Windows 计划任务被拒绝，需要管理员权限' }
+              : undefined,
+          }
+        )
+        await persistGatewayRuntimeReconcile({ result })
+        return result
+      }
+    } else {
+      gatewayLauncherMode = 'schtasks'
     }
 
     autoInstalledGatewayService = true

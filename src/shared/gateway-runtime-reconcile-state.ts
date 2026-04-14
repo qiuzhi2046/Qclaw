@@ -51,6 +51,8 @@ export type RuntimeMutationSource =
   | 'gateway-bootstrap'
   | 'manual'
 
+export type GatewayLauncherMode = 'schtasks' | 'startup-fallback'
+
 export interface ReconcileActionSummary {
   kind: 'probe' | 'repair' | 'migration'
   action: string
@@ -83,6 +85,7 @@ export interface RuntimeReconcileState {
   lastReconcileAt: string | null
   lastReconcileSummary: string | null
   lastActions: ReconcileActionSummary[]
+  launcherMode?: GatewayLauncherMode | null
 }
 
 export interface OpenClawRuntimeReconcileStore {
@@ -121,6 +124,7 @@ export function createDefaultRuntimeReconcileState(): RuntimeReconcileState {
     lastReconcileAt: null,
     lastReconcileSummary: null,
     lastActions: [],
+    launcherMode: null,
   }
 }
 

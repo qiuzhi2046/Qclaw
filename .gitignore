@@ -60,3 +60,4 @@ skills-lock.json
 /docs/superpowers/
 /.cache/
 /node-env-backup.txt
+*.tsbuildinfo

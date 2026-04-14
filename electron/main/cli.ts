@@ -95,6 +95,7 @@ import {
   type WindowsActiveRuntimeSnapshot,
 } from './platforms/windows/windows-runtime-policy'
 import { rankWindowsActiveRuntimeDiscoveryCandidates } from './platforms/windows/windows-runtime-selection'
+import { readOpenClawRuntimeReconcileStore } from './openclaw-runtime-reconcile'
 import {
   normalizeWindowsChannelRuntimeSnapshot,
   type WindowsChannelRuntimeSnapshot,
@@ -420,6 +421,16 @@ async function prepareManagedWindowsRuntimeSnapshotFromExistingRuntime(input: {
       extensionsDir,
       stateDir,
       userDataDir: String(process.env.QCLAW_USER_DATA_DIR || '').trim() || undefined,
+    }, {
+      probeVersion: async (binaryPath: string) => {
+        const result = await runCliWithBinary(
+          binaryPath,
+          ['--version'],
+          MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs,
+          'env-setup'
+        ).catch(() => null)
+        return String(result?.stdout || result?.stderr || '').trim()
+      },
     })
     const preparedSnapshot = preparedManagedRuntime.snapshot
 
@@ -468,6 +479,19 @@ async function discoverWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRunt
   if (!nodeExecutable) return null
 
   const discovery = await discoverOpenClawInstallations().catch(() => null)
+  const activeDiscoveryCandidate = resolveDiscoveryActiveCandidate(discovery)
+  const shouldSwitchToManaged = shouldSwitchWindowsRuntimeToManagedCandidate(activeDiscoveryCandidate)
+
+  // Condition-based private candidate bias (plan item 7):
+  // Prefer private runtime only when evidence specifically points to the external candidate
+  // being problematic for service/launcher reasons — not for unrelated blocking reasons
+  // (config-invalid, token-stale, etc.) which would cause confusing runtime switches.
+  const reconcileStore = await readOpenClawRuntimeReconcileStore().catch(() => null)
+  const reconcileDegraded =
+    (reconcileStore?.runtime.stateCode === 'degraded' || reconcileStore?.runtime.stateCode === 'blocked') &&
+    reconcileStore?.runtime.blockingReason === 'service_generation_stale'
+  const preferPrivate = shouldSwitchToManaged || reconcileDegraded
+
   const rankedCandidates = rankWindowsActiveRuntimeDiscoveryCandidates(
     (discovery?.candidates || []).flatMap((candidate) =>
       candidate.activeRuntimeSnapshot
@@ -481,21 +505,23 @@ async function discoverWindowsActiveRuntimeSnapshot(): Promise<WindowsActiveRunt
     ),
     {
       env: process.env,
+      preferPrivate,
     }
   )
 
   const selectedCandidate = await selectAuthoritativeWindowsActiveRuntimeSnapshot(rankedCandidates, {
     env: process.env,
     isSnapshotComplete: canAccessWindowsActiveRuntimeSnapshot,
+    preferPrivate,
   })
-  const activeDiscoveryCandidate = resolveDiscoveryActiveCandidate(discovery)
-  const shouldSwitchToManaged = shouldSwitchWindowsRuntimeToManagedCandidate(activeDiscoveryCandidate)
   await appendEnvCheckDiagnostic('main-windows-runtime-selection-decision', {
     hasSelectedCandidate: Boolean(selectedCandidate),
     activeCandidateId: activeDiscoveryCandidate?.candidateId || null,
     activeCandidateSource: activeDiscoveryCandidate?.installSource || null,
     activeCandidateVersion: activeDiscoveryCandidate?.version || null,
     shouldSwitchToManaged,
+    preferPrivate,
+    reconcileDegraded,
   }).catch(() => undefined)
   if (selectedCandidate) {
     if (!shouldSwitchToManaged) {
@@ -3264,10 +3290,32 @@ export async function discoverOpenClawForEnvCheck(): Promise<OpenClawDiscoveryRe
       activeRuntimeSnapshot: selectedRuntimeSnapshot || undefined,
       env: commandProbeEnv,
     }).catch(() => null))
+
+  // Include full PATH discovery paths to align with runtime selection's view (plan item 3).
+  const fullDiscovery = await discoverOpenClawInstallations().catch(() => null)
+  const fullDiscoveryPaths = (fullDiscovery?.candidates || [])
+    .map((c) => c.resolvedBinaryPath)
+    .filter(Boolean) as string[]
+
   const discovery = await discoverOpenClawInstallationsFromKnownPaths({
     activeBinaryPath: resolvedOpenClawPath || null,
-    knownPaths: [selectedOpenClawPath, resolvedOpenClawPath],
+    knownPaths: [selectedOpenClawPath, resolvedOpenClawPath, ...fullDiscoveryPaths],
   })
+
+  // Diagnostic: detect divergence between env-check active candidate and full discovery
+  const envCheckActiveId = discovery.activeCandidateId
+  const fullDiscoveryActiveId = fullDiscovery?.activeCandidateId || null
+  if (envCheckActiveId && fullDiscoveryActiveId && envCheckActiveId !== fullDiscoveryActiveId) {
+    const envCheckCandidate = discovery.candidates.find((c) => c.candidateId === envCheckActiveId)
+    const fullCandidate = fullDiscovery?.candidates.find((c) => c.candidateId === fullDiscoveryActiveId)
+    await appendEnvCheckDiagnostic('env-check-runtime-selection-divergence', {
+      envCheckActiveVersion: envCheckCandidate?.version || null,
+      envCheckActiveSource: envCheckCandidate?.installSource || null,
+      runtimeSelectionActiveVersion: fullCandidate?.version || null,
+      runtimeSelectionActiveSource: fullCandidate?.installSource || null,
+    }).catch(() => undefined)
+  }
+
   const gatewayOwnerHomeDir =
     String(selectedRuntimeSnapshot?.stateDir || '').trim() || resolveOpenClawPaths().homeDir
 

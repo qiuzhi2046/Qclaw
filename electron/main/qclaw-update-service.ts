@@ -77,6 +77,18 @@ function resolveCurrentAppVersion(): string {
 
 let listenersBound = false
 
+let inflightOperation: Promise<unknown> | null = null
+
+function withSerializedOperation<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = inflightOperation
+  const result: Promise<T> = prev ? prev.then(() => fn(), () => fn()) : fn()
+  inflightOperation = result.then(
+    () => { if (inflightOperation === result) inflightOperation = null },
+    () => { if (inflightOperation === result) inflightOperation = null }
+  )
+  return result
+}
+
 let currentStatus: QClawUpdateStatus = {
   ok: true,
   supported: process.platform === 'darwin' || process.platform === 'win32',
@@ -441,7 +453,7 @@ export async function getQClawUpdateStatus(): Promise<QClawUpdateStatus> {
   return ensureUpdaterAvailability()
 }
 
-export async function checkQClawUpdate(): Promise<QClawUpdateStatus> {
+async function checkQClawUpdateCore(): Promise<QClawUpdateStatus> {
   const baseStatus = await ensureUpdaterAvailability()
   if (!baseStatus.supported || !baseStatus.configured) {
     return baseStatus
@@ -463,7 +475,11 @@ export async function checkQClawUpdate(): Promise<QClawUpdateStatus> {
   }
 }
 
-export async function downloadQClawUpdate(): Promise<QClawUpdateActionResult> {
+export function checkQClawUpdate(): Promise<QClawUpdateStatus> {
+  return withSerializedOperation(checkQClawUpdateCore)
+}
+
+async function downloadQClawUpdateCore(): Promise<QClawUpdateActionResult> {
   const baseStatus = await ensureUpdaterAvailability()
   if (!baseStatus.supported || !baseStatus.configured) {
     return {
@@ -477,7 +493,7 @@ export async function downloadQClawUpdate(): Promise<QClawUpdateActionResult> {
 
   let status = cloneStatus()
   if (status.status !== 'available' && status.status !== 'downloaded' && !status.availableVersion) {
-    status = await checkQClawUpdate()
+    status = await checkQClawUpdateCore()
   }
 
   if (status.status === 'downloaded') {
@@ -533,7 +549,11 @@ export async function downloadQClawUpdate(): Promise<QClawUpdateActionResult> {
   }
 }
 
-export async function installQClawUpdate(): Promise<QClawUpdateActionResult> {
+export function downloadQClawUpdate(): Promise<QClawUpdateActionResult> {
+  return withSerializedOperation(downloadQClawUpdateCore)
+}
+
+async function installQClawUpdateCore(): Promise<QClawUpdateActionResult> {
   const baseStatus = await ensureUpdaterAvailability()
   if (!baseStatus.supported || !baseStatus.configured) {
     return {
@@ -564,21 +584,25 @@ export async function installQClawUpdate(): Promise<QClawUpdateActionResult> {
     errorCode: undefined,
   })
 
-  setImmediate(() => {
-    try {
-      runQClawUpdateInstall(getAutoUpdater(), process.platform)
-    } catch (error) {
-      const errorCode = classifyUpdaterError(error)
-      setStatus({
+  try {
+    runQClawUpdateInstall(getAutoUpdater(), process.platform)
+  } catch (error) {
+    const errorCode = classifyUpdaterError(error)
+    return {
+      ok: false,
+      status: setStatus({
         ok: false,
         status: 'error',
         progressPercent: null,
         error: error instanceof Error ? error.message : String(error),
         errorCode,
         message: explainUpdaterError(errorCode, 'Qclaw 安装更新时发生错误。'),
-      })
+      }),
+      errorCode,
+      error: error instanceof Error ? error.message : String(error),
+      message: explainUpdaterError(errorCode, 'Qclaw 安装更新时发生错误。'),
     }
-  })
+  }
 
   return {
     ok: true,
@@ -588,7 +612,11 @@ export async function installQClawUpdate(): Promise<QClawUpdateActionResult> {
   }
 }
 
-export async function openQClawUpdateDownloadUrl(): Promise<QClawUpdateOpenDownloadResult> {
+export function installQClawUpdate(): Promise<QClawUpdateActionResult> {
+  return withSerializedOperation(installQClawUpdateCore)
+}
+
+async function openQClawUpdateDownloadUrlCore(): Promise<QClawUpdateOpenDownloadResult> {
   const baseStatus = await ensureUpdaterAvailability()
   if (!baseStatus.supported || !baseStatus.configured) {
     return {
@@ -602,9 +630,8 @@ export async function openQClawUpdateDownloadUrl(): Promise<QClawUpdateOpenDownl
 
   let status = cloneStatus()
   if (!status.manualDownloadUrl || !status.availableVersion) {
-    status = await checkQClawUpdate()
+    status = await checkQClawUpdateCore()
   }
-
   const manualDownloadUrl = normalizeText(status.manualDownloadUrl)
   if (!manualDownloadUrl || !status.availableVersion) {
     return {
@@ -658,4 +685,8 @@ export async function openQClawUpdateDownloadUrl(): Promise<QClawUpdateOpenDownl
       message: explainUpdaterError(errorCode, '打开下载链接失败。'),
     }
   }
+}
+
+export function openQClawUpdateDownloadUrl(): Promise<QClawUpdateOpenDownloadResult> {
+  return withSerializedOperation(openQClawUpdateDownloadUrlCore)
 }

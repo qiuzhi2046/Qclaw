@@ -119,7 +119,14 @@ import { prepareQClawUninstall, runOpenClawCleanup } from './openclaw-cleanup-se
 import { runOpenClawDataCleanup } from './openclaw-data-cleanup-service'
 import { previewOpenClawRestore, runOpenClawRestore } from './openclaw-restore-service'
 import { checkOpenClawUpgrade, checkOpenClawUpgradeForEnvCheck, runOpenClawUpgrade } from './openclaw-upgrade-service'
-import { readOpenClawRuntimeReconcileStore } from './openclaw-runtime-reconcile'
+import { readOpenClawRuntimeReconcileStore, confirmRuntimeReconcile } from './openclaw-runtime-reconcile'
+import { resolveOpenClawBinaryPath } from './openclaw-package'
+import { resolveOpenClawPaths } from './openclaw-paths'
+import {
+  cleanupWindowsStartupLauncherIfScheduledTaskHealthy,
+  elevateGatewayServiceInstall,
+  inspectWindowsGatewayLauncherIntegrity,
+} from './platforms/windows/windows-platform-ops'
 import { withManagedOperationLock } from './managed-operation-lock'
 import { buildAppleScriptDoShellScript } from './node-runtime'
 import type { FeishuBotDiagnosticSendRequest } from '../../src/shared/feishu-diagnostics'
@@ -703,6 +710,61 @@ export function registerIpcHandlers() {
   ipcMain.handle('gateway:health', () => gatewayHealth())
   ipcMain.handle('gateway:runtime-reconcile:state:get', () => readOpenClawRuntimeReconcileStore())
   ipcMain.handle('gateway:force-restart', () => gatewayForceRestart())
+  ipcMain.handle('gateway:service:elevate', () =>
+    withManagedOperationLock('gateway-service-elevate', async () => {
+    await appendEnvCheckDiagnostic('ipc-gateway-service-elevate-requested', {})
+
+    if (process.platform !== 'win32') {
+      return { ok: false, message: '提权安装仅适用于 Windows 平台。' }
+    }
+
+    try {
+      const binaryPath = await resolveOpenClawBinaryPath().catch(() => '')
+      if (!binaryPath) {
+        return { ok: false, message: '无法解析 OpenClaw 可执行文件路径。' }
+      }
+
+      const result = await elevateGatewayServiceInstall({ openclawBinaryPath: binaryPath })
+      await appendEnvCheckDiagnostic('ipc-gateway-service-elevate-result', {
+        ok: result.ok,
+        cancelled: result.cancelled,
+        message: result.message,
+      })
+
+      if (!result.ok) {
+        return { ok: false, message: result.message }
+      }
+
+      // Elevation succeeded — verify schtasks is actually healthy before updating state
+      const paths = resolveOpenClawPaths()
+      const homeDir = paths.homeDir
+      const integrity = await inspectWindowsGatewayLauncherIntegrity({ homeDir })
+      await cleanupWindowsStartupLauncherIfScheduledTaskHealthy({
+        homeDir,
+        launcherIntegrity: integrity,
+      })
+      const confirmedLauncherMode =
+        integrity.status === 'healthy' && integrity.taskName ? 'schtasks' : null
+      await confirmRuntimeReconcile({
+        confirmed: true,
+        summary: confirmedLauncherMode === 'schtasks'
+          ? '已通过管理员权限成功创建 Windows 计划任务，网关已升级为 schtasks 模式。'
+          : '提权安装已完成，但计划任务状态尚未确认。',
+        launcherMode: confirmedLauncherMode,
+      })
+      await appendEnvCheckDiagnostic('ipc-gateway-service-elevate-cleanup', {
+        launcherMode: confirmedLauncherMode,
+        integrityStatus: integrity.status,
+      })
+      return { ok: true, message: result.message }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '提权安装过程中发生未知错误。'
+      await appendEnvCheckDiagnostic('ipc-gateway-service-elevate-error', {
+        error: message,
+      }).catch(() => undefined)
+      return { ok: false, message }
+    }
+  }))
   ipcMain.handle('gateway:reload-after-model-change', () =>
     reconcileGatewayRuntimeMutation({
       kind: 'model-change',
