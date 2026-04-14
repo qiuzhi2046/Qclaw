@@ -643,6 +643,14 @@ async function runSourceAwareUpgrade(
       const runtime = await ensureManagedOpenClawNpmRuntime({
         workingDirectory: resolveSafeWorkingDirectory(),
       })
+      if (process.platform === 'win32') {
+        const prefixPath =
+          String(getSelectedWindowsActiveRuntimeSnapshot()?.npmPrefix || '').trim() ||
+          (candidate.binaryPath ? path.dirname(candidate.binaryPath) : '')
+        if (prefixPath) {
+          return { ...runtime.commandOptions, prefixPath }
+        }
+      }
       return runtime.commandOptions
     } catch {
       return null
