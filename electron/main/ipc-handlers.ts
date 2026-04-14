@@ -131,6 +131,7 @@ import {
 } from './qclaw-update-service'
 import { checkCombinedUpdate, runCombinedUpdate } from './combined-update-orchestrator'
 import { wecomQrGenerate, wecomQrCheckResult } from './wecom-qr'
+import { parseClawHubSearchResults } from './clawhub-search'
 import {
   ensureGatewayReady,
   reloadGatewayForConfigChange,
@@ -1031,14 +1032,7 @@ export function registerIpcHandlers() {
       MANAGED_NPX_RUNNER_DEPENDENCIES
     )
     if (!result.ok) return { ok: false, skills: [], error: result.stderr }
-    const skills: { slug: string; name: string; score: number }[] = []
-    for (const line of result.stdout.split('\n')) {
-      const match = line.match(/^(\S+)\s{2,}(.+?)\s{2,}\(([0-9.]+)\)/)
-      if (match) {
-        skills.push({ slug: match[1], name: match[2].trim(), score: parseFloat(match[3]) })
-      }
-    }
-    return { ok: true, skills }
+    return { ok: true, skills: parseClawHubSearchResults(result.stdout) }
   })
 
   ipcMain.handle('clawhub:install', async (_e, slug: string) => {
