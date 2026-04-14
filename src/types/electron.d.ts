@@ -1093,6 +1093,14 @@ type OpenClawBackupType =
   | 'upgrade-preflight'
   | 'unknown'
 
+type OpenClawBackupStrategyId =
+  | 'full-state'
+  | 'config-only'
+  | 'takeover-safeguard'
+  | 'unknown'
+
+type OpenClawBackupHomeCaptureMode = 'none' | 'essential-state' | 'full-home'
+
 interface OpenClawBackupScopeAvailability {
   hasConfigData: boolean
   hasMemoryData: boolean
@@ -1106,6 +1114,8 @@ interface OpenClawBackupEntry {
   archivePath: string
   manifestPath: string
   type: OpenClawBackupType
+  strategyId?: OpenClawBackupStrategyId
+  homeCaptureMode?: OpenClawBackupHomeCaptureMode
   installFingerprint: string | null
   sourceVersion: string | null
   sourceConfigPath?: string | null

@@ -97,7 +97,7 @@ describe('openclaw manual backup service', () => {
     expect(createManagedBackupArchiveMock).toHaveBeenCalledWith({
       candidate,
       backupType: 'manual-backup',
-      copyMode: 'full-state',
+      strategyId: 'full-state',
     })
   })
 

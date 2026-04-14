@@ -7,6 +7,7 @@ import type {
 } from '../../src/shared/openclaw-phase3'
 import { atomicWriteFile } from './atomic-write'
 import { collectChangedJsonPaths } from './openclaw-config-diff'
+import { copyManagedPathIfExists } from './openclaw-managed-copy'
 import { applyGatewaySecretAction } from './gateway-secret-apply'
 import { resolveGatewayApplyAction } from './gateway-apply-policy'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
@@ -28,7 +29,7 @@ import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
-const { access, cp, mkdir, readFile, readdir, rm, stat } = fs.promises
+const { access, mkdir, readFile, readdir, rm, stat } = fs.promises
 
 const MODEL_RELOAD_PATH_PREFIXES = [
   '$.defaultModel',
@@ -264,10 +265,22 @@ function resolveAvailableScopes(backup: OpenClawBackupEntry): OpenClawRestoreSco
     backup.scopeAvailability.hasConfigData ||
     backup.scopeAvailability.hasEnvData ||
     backup.scopeAvailability.hasCredentialsData
+  const homeCaptureMode = resolveBackupHomeCaptureMode(backup)
   if (hasConfigScope) scopes.push('config')
   if (backup.scopeAvailability.hasMemoryData) scopes.push('memory')
-  if (hasConfigScope && backup.scopeAvailability.hasMemoryData) scopes.push('all')
+  if (
+    hasConfigScope &&
+    backup.scopeAvailability.hasMemoryData &&
+    homeCaptureMode === 'full-home'
+  ) {
+    scopes.push('all')
+  }
   return scopes
+}
+
+function resolveBackupHomeCaptureMode(backup: OpenClawBackupEntry): 'none' | 'essential-state' | 'full-home' {
+  if (backup.homeCaptureMode) return backup.homeCaptureMode
+  return backup.scopeAvailability.hasMemoryData ? 'full-home' : 'none'
 }
 
 function buildRestoreItems(backup: OpenClawBackupEntry): string[] {
@@ -282,7 +295,15 @@ function buildRestoreItems(backup: OpenClawBackupEntry): string[] {
     items.push('备份中包含 credentials 目录。')
   }
   if (backup.scopeAvailability.hasMemoryData) {
-    items.push('备份中包含完整 openclaw-home，可恢复用户记忆数据。')
+    const homeCaptureMode = resolveBackupHomeCaptureMode(backup)
+    items.push(
+      homeCaptureMode === 'full-home'
+        ? '备份中包含完整 openclaw-home，可恢复用户记忆数据。'
+        : '备份中包含保底状态数据（如记忆与设备身份），可恢复接管前关键状态。'
+    )
+    if (homeCaptureMode !== 'full-home') {
+      items.push('备份中包含 agents/*/agent/auth-profiles.json 本地认证档案，可恢复 provider/agent 授权状态。')
+    }
   }
   return items
 }
@@ -398,7 +419,7 @@ async function createRestorePreflightSnapshot(
     return createManagedBackupArchive({
       candidate: resolution.candidate,
       backupType: 'restore-preflight',
-      copyMode: 'full-state',
+      strategyId: 'full-state',
     })
   }
 
@@ -412,10 +433,12 @@ async function createRestorePreflightSnapshot(
   return null
 }
 
-async function copyPathIfExists(sourcePath: string | null, targetPath: string): Promise<void> {
+async function copyPathIfExists(
+  sourcePath: string | null,
+  targetPath: string
+): Promise<void> {
   if (!sourcePath) return
-  if (!(await pathExists(sourcePath))) return
-  await cp(sourcePath, targetPath, { recursive: true, force: true })
+  await copyManagedPathIfExists(sourcePath, targetPath)
 }
 
 async function removeIfExists(targetPath: string): Promise<void> {
@@ -483,6 +506,7 @@ async function restoreMemoryScope(
   await mkdir(targetPaths.homeDir, { recursive: true })
   const restoredItems: string[] = []
   const entries = await readdir(sourcePaths.homeDir, { withFileTypes: true })
+  const homeCaptureMode = resolveBackupHomeCaptureMode(backup)
   for (const entry of entries) {
     if (entry.name === 'openclaw.json' || entry.name === '.env' || entry.name === 'credentials') {
       continue
@@ -490,7 +514,10 @@ async function restoreMemoryScope(
 
     const sourcePath = path.join(sourcePaths.homeDir, entry.name)
     const targetPath = path.join(targetPaths.homeDir, entry.name)
-    await removeIfExists(targetPath)
+    const shouldMergeWithoutReplacing = homeCaptureMode !== 'full-home' && entry.name === 'agents'
+    if (!shouldMergeWithoutReplacing) {
+      await removeIfExists(targetPath)
+    }
     await copyPathIfExists(sourcePath, targetPath)
     restoredItems.push(`已恢复 ${entry.name}`)
   }
@@ -832,8 +859,11 @@ export async function previewOpenClawRestore(backupId: string): Promise<OpenClaw
   const blockedReasons =
     availableScopes.length === 0 ? ['该备份不包含可恢复的配置或记忆数据。'] : []
   const warnings: string[] = []
+  const homeCaptureMode = resolveBackupHomeCaptureMode(backup)
   if (!backup.scopeAvailability.hasMemoryData) {
     warnings.push('该备份不包含完整 openclaw-home，因此不能恢复“仅记忆数据”或“配置 + 记忆数据”。')
+  } else if (homeCaptureMode !== 'full-home') {
+    warnings.push('该备份采用接管前保底策略，不包含完整 openclaw-home，因此不支持“配置 + 记忆数据”整目录恢复。')
   }
 
   return {

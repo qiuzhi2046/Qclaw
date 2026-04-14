@@ -921,7 +921,7 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
       backupCreated = await createManagedBackupArchive({
         candidate: check.activeCandidate,
         backupType: 'upgrade-preflight',
-        copyMode: check.enforcement === 'auto_correct' ? 'full-state' : 'config-only',
+        strategyId: check.enforcement === 'auto_correct' ? 'full-state' : 'config-only',
         rootResolution: backupRootResolution,
       })
     } catch (error) {

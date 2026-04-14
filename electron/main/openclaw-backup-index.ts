@@ -1,12 +1,16 @@
 import type { OpenClawInstallCandidate } from '../../src/shared/openclaw-phase1'
 import type {
   OpenClawBackupEntry,
+  OpenClawBackupHomeCaptureMode,
   OpenClawBackupDeleteResult,
   OpenClawBackupListResult,
   OpenClawBackupScopeAvailability,
+  OpenClawBackupStrategyId,
   OpenClawBackupType,
 } from '../../src/shared/openclaw-phase3'
 import { atomicWriteJson } from './atomic-write'
+import { copyManagedPathIfExists } from './openclaw-managed-copy'
+import { getOpenClawBackupStrategy } from './openclaw-backup-strategy'
 import {
   recordBaselineBackupDeletionBypass,
 } from './openclaw-baseline-backup-gate'
@@ -16,7 +20,6 @@ import {
   resolvePreferredOpenClawBackupDirectory,
   type OpenClawBackupRootResolution,
 } from './openclaw-backup-roots'
-import { resolveOpenClawPathsFromStateRoot } from './openclaw-paths'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
@@ -30,6 +33,8 @@ interface BackupManifestCandidate {
   archivePath?: string
   backupType?: string
   snapshotType?: string
+  strategyId?: string
+  homeCaptureMode?: string
   installFingerprint?: string
   candidate?: {
     version?: string
@@ -70,6 +75,32 @@ function resolveBackupType(manifest: BackupManifestCandidate): OpenClawBackupTyp
   return 'unknown'
 }
 
+function resolveBackupStrategyId(manifest: BackupManifestCandidate): OpenClawBackupStrategyId {
+  const rawStrategyId = String(manifest.strategyId || '').trim()
+  if (
+    rawStrategyId === 'full-state' ||
+    rawStrategyId === 'config-only' ||
+    rawStrategyId === 'takeover-safeguard'
+  ) {
+    return rawStrategyId
+  }
+  return 'unknown'
+}
+
+function resolveBackupHomeCaptureMode(
+  manifest: BackupManifestCandidate,
+  hasHomeDir: boolean,
+  strategyId: OpenClawBackupStrategyId
+): OpenClawBackupHomeCaptureMode {
+  const rawMode = String(manifest.homeCaptureMode || '').trim()
+  if (rawMode === 'none' || rawMode === 'essential-state' || rawMode === 'full-home') {
+    return rawMode
+  }
+  if (strategyId === 'config-only') return 'none'
+  if (strategyId === 'takeover-safeguard') return hasHomeDir ? 'essential-state' : 'none'
+  return hasHomeDir ? 'full-home' : 'none'
+}
+
 async function resolveBackupScopeAvailability(archivePath: string): Promise<OpenClawBackupScopeAvailability> {
   const homeDirArchive = path.join(archivePath, 'openclaw-home')
   const configRootPath = path.join(archivePath, 'openclaw.json')
@@ -105,6 +136,13 @@ async function parseBackupEntry(archivePath: string): Promise<OpenClawBackupEntr
     const manifest = JSON.parse(raw) as BackupManifestCandidate
     const backupId = String(manifest.backupId || manifest.snapshotId || path.basename(archivePath)).trim()
     if (!backupId) return null
+    const scopeAvailability = await resolveBackupScopeAvailability(archivePath)
+    const strategyId = resolveBackupStrategyId(manifest)
+    const homeCaptureMode = resolveBackupHomeCaptureMode(
+      manifest,
+      scopeAvailability.hasMemoryData,
+      strategyId
+    )
 
     return {
       backupId,
@@ -112,11 +150,13 @@ async function parseBackupEntry(archivePath: string): Promise<OpenClawBackupEntr
       archivePath,
       manifestPath,
       type: resolveBackupType(manifest),
+      strategyId,
+      homeCaptureMode,
       installFingerprint: String(manifest.installFingerprint || '').trim() || null,
       sourceVersion: String(manifest.candidate?.version || '').trim() || null,
       sourceConfigPath: String(manifest.candidate?.configPath || '').trim() || null,
       sourceStateRoot: String(manifest.candidate?.stateRoot || '').trim() || null,
-      scopeAvailability: await resolveBackupScopeAvailability(archivePath),
+      scopeAvailability,
     }
   } catch {
     return null
@@ -140,6 +180,8 @@ function buildManagedBackupManifest(params: {
   createdAt: string
   archivePath: string
   backupType: OpenClawBackupType
+  strategyId: OpenClawBackupStrategyId
+  homeCaptureMode: OpenClawBackupHomeCaptureMode
   installFingerprint: string
   candidate: OpenClawInstallCandidate
   scopeAvailability: OpenClawBackupScopeAvailability
@@ -149,6 +191,8 @@ function buildManagedBackupManifest(params: {
     createdAt: params.createdAt,
     archivePath: params.archivePath,
     backupType: params.backupType,
+    strategyId: params.strategyId,
+    homeCaptureMode: params.homeCaptureMode,
     installFingerprint: params.installFingerprint,
     scopeAvailability: params.scopeAvailability,
     candidate: {
@@ -169,6 +213,8 @@ function buildStateRootBackupManifest(params: {
   createdAt: string
   archivePath: string
   backupType: OpenClawBackupType
+  strategyId: OpenClawBackupStrategyId
+  homeCaptureMode: OpenClawBackupHomeCaptureMode
   scopeAvailability: OpenClawBackupScopeAvailability
   stateRoot: string
 }): Record<string, unknown> {
@@ -177,6 +223,8 @@ function buildStateRootBackupManifest(params: {
     createdAt: params.createdAt,
     archivePath: params.archivePath,
     backupType: params.backupType,
+    strategyId: params.strategyId,
+    homeCaptureMode: params.homeCaptureMode,
     installFingerprint: null,
     scopeAvailability: params.scopeAvailability,
     candidate: {
@@ -184,24 +232,6 @@ function buildStateRootBackupManifest(params: {
       stateRoot: params.stateRoot,
     },
   }
-}
-
-async function copyIfExists(sourcePath: string, targetPath: string): Promise<void> {
-  if (!(await pathExists(sourcePath))) return
-  await cp(sourcePath, targetPath, { recursive: true, force: true })
-}
-
-function normalizePathForCompare(targetPath: string): string {
-  const normalized = path.resolve(String(targetPath || '').trim())
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
-}
-
-function isPathWithinParent(targetPath: string, parentPath: string): boolean {
-  const normalizedTarget = normalizePathForCompare(targetPath)
-  const normalizedParent = normalizePathForCompare(parentPath)
-  if (!normalizedTarget || !normalizedParent) return false
-  if (normalizedTarget === normalizedParent) return true
-  return normalizedTarget.startsWith(`${normalizedParent}${path.sep}`)
 }
 
 export function resolveBackupRootDirectory(): string {
@@ -374,29 +404,17 @@ export async function deleteAllOpenClawBackups(): Promise<OpenClawBackupDeleteRe
 export async function createManagedBackupArchive(params: {
   candidate: OpenClawInstallCandidate
   backupType: 'manual-backup' | 'cleanup-backup' | 'restore-preflight' | 'upgrade-preflight'
-  copyMode: 'full-state' | 'config-only'
+  strategyId: Exclude<OpenClawBackupStrategyId, 'unknown'>
   rootResolution?: OpenClawBackupRootResolution
 }): Promise<OpenClawBackupEntry> {
   const rootResolution = params.rootResolution || await ensureWritableOpenClawBackupRootDirectory()
   const backupId = buildManagedBackupId(params.backupType, params.candidate.installFingerprint)
   const archivePath = path.join(rootResolution.effectiveRootDirectory, backupId)
   const createdAt = new Date().toISOString()
-  const openClawPaths = resolveOpenClawPathsFromStateRoot({
-    stateRoot: params.candidate.stateRoot,
-    configFile: params.candidate.configPath,
-  })
+  const strategy = getOpenClawBackupStrategy(params.strategyId)
 
   await mkdir(archivePath, { recursive: true })
-  if (params.copyMode === 'full-state') {
-    await copyIfExists(params.candidate.stateRoot, path.join(archivePath, 'openclaw-home'))
-    if (!isPathWithinParent(params.candidate.configPath, params.candidate.stateRoot)) {
-      await copyIfExists(params.candidate.configPath, path.join(archivePath, 'openclaw.json'))
-    }
-  } else {
-    await copyIfExists(params.candidate.configPath, path.join(archivePath, 'openclaw.json'))
-    await copyIfExists(openClawPaths.envFile, path.join(archivePath, '.env'))
-    await copyIfExists(openClawPaths.credentialsDir, path.join(archivePath, 'credentials'))
-  }
+  await strategy.apply({ archivePath, candidate: params.candidate })
 
   const scopeAvailability = await resolveBackupScopeAvailability(archivePath)
   await atomicWriteJson(
@@ -406,6 +424,8 @@ export async function createManagedBackupArchive(params: {
       createdAt,
       archivePath,
       backupType: params.backupType,
+      strategyId: strategy.id,
+      homeCaptureMode: strategy.homeCaptureMode,
       installFingerprint: params.candidate.installFingerprint,
       candidate: params.candidate,
       scopeAvailability,
@@ -421,6 +441,8 @@ export async function createManagedBackupArchive(params: {
     archivePath,
     manifestPath: path.join(archivePath, 'manifest.json'),
     type: params.backupType,
+    strategyId: strategy.id,
+    homeCaptureMode: strategy.homeCaptureMode,
     installFingerprint: params.candidate.installFingerprint,
     sourceVersion: params.candidate.version || null,
     sourceConfigPath: params.candidate.configPath || null,
@@ -440,7 +462,7 @@ export async function createStateRootBackupArchive(params: {
   const createdAt = new Date().toISOString()
 
   await mkdir(archivePath, { recursive: true })
-  await copyIfExists(params.stateRoot, path.join(archivePath, 'openclaw-home'))
+  await copyManagedPathIfExists(params.stateRoot, path.join(archivePath, 'openclaw-home'))
 
   const scopeAvailability = await resolveBackupScopeAvailability(archivePath)
   await atomicWriteJson(
@@ -450,6 +472,8 @@ export async function createStateRootBackupArchive(params: {
       createdAt,
       archivePath,
       backupType: params.backupType,
+      strategyId: 'full-state',
+      homeCaptureMode: 'full-home',
       scopeAvailability,
       stateRoot: params.stateRoot,
     }),
@@ -464,6 +488,8 @@ export async function createStateRootBackupArchive(params: {
     archivePath,
     manifestPath: path.join(archivePath, 'manifest.json'),
     type: params.backupType,
+    strategyId: 'full-state',
+    homeCaptureMode: 'full-home',
     installFingerprint: null,
     sourceVersion: null,
     sourceConfigPath: null,

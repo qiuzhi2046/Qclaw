@@ -8,6 +8,7 @@ import type {
 } from '../../src/shared/openclaw-phase1'
 import { shouldEnsureBaselineBackup } from '../../src/shared/openclaw-phase1'
 import { atomicWriteJson } from './atomic-write'
+import { getOpenClawBackupStrategy } from './openclaw-backup-strategy'
 import {
   ensureWritableOpenClawBackupRootDirectory,
   resolvePreferredOpenClawBackupDirectory,
@@ -19,7 +20,7 @@ const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { createHash } = process.getBuiltinModule('node:crypto') as typeof import('node:crypto')
-const { access, cp, mkdir, readFile } = fs.promises
+const { access, mkdir, readFile } = fs.promises
 const { homedir } = os
 
 interface BaselineBackupStore {
@@ -189,24 +190,17 @@ export async function recordBaselineBackupDeletionBypass(params: {
   return bypassRecord
 }
 
-async function copyIntoBackup(candidate: OpenClawInstallCandidate, backupDir: string): Promise<void> {
-  const copiedStateRoot = path.join(backupDir, 'openclaw-home')
-  if (await pathExists(candidate.stateRoot)) {
-    await cp(candidate.stateRoot, copiedStateRoot, { recursive: true, force: true })
-    return
-  }
-
-  await mkdir(copiedStateRoot, { recursive: true })
-}
-
 function buildBackupManifest(
   candidate: OpenClawInstallCandidate,
-  backup: OpenClawBaselineBackupRecord
+  backup: OpenClawBaselineBackupRecord,
+  strategy = getOpenClawBackupStrategy('takeover-safeguard')
 ): Record<string, unknown> {
   return {
     backupId: backup.backupId,
     createdAt: backup.createdAt,
     backupType: 'baseline-backup',
+    strategyId: strategy.id,
+    homeCaptureMode: strategy.homeCaptureMode,
     installFingerprint: backup.installFingerprint,
     archivePath: backup.archivePath,
     candidate: {
@@ -261,6 +255,7 @@ export async function ensureBaselineBackup(
     const backupId = createBackupId(candidate.installFingerprint)
     const backupDir = path.join(backupRoot, backupId)
     const createdAt = new Date().toISOString()
+    const strategy = getOpenClawBackupStrategy('takeover-safeguard')
     const backupRecord: OpenClawBaselineBackupRecord = {
       backupId,
       createdAt,
@@ -269,8 +264,8 @@ export async function ensureBaselineBackup(
     }
 
     await mkdir(backupDir, { recursive: true })
-    await copyIntoBackup(candidate, backupDir)
-    await atomicWriteJson(path.join(backupDir, 'manifest.json'), buildBackupManifest(candidate, backupRecord), {
+    await strategy.apply({ archivePath: backupDir, candidate })
+    await atomicWriteJson(path.join(backupDir, 'manifest.json'), buildBackupManifest(candidate, backupRecord, strategy), {
       description: '基线备份 manifest',
     })
 

@@ -46,10 +46,11 @@ vi.mock('../cli', () => ({
   readEnvFile: readRuntimeEnvFileMock,
 }))
 
-import { runOpenClawRestore } from '../openclaw-restore-service'
+import { previewOpenClawRestore, runOpenClawRestore } from '../openclaw-restore-service'
 
 const fs = (process.getBuiltinModule('node:fs') as typeof import('node:fs')).promises
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+const itOnWindows = process.platform === 'win32' ? it : it.skip
 
 describe('openclaw restore service', () => {
   let rootDir = ''
@@ -294,14 +295,17 @@ describe('openclaw restore service', () => {
     await expect(fs.readFile(path.join(targetStateRoot, 'openclaw.json'), 'utf8')).resolves.toContain('"primary": "openai/gpt-5"')
     await expect(fs.readFile(path.join(targetStateRoot, 'openclaw.json'), 'utf8')).resolves.not.toContain('"defaultModel"')
     await expect(fs.readFile(path.join(wrongStateRoot, 'openclaw.json'), 'utf8')).resolves.toContain('wrong-target')
-    expect((await fs.stat(path.join(targetStateRoot, 'openclaw.json'))).mode & 0o777).toBe(0o600)
+    const restoredConfigMode = (await fs.stat(path.join(targetStateRoot, 'openclaw.json'))).mode & 0o777
+    if (process.platform !== 'win32') {
+      expect(restoredConfigMode).toBe(0o600)
+    }
     expect(createManagedBackupArchiveMock).toHaveBeenCalledWith({
       candidate: expect.objectContaining({
         stateRoot: targetStateRoot,
         configPath: path.join(targetStateRoot, 'openclaw.json'),
       }),
       backupType: 'restore-preflight',
-      copyMode: 'full-state',
+      strategyId: 'full-state',
     })
   })
 
@@ -846,6 +850,205 @@ describe('openclaw restore service', () => {
     await expect(fs.readFile(path.join(targetStateRoot, 'openclaw.json'), 'utf8')).resolves.toContain('"primary": "openai/gpt-legacy-home"')
     await expect(fs.readFile(path.join(targetStateRoot, 'openclaw.json'), 'utf8')).resolves.not.toContain('"defaultModel"')
     await expect(fs.readFile(path.join(targetStateRoot, 'memory', 'note.txt'), 'utf8')).resolves.toBe('restored-memory')
+  })
+
+  it('does not offer all-scope restore for takeover safeguard backups', async () => {
+    const archivePath = path.join(rootDir, 'backup-takeover-safeguard')
+    await fs.mkdir(path.join(archivePath, 'openclaw-home', 'memory'), { recursive: true })
+    await fs.mkdir(path.join(archivePath, 'openclaw-home', 'identity'), { recursive: true })
+    await fs.mkdir(path.join(archivePath, 'openclaw-home', 'agents', 'assistant', 'agent'), { recursive: true })
+    await fs.writeFile(path.join(archivePath, 'openclaw-home', 'memory', 'note.txt'), 'restored-memory', 'utf8')
+    await fs.writeFile(path.join(archivePath, 'openclaw-home', 'identity', 'device-auth.json'), '{"device":"linked"}', 'utf8')
+    await fs.writeFile(
+      path.join(archivePath, 'openclaw-home', 'agents', 'assistant', 'agent', 'auth-profiles.json'),
+      '{"profiles":{"openai:default":{"provider":"openai"}}}',
+      'utf8'
+    )
+    await fs.writeFile(path.join(archivePath, 'openclaw.json'), JSON.stringify({ provider: 'openai' }, null, 2), 'utf8')
+
+    getOpenClawBackupEntryMock.mockResolvedValue({
+      backupId: 'backup-takeover-safeguard',
+      createdAt: '2026-03-20T00:00:00.000Z',
+      archivePath,
+      manifestPath: path.join(archivePath, 'manifest.json'),
+      type: 'baseline-backup',
+      strategyId: 'takeover-safeguard',
+      homeCaptureMode: 'essential-state',
+      installFingerprint: 'backup-fingerprint-takeover-safeguard',
+      sourceVersion: '2026.3.13',
+      sourceConfigPath: path.join(archivePath, 'openclaw.json'),
+      sourceStateRoot: path.join(rootDir, 'target-home-takeover-safeguard'),
+      scopeAvailability: {
+        hasConfigData: true,
+        hasMemoryData: true,
+        hasEnvData: false,
+        hasCredentialsData: false,
+      },
+    })
+
+    const preview = await previewOpenClawRestore('backup-takeover-safeguard')
+
+    expect(preview.ok).toBe(true)
+    expect(preview.availableScopes).toEqual(['config', 'memory'])
+    expect(preview.restoreItems.some((item) => item.includes('auth-profiles.json'))).toBe(true)
+    expect(preview.restoreItems).toContain('备份中包含保底状态数据（如记忆与设备身份），可恢复接管前关键状态。')
+    expect(preview.warnings).toContain(
+      '该备份采用接管前保底策略，不包含完整 openclaw-home，因此不支持“配置 + 记忆数据”整目录恢复。'
+    )
+  })
+
+  it('preserves unrelated agent data when restoring essential-state auth profiles', async () => {
+    const archivePath = path.join(rootDir, 'backup-takeover-agents-auth')
+    const targetStateRoot = path.join(rootDir, 'target-home-takeover-agents-auth')
+    await fs.mkdir(path.join(archivePath, 'openclaw-home', 'memory'), { recursive: true })
+    await fs.mkdir(path.join(archivePath, 'openclaw-home', 'agents', 'main', 'agent'), { recursive: true })
+    await fs.mkdir(path.join(targetStateRoot, 'agents', 'assistant', 'agent'), { recursive: true })
+    await fs.mkdir(path.join(targetStateRoot, 'agents', 'main', 'agent'), { recursive: true })
+
+    await fs.writeFile(path.join(archivePath, 'openclaw-home', 'memory', 'note.txt'), 'restored-memory', 'utf8')
+    await fs.writeFile(
+      path.join(archivePath, 'openclaw-home', 'agents', 'main', 'agent', 'auth-profiles.json'),
+      '{"profiles":{"openai:default":{"provider":"openai","key":"new-key"}}}',
+      'utf8'
+    )
+    await fs.writeFile(path.join(targetStateRoot, 'openclaw.json'), JSON.stringify({}, null, 2), 'utf8')
+    await fs.writeFile(path.join(targetStateRoot, 'agents', 'assistant', 'agent', 'session.json'), '{"keep":true}', 'utf8')
+    await fs.writeFile(path.join(targetStateRoot, 'agents', 'main', 'agent', 'cache.json'), '{"keep-main":true}', 'utf8')
+    await fs.writeFile(
+      path.join(targetStateRoot, 'agents', 'main', 'agent', 'auth-profiles.json'),
+      '{"profiles":{"openai:default":{"provider":"openai","key":"old-key"}}}',
+      'utf8'
+    )
+
+    getOpenClawBackupEntryMock.mockResolvedValue({
+      backupId: 'backup-takeover-agents-auth',
+      createdAt: '2026-03-20T00:00:00.000Z',
+      archivePath,
+      manifestPath: path.join(archivePath, 'manifest.json'),
+      type: 'baseline-backup',
+      strategyId: 'takeover-safeguard',
+      homeCaptureMode: 'essential-state',
+      installFingerprint: 'backup-fingerprint-takeover-agents-auth',
+      sourceVersion: '2026.3.13',
+      sourceConfigPath: path.join(targetStateRoot, 'openclaw.json'),
+      sourceStateRoot: targetStateRoot,
+      scopeAvailability: {
+        hasConfigData: true,
+        hasMemoryData: true,
+        hasEnvData: false,
+        hasCredentialsData: false,
+      },
+    })
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      status: 'installed',
+      candidates: [
+        {
+          candidateId: 'target-candidate-takeover-agents-auth',
+          binaryPath: '/tmp/openclaw-takeover-agents-auth',
+          resolvedBinaryPath: '/tmp/openclaw-takeover-agents-auth',
+          packageRoot: '/tmp',
+          version: '2026.3.13',
+          installSource: 'custom',
+          isPathActive: true,
+          configPath: path.join(targetStateRoot, 'openclaw.json'),
+          stateRoot: targetStateRoot,
+          displayConfigPath: path.join(targetStateRoot, 'openclaw.json'),
+          displayStateRoot: targetStateRoot,
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'target-fingerprint-takeover-agents-auth',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+      activeCandidateId: 'target-candidate-takeover-agents-auth',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: rootDir,
+    })
+
+    const result = await runOpenClawRestore('backup-takeover-agents-auth', 'memory')
+
+    expect(result.ok).toBe(true)
+    await expect(fs.readFile(path.join(targetStateRoot, 'memory', 'note.txt'), 'utf8')).resolves.toBe('restored-memory')
+    await expect(fs.readFile(path.join(targetStateRoot, 'agents', 'assistant', 'agent', 'session.json'), 'utf8')).resolves.toContain(
+      '"keep":true'
+    )
+    await expect(fs.readFile(path.join(targetStateRoot, 'agents', 'main', 'agent', 'cache.json'), 'utf8')).resolves.toContain(
+      '"keep-main":true'
+    )
+    await expect(
+      fs.readFile(path.join(targetStateRoot, 'agents', 'main', 'agent', 'auth-profiles.json'), 'utf8')
+    ).resolves.toContain('"new-key"')
+  })
+
+  itOnWindows('skips the derived runtime bridge when restoring full openclaw-home data', async () => {
+    const archivePath = path.join(rootDir, 'backup-all-runtime-bridge')
+    const targetStateRoot = path.join(rootDir, 'target-home-runtime-bridge')
+    const runtimeHostRoot = path.join(rootDir, 'runtime-host-openclaw')
+    const backupRuntimeBridgePath = path.join(archivePath, 'openclaw-home', 'node_modules', 'openclaw')
+    await fs.mkdir(path.join(archivePath, 'openclaw-home', 'memory'), { recursive: true })
+    await fs.mkdir(path.dirname(backupRuntimeBridgePath), { recursive: true })
+    await fs.mkdir(runtimeHostRoot, { recursive: true })
+    await fs.mkdir(targetStateRoot, { recursive: true })
+
+    await fs.writeFile(path.join(archivePath, 'openclaw-home', 'memory', 'note.txt'), 'restored-memory', 'utf8')
+    await fs.writeFile(path.join(archivePath, 'openclaw-home', 'openclaw.json'), JSON.stringify({}, null, 2), 'utf8')
+    await fs.writeFile(path.join(runtimeHostRoot, 'package.json'), '{"name":"openclaw"}', 'utf8')
+    await fs.symlink(runtimeHostRoot, backupRuntimeBridgePath, 'junction')
+
+    getOpenClawBackupEntryMock.mockResolvedValue({
+      backupId: 'backup-all-runtime-bridge',
+      createdAt: '2026-03-20T00:00:00.000Z',
+      archivePath,
+      manifestPath: path.join(archivePath, 'manifest.json'),
+      type: 'manual-backup',
+      installFingerprint: 'backup-fingerprint-all-runtime-bridge',
+      sourceVersion: '2026.3.13',
+      sourceConfigPath: path.join(targetStateRoot, 'openclaw.json'),
+      sourceStateRoot: targetStateRoot,
+      scopeAvailability: {
+        hasConfigData: true,
+        hasMemoryData: true,
+        hasEnvData: false,
+        hasCredentialsData: false,
+      },
+    })
+    discoverOpenClawInstallationsMock.mockResolvedValue({
+      status: 'installed',
+      candidates: [
+        {
+          candidateId: 'target-candidate-runtime-bridge',
+          binaryPath: 'C:\\openclaw.cmd',
+          resolvedBinaryPath: 'C:\\openclaw.cmd',
+          packageRoot: 'C:\\runtime\\openclaw',
+          version: '2026.3.13',
+          installSource: 'qclaw-managed',
+          isPathActive: true,
+          configPath: path.join(targetStateRoot, 'openclaw.json'),
+          stateRoot: targetStateRoot,
+          displayConfigPath: path.join(targetStateRoot, 'openclaw.json'),
+          displayStateRoot: targetStateRoot,
+          ownershipState: 'qclaw-installed',
+          installFingerprint: 'target-fingerprint-runtime-bridge',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+      ],
+      activeCandidateId: 'target-candidate-runtime-bridge',
+      hasMultipleCandidates: false,
+      historyDataCandidates: [],
+      errors: [],
+      warnings: [],
+      defaultBackupDirectory: rootDir,
+    })
+
+    const result = await runOpenClawRestore('backup-all-runtime-bridge', 'all')
+
+    expect(result.ok).toBe(true)
+    await expect(fs.readFile(path.join(targetStateRoot, 'memory', 'note.txt'), 'utf8')).resolves.toBe('restored-memory')
+    await expect(fs.access(path.join(targetStateRoot, 'node_modules', 'openclaw'))).rejects.toThrow()
   })
 
   it('uses the target install env when applying secrets to a non-active restore target', async () => {

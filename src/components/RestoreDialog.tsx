@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react'
 import { Button, Modal, Text, Title } from '@mantine/core'
 import type {
   OpenClawBackupEntry,
+  OpenClawBackupHomeCaptureMode,
   OpenClawRestorePreviewResult,
   OpenClawRestoreScope,
   OpenClawRestoreRunResult,
 } from '../shared/openclaw-phase3'
 
-function scopeLabel(scope: OpenClawRestoreScope): string {
+export function scopeLabel(scope: OpenClawRestoreScope, homeCaptureMode?: OpenClawBackupHomeCaptureMode): string {
   if (scope === 'config') return '仅配置'
-  if (scope === 'memory') return '仅记忆数据'
+  if (scope === 'memory') return homeCaptureMode === 'essential-state' ? '关键状态数据（含身份）' : '仅记忆数据'
   return '配置 + 记忆数据'
 }
 
@@ -118,7 +119,7 @@ export default function RestoreDialog({
                     size="xs"
                     onClick={() => setSelectedScope(scope)}
                   >
-                    {scopeLabel(scope)}
+                    {scopeLabel(scope, preview.backup?.homeCaptureMode)}
                   </Button>
                 ))}
               </div>

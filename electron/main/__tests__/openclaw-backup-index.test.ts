@@ -11,6 +11,7 @@ import { getBaselineBackupBypassStatus } from '../openclaw-baseline-backup-gate'
 
 const fs = (process.getBuiltinModule('node:fs') as typeof import('node:fs')).promises
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
+const itOnWindows = process.platform === 'win32' ? it : it.skip
 
 describe('openclaw backup index', () => {
   const originalBackupDir = process.env.QCLAW_BACKUP_DIR
@@ -250,7 +251,7 @@ describe('openclaw backup index', () => {
           baselineBackupBypass: null,
         },
         backupType: 'manual-backup',
-        copyMode: 'full-state',
+        strategyId: 'full-state',
       })
 
       await expect(fs.readFile(path.join(backup.archivePath, 'openclaw-home', 'memory', 'note.txt'), 'utf8')).resolves.toBe('hello')
@@ -264,6 +265,133 @@ describe('openclaw backup index', () => {
     } finally {
       await fs.rm(stateRoot, { recursive: true, force: true })
       await fs.rm(externalConfigDir, { recursive: true, force: true })
+    }
+  })
+
+  itOnWindows('skips the Windows runtime bridge when creating full-state managed backups', async () => {
+    const stateRoot = path.join('/tmp', `qclaw-managed-backup-win-state-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const hostPackageRoot = path.join('/tmp', `qclaw-managed-backup-win-host-${Date.now()}-${Math.random().toString(16).slice(2)}`, 'node_modules', 'openclaw')
+    const configPath = path.join(stateRoot, 'openclaw.json')
+    const runtimeBridgePath = path.join(stateRoot, 'node_modules', 'openclaw')
+    await fs.mkdir(path.join(stateRoot, 'memory'), { recursive: true })
+    await fs.mkdir(path.dirname(runtimeBridgePath), { recursive: true })
+    await fs.mkdir(path.join(hostPackageRoot, 'dist'), { recursive: true })
+    await fs.writeFile(path.join(stateRoot, 'memory', 'note.txt'), 'hello', 'utf8')
+    await fs.writeFile(configPath, '{"provider":"openai"}', 'utf8')
+    await fs.writeFile(path.join(hostPackageRoot, 'package.json'), '{"name":"openclaw"}', 'utf8')
+    await fs.symlink(hostPackageRoot, runtimeBridgePath, 'junction')
+
+    try {
+      const backup = await createManagedBackupArchive({
+        candidate: {
+          candidateId: 'managed-candidate-win-bridge',
+          binaryPath: 'C:\\openclaw.cmd',
+          resolvedBinaryPath: 'C:\\openclaw.cmd',
+          packageRoot: hostPackageRoot,
+          version: '2026.4.12',
+          installSource: 'qclaw-managed',
+          isPathActive: true,
+          configPath,
+          stateRoot,
+          displayConfigPath: configPath,
+          displayStateRoot: stateRoot,
+          ownershipState: 'qclaw-installed',
+          installFingerprint: 'managed-fingerprint-win-bridge',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+        backupType: 'upgrade-preflight',
+        strategyId: 'full-state',
+      })
+
+      await expect(fs.readFile(path.join(backup.archivePath, 'openclaw-home', 'memory', 'note.txt'), 'utf8')).resolves.toBe('hello')
+      await expect(fs.access(path.join(backup.archivePath, 'openclaw-home', 'node_modules', 'openclaw'))).rejects.toThrow()
+    } finally {
+      await fs.rm(stateRoot, { recursive: true, force: true })
+      await fs.rm(path.dirname(path.dirname(hostPackageRoot)), { recursive: true, force: true })
+    }
+  })
+
+  it('creates a takeover safeguard backup without extension dependency trees', async () => {
+    const stateRoot = path.join('/tmp', `qclaw-managed-backup-safe-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const configPath = path.join(stateRoot, 'openclaw.json')
+    const credentialsPath = path.join(stateRoot, 'credentials', 'token.json')
+    const identityPath = path.join(stateRoot, 'identity', 'device-auth.json')
+    const memoryPath = path.join(stateRoot, 'memory', 'note.txt')
+    const agentAuthProfilePath = path.join(stateRoot, 'agents', 'assistant', 'agent', 'auth-profiles.json')
+    const extensionRuntimePath = path.join(
+      stateRoot,
+      'extensions',
+      'openclaw-lark',
+      'node_modules',
+      '@smithy',
+      'middleware-retry',
+      'index.js'
+    )
+    await fs.mkdir(path.dirname(credentialsPath), { recursive: true })
+    await fs.mkdir(path.dirname(identityPath), { recursive: true })
+    await fs.mkdir(path.dirname(memoryPath), { recursive: true })
+    await fs.mkdir(path.dirname(agentAuthProfilePath), { recursive: true })
+    await fs.mkdir(path.dirname(extensionRuntimePath), { recursive: true })
+    await fs.writeFile(configPath, '{"provider":"openai"}', 'utf8')
+    await fs.writeFile(path.join(stateRoot, '.env'), 'OPENAI_API_KEY=sk-test', 'utf8')
+    await fs.writeFile(credentialsPath, '{"token":"secret"}', 'utf8')
+    await fs.writeFile(identityPath, '{"device":"linked"}', 'utf8')
+    await fs.writeFile(memoryPath, 'hello', 'utf8')
+    await fs.writeFile(agentAuthProfilePath, '{"profiles":{"openai:default":{"provider":"openai"}}}', 'utf8')
+    await fs.writeFile(extensionRuntimePath, 'runtime', 'utf8')
+
+    try {
+      const backup = await createManagedBackupArchive({
+        candidate: {
+          candidateId: 'managed-candidate-safeguard',
+          binaryPath: '/tmp/openclaw-managed',
+          resolvedBinaryPath: '/tmp/openclaw-managed',
+          packageRoot: '/tmp',
+          version: '2026.4.12',
+          installSource: 'custom',
+          isPathActive: true,
+          configPath,
+          stateRoot,
+          displayConfigPath: configPath,
+          displayStateRoot: stateRoot,
+          ownershipState: 'external-preexisting',
+          installFingerprint: 'managed-fingerprint-safeguard',
+          baselineBackup: null,
+          baselineBackupBypass: null,
+        },
+        backupType: 'manual-backup',
+        strategyId: 'takeover-safeguard',
+      })
+
+      expect(backup.strategyId).toBe('takeover-safeguard')
+      expect(backup.homeCaptureMode).toBe('essential-state')
+      await expect(fs.readFile(path.join(backup.archivePath, 'openclaw.json'), 'utf8')).resolves.toContain('"provider":"openai"')
+      await expect(fs.readFile(path.join(backup.archivePath, '.env'), 'utf8')).resolves.toContain('OPENAI_API_KEY=sk-test')
+      await expect(fs.readFile(path.join(backup.archivePath, 'credentials', 'token.json'), 'utf8')).resolves.toContain('"secret"')
+      await expect(fs.readFile(path.join(backup.archivePath, 'openclaw-home', 'identity', 'device-auth.json'), 'utf8')).resolves.toContain(
+        '"linked"'
+      )
+      await expect(fs.readFile(path.join(backup.archivePath, 'openclaw-home', 'memory', 'note.txt'), 'utf8')).resolves.toBe('hello')
+      await expect(
+        fs.readFile(path.join(backup.archivePath, 'openclaw-home', 'agents', 'assistant', 'agent', 'auth-profiles.json'), 'utf8')
+      ).resolves.toContain('"openai:default"')
+      await expect(
+        fs.access(
+          path.join(
+            backup.archivePath,
+            'openclaw-home',
+            'extensions',
+            'openclaw-lark',
+            'node_modules',
+            '@smithy',
+            'middleware-retry',
+            'index.js'
+          )
+        )
+      ).rejects.toThrow()
+    } finally {
+      await fs.rm(stateRoot, { recursive: true, force: true })
     }
   })
 
@@ -296,7 +424,7 @@ describe('openclaw backup index', () => {
           baselineBackupBypass: null,
         },
         backupType: 'upgrade-preflight',
-        copyMode: 'config-only',
+        strategyId: 'config-only',
       })
 
       expect(backup.archivePath).toContain(path.join(userDataDir, 'backups'))

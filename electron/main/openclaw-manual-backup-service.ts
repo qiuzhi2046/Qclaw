@@ -34,7 +34,7 @@ export async function runOpenClawManualBackup(): Promise<OpenClawManualBackupRun
     const backup = await createManagedBackupArchive({
       candidate: activeCandidate,
       backupType: 'manual-backup',
-      copyMode: 'full-state',
+      strategyId: 'full-state',
     })
     if (!backup.scopeAvailability.hasMemoryData) {
       await cleanupInvalidArchive(backup.archivePath)

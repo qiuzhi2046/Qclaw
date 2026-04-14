@@ -1379,7 +1379,7 @@ describe('openclaw upgrade service', () => {
       expect(result.ok).toBe(false)
       expect(createManagedBackupArchiveMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          copyMode: 'full-state',
+          strategyId: 'full-state',
         })
       )
       await expect(fs.readFile(path.join(stateRoot, 'openclaw.json'), 'utf8')).resolves.toContain('"local"')
@@ -1474,7 +1474,7 @@ describe('openclaw upgrade service', () => {
       expect(result.ok).toBe(false)
       expect(createManagedBackupArchiveMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          copyMode: 'full-state',
+          strategyId: 'full-state',
         })
       )
       await expect(fs.readFile(path.join(stateRoot, '.env'), 'utf8')).resolves.toContain('API_KEY=restored')

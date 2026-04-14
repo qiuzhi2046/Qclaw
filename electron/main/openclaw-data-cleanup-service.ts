@@ -102,7 +102,7 @@ export async function runOpenClawDataCleanup(
         ? await createManagedBackupArchive({
             candidate: matchedCandidate,
             backupType: 'cleanup-backup',
-            copyMode: 'full-state',
+            strategyId: 'full-state',
           })
         : await createStateRootBackupArchive({
             stateRoot: target.path,

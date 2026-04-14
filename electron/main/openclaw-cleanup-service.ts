@@ -389,7 +389,7 @@ export async function runOpenClawCleanup(
         const candidateBackup = await createManagedBackupArchive({
           candidate,
           backupType: 'cleanup-backup',
-          copyMode: 'full-state',
+          strategyId: 'full-state',
         })
         if (!backupCreated) backupCreated = candidateBackup
       } catch (error) {

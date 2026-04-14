@@ -50,6 +50,18 @@ describe('openclaw baseline backup gate', () => {
 
     await fs.rm(tempRoot, { recursive: true, force: true })
     await fs.mkdir(path.join(stateRoot, 'identity'), { recursive: true })
+    await fs.mkdir(path.join(stateRoot, 'credentials'), { recursive: true })
+    await fs.mkdir(path.join(stateRoot, 'memory'), { recursive: true })
+    await fs.mkdir(path.join(stateRoot, 'extensions', 'openclaw-lark', 'node_modules'), { recursive: true })
+    await fs.writeFile(path.join(stateRoot, 'openclaw.json'), '{"provider":"openai"}', 'utf8')
+    await fs.writeFile(path.join(stateRoot, '.env'), 'OPENAI_API_KEY=test\n', 'utf8')
+    await fs.writeFile(path.join(stateRoot, 'credentials', 'token.json'), '{"token":"secret"}', 'utf8')
+    await fs.writeFile(path.join(stateRoot, 'memory', 'note.txt'), 'memory', 'utf8')
+    await fs.writeFile(
+      path.join(stateRoot, 'extensions', 'openclaw-lark', 'node_modules', 'package.json'),
+      '{"name":"openclaw-lark-runtime"}',
+      'utf8'
+    )
     await fs.writeFile(path.join(stateRoot, 'identity', 'device.json'), '{"device":"test"}', 'utf8')
   })
 
@@ -152,5 +164,38 @@ describe('openclaw baseline backup gate', () => {
     expect(result.created).toBe(true)
     expect(result.backup?.archivePath).toContain(backupDir)
     expect(await getBaselineBackupBypassStatus(candidate.installFingerprint)).toBeNull()
+  })
+
+  it('creates a safeguard baseline backup with config and memory but without extension runtimes', async () => {
+    const candidate = createCandidate({
+      stateRoot,
+      configPath: path.join(stateRoot, 'openclaw.json'),
+      displayStateRoot: stateRoot,
+      displayConfigPath: path.join(stateRoot, 'openclaw.json'),
+    })
+
+    const result = await ensureBaselineBackup(candidate)
+
+    expect(result.ok).toBe(true)
+    expect(result.backup).not.toBeNull()
+
+    const archivePath = result.backup?.archivePath || ''
+    const manifest = JSON.parse(await fs.readFile(path.join(archivePath, 'manifest.json'), 'utf8')) as {
+      homeCaptureMode?: string
+      strategyId?: string
+    }
+
+    expect(manifest.strategyId).toBe('takeover-safeguard')
+    expect(manifest.homeCaptureMode).toBe('essential-state')
+    await expect(fs.readFile(path.join(archivePath, 'openclaw.json'), 'utf8')).resolves.toContain('"provider":"openai"')
+    await expect(fs.readFile(path.join(archivePath, '.env'), 'utf8')).resolves.toContain('OPENAI_API_KEY=test')
+    await expect(fs.readFile(path.join(archivePath, 'credentials', 'token.json'), 'utf8')).resolves.toContain('"secret"')
+    await expect(fs.readFile(path.join(archivePath, 'openclaw-home', 'memory', 'note.txt'), 'utf8')).resolves.toBe('memory')
+    await expect(fs.readFile(path.join(archivePath, 'openclaw-home', 'identity', 'device.json'), 'utf8')).resolves.toContain(
+      '"device":"test"'
+    )
+    await expect(
+      fs.access(path.join(archivePath, 'openclaw-home', 'extensions', 'openclaw-lark', 'node_modules', 'package.json'))
+    ).rejects.toThrow()
   })
 })
