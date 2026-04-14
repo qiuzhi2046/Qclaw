@@ -590,6 +590,76 @@ describe('openclaw upgrade service', () => {
     expect(String(repairCommand || '')).toContain(`${TEST_HOME}/.nvm/versions/node/v22.22.1/lib/node_modules`)
   })
 
+  it('cleans stale npm rename targets and retries the same mirror for user-managed downgrades', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(TEST_HOME, '.qclaw-openclaw-enotempty-'))
+    const packageRoot = path.join(tempRoot, '.n', 'lib', 'node_modules', 'openclaw')
+    const renameDest = path.join(tempRoot, '.n', 'lib', 'node_modules', 'openclaw-7uodeuGm')
+
+    try {
+      await fs.mkdir(packageRoot, { recursive: true })
+      await fs.mkdir(renameDest, { recursive: true })
+      await fs.writeFile(path.join(packageRoot, 'package.json'), '{"name":"openclaw"}', 'utf8')
+      await fs.writeFile(path.join(renameDest, 'stale.txt'), 'stale', 'utf8')
+
+      gatewayHealthMock.mockResolvedValue({ running: false, raw: '{}' })
+      discoverOpenClawInstallationsMock.mockResolvedValue({
+        candidates: [
+          {
+            candidateId: 'candidate-n',
+            binaryPath: path.join(tempRoot, '.n', 'bin', 'openclaw'),
+            resolvedBinaryPath: path.join(packageRoot, 'openclaw.mjs'),
+            packageRoot,
+            version: '2026.3.31',
+            installSource: 'npm-global',
+            isPathActive: true,
+            configPath: path.join(tempRoot, '.openclaw', 'openclaw.json'),
+            stateRoot: path.join(tempRoot, '.openclaw'),
+            displayConfigPath: '~/.openclaw/openclaw.json',
+            displayStateRoot: '~/.openclaw',
+            ownershipState: 'external-preexisting',
+            installFingerprint: 'fingerprint-n',
+            baselineBackup: null,
+            baselineBackupBypass: null,
+          },
+        ],
+        warnings: [],
+      })
+      runShellMock
+        .mockResolvedValueOnce({
+          ok: false,
+          stdout: '',
+          stderr: [
+            'npm error code ENOTEMPTY',
+            'npm error syscall rename',
+            `npm error path ${packageRoot}`,
+            `npm error dest ${renameDest}`,
+            `npm error ENOTEMPTY: directory not empty, rename '${packageRoot}' -> '${renameDest}'`,
+          ].join('\n'),
+          code: 1,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          stdout: 'changed 1 package',
+          stderr: '',
+          code: 0,
+        })
+      checkOpenClawMock.mockResolvedValue({ installed: true, version: '2026.3.24' })
+
+      const result = await runOpenClawUpgrade()
+
+      expect(result.ok).toBe(true)
+      expect(runShellMock).toHaveBeenCalledTimes(2)
+      const firstCallArgs = (runShellMock.mock.calls[0]?.[1] as string[] | undefined) || []
+      const secondCallArgs = (runShellMock.mock.calls[1]?.[1] as string[] | undefined) || []
+      expect(firstCallArgs).toContain('--registry=https://registry.npmmirror.com')
+      expect(secondCallArgs).toContain('--registry=https://registry.npmmirror.com')
+      await expect(fs.access(packageRoot)).resolves.toBeUndefined()
+      await expect(fs.access(renameDest)).rejects.toThrow()
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
   it('blocks the upgrade when both snapshot roots are unavailable', async () => {
     gatewayHealthMock.mockResolvedValue({ running: false, raw: '{}' })
     discoverOpenClawInstallationsMock.mockResolvedValue({
