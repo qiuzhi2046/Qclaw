@@ -227,7 +227,9 @@ describe('resolveOpenClawBinaryPath', () => {
       options: Record<string, unknown>
     }> = []
     const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
-    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id: string) => {
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((
+      id: Parameters<typeof process.getBuiltinModule>[0],
+    ) => {
       if (id === 'node:child_process' || id === 'child_process') {
         const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
         return {

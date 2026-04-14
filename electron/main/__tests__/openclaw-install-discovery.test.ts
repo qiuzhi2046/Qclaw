@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { inferOpenClawInstallSource } from '../openclaw-install-discovery'
+import { buildTestEnv } from './test-env'
 
 const fs = process.getBuiltinModule('fs') as typeof import('node:fs')
 const { EventEmitter } = process.getBuiltinModule('node:events') as typeof import('node:events')
@@ -176,9 +177,9 @@ describe('inferOpenClawInstallSource', () => {
         resolvedBinaryPath: 'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\openclaw.cmd',
         packageRoot: 'C:\\Users\\alice\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node_modules\\openclaw',
         platform: 'win32',
-        env: {
+        env: buildTestEnv({
           LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
-        } as unknown as NodeJS.ProcessEnv,
+        }),
       })
     ).toBe('qclaw-managed')
   })
@@ -905,7 +906,9 @@ describe('discoverOpenClawInstallations', () => {
       options: Record<string, unknown>
     }> = []
     const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
-    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id: string) => {
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((
+      id: Parameters<typeof process.getBuiltinModule>[0],
+    ) => {
       if (id === 'node:child_process' || id === 'child_process') {
         const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
         return {

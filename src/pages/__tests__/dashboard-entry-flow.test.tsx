@@ -95,6 +95,10 @@ function createBootstrapApi(
   }
 }
 
+type EnsureGatewayRunningResult = Awaited<
+  ReturnType<DashboardEntryBootstrapApi['ensureGatewayRunning']>
+>
+
 describe('dashboard entry bootstrap flow', () => {
   it('records gateway bootstrap flow progress into env-check diagnostics', () => {
     expect(gatewayBootstrapSource).toContain("window.api.appendEnvCheckDiagnostic('gateway-bootstrap-run-start'")
@@ -335,8 +339,10 @@ describe('dashboard entry bootstrap flow', () => {
 
   it('lets dashboard entry continue when the lightweight gateway ensure exceeds the bootstrap wait budget', async () => {
     const ensureGatewayRunning = vi.fn(
-      (_options?: Parameters<DashboardEntryBootstrapApi['ensureGatewayRunning']>[0]) =>
-        new Promise<Awaited<ReturnType<DashboardEntryBootstrapApi['ensureGatewayRunning']>>>(() => {
+      (
+        _options?: Parameters<DashboardEntryBootstrapApi['ensureGatewayRunning']>[0]
+      ): Promise<EnsureGatewayRunningResult> =>
+        new Promise(() => {
           // Keep the ensure request pending to simulate a long-running gateway recovery.
         })
     )
