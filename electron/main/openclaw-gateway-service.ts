@@ -54,6 +54,7 @@ import {
   writeStartupLauncherFallback,
   type WindowsGatewayLauncherIntegrity,
 } from './platforms/windows/windows-platform-ops'
+import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 import { reconcileTrustedPluginAllowlist, sanitizeManagedPluginConfig } from './openclaw-plugin-config'
 import {
@@ -464,6 +465,49 @@ function combineCliOutput(result: Partial<CliResult> | null | undefined): string
     .filter(Boolean)
     .join('\n')
     .trim()
+}
+
+function isWindowsGatewaySpawnPermissionError(
+  result: Partial<CliResult> | null | undefined
+): boolean {
+  return /\bspawn\s+eperm\b/i.test(combineCliOutput(result))
+}
+
+async function launchWindowsGatewayViaLauncher(launcherPath: string): Promise<CliResult> {
+  const normalizedLauncherPath = normalizeText(launcherPath)
+  if (!normalizedLauncherPath) {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: 'Windows gateway launcher path is empty',
+      code: 1,
+    }
+  }
+
+  try {
+    await fs.promises.access(normalizedLauncherPath)
+  } catch {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: `Windows gateway launcher not found: ${normalizedLauncherPath}`,
+      code: 1,
+    }
+  }
+
+  const escapedLauncherPath = normalizedLauncherPath.replace(/'/g, "''")
+  const command = [
+    '$ErrorActionPreference = "Stop";',
+    `$scriptPath = '${escapedLauncherPath}';`,
+    "Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$scriptPath -WindowStyle Hidden",
+  ].join('\n')
+
+  return runShell(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    MAIN_RUNTIME_POLICY.cli.lightweightProbeTimeoutMs,
+    'gateway'
+  )
 }
 
 function isSafeAlreadyInstalledManagedPluginInstallError(detail: string): boolean {
@@ -2087,6 +2131,7 @@ async function ensureGatewayRunningImpl(
   let startResult: CliResult
   let gatewayStartRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null = null
   let gatewayStartPreflightHomeDir: string | null = null
+  let windowsGatewayLauncherPathForDirectStart: string | null = null
   if (process.platform === 'win32') {
     // Windows gateway owner repair/provision is intentionally centralized here.
     // Upper layers may request "make the gateway usable", but they must not install
@@ -2116,6 +2161,9 @@ async function ensureGatewayRunningImpl(
       || normalizeText((await resolveOpenClawPathsForRead().catch(() => null))?.homeDir)
       || normalizeText(resolveOpenClawPaths().homeDir)
     gatewayStartPreflightHomeDir = preflightHomeDir
+    windowsGatewayLauncherPathForDirectStart = preflightHomeDir
+      ? path.win32.join(preflightHomeDir, 'gateway.cmd')
+      : null
     const preflightPortOwner = normalizeGatewayPortOwner(
       currentPort,
       await probeGatewayPortOwner(currentPort).catch(() => null)
@@ -2124,6 +2172,9 @@ async function ensureGatewayRunningImpl(
       homeDir: preflightHomeDir,
     }).catch(() => null)
     windowsGatewayLauncherIntegrity = launcherIntegrity
+    if (normalizeText(launcherIntegrity?.launcherPath)) {
+      windowsGatewayLauncherPathForDirectStart = normalizeText(launcherIntegrity?.launcherPath)
+    }
     const preflight = buildWindowsGatewayPreflight({
       gatewayOwner: authoritativeRuntimeSnapshot?.gatewayOwner || null,
       launcherIntegrity,
@@ -2247,6 +2298,9 @@ async function ensureGatewayRunningImpl(
             branch: 'reinstall-service',
           })
           startupFallbackSucceeded = fallback.ok
+          if (normalizeText(fallback.launcherPath)) {
+            windowsGatewayLauncherPathForDirectStart = normalizeText(fallback.launcherPath)
+          }
         }
 
         if (startupFallbackSucceeded) {
@@ -2372,6 +2426,9 @@ async function ensureGatewayRunningImpl(
           branch: 'service-not-loaded',
         })
         startupFallbackSucceeded = fallback.ok
+        if (normalizeText(fallback.launcherPath)) {
+          windowsGatewayLauncherPathForDirectStart = normalizeText(fallback.launcherPath)
+        }
       }
 
       if (startupFallbackSucceeded) {
@@ -2428,6 +2485,47 @@ async function ensureGatewayRunningImpl(
       stdout: String(startResult.stdout || '').slice(0, 400),
       stderr: String(startResult.stderr || '').slice(0, 400),
     })
+  }
+
+  if (
+    process.platform === 'win32'
+    && !startResult.ok
+    && isWindowsGatewaySpawnPermissionError(startResult)
+    && windowsGatewayLauncherPathForDirectStart
+  ) {
+    await appendEnvCheckDiagnostic('gateway-ensure-direct-launch-fallback-start', {
+      launcherPath: windowsGatewayLauncherPathForDirectStart,
+      previousCode: startResult.code,
+      previousStderr: String(startResult.stderr || '').slice(0, 400),
+    })
+    recordGatewayAction(context, 'start-gateway', [
+      'cmd.exe',
+      '/d',
+      '/c',
+      windowsGatewayLauncherPathForDirectStart,
+    ])
+    const directLaunchResult = await launchWindowsGatewayViaLauncher(
+      windowsGatewayLauncherPathForDirectStart
+    )
+    await appendEnvCheckDiagnostic('gateway-ensure-direct-launch-fallback-result', {
+      launcherPath: windowsGatewayLauncherPathForDirectStart,
+      ok: directLaunchResult.ok,
+      code: directLaunchResult.code,
+      stderr: String(directLaunchResult.stderr || '').slice(0, 400),
+    })
+    if (directLaunchResult.ok) {
+      if (!gatewayLauncherMode && !normalizeText(windowsGatewayLauncherIntegrity?.taskName)) {
+        gatewayLauncherMode = 'startup-fallback'
+      }
+      startResult = directLaunchResult
+    } else {
+      startResult = {
+        ok: false,
+        stdout: joinNonEmpty([startResult.stdout, directLaunchResult.stdout]),
+        stderr: joinNonEmpty([startResult.stderr, directLaunchResult.stderr]),
+        code: directLaunchResult.code ?? startResult.code,
+      }
+    }
   }
 
   if (!startResult.ok) {

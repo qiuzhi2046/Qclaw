@@ -2224,6 +2224,96 @@ describe('openclaw gateway service', () => {
     }
   })
 
+  itOnWindows('falls back to launching gateway.cmd directly when gateway start hits spawn EPERM', async () => {
+    const homeDir = await createOpenClawHome()
+    const launcherPath = join(homeDir, 'gateway.cmd')
+    const startupEntryPath = join(
+      homeDir,
+      'AppData',
+      'Roaming',
+      'Microsoft',
+      'Windows',
+      'Start Menu',
+      'Programs',
+      'Startup',
+      'OpenClaw Gateway.cmd'
+    )
+    await fs.promises.mkdir(
+      join(homeDir, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'),
+      { recursive: true }
+    )
+    await fs.promises.writeFile(launcherPath, '@echo off\r\n')
+    await fs.promises.writeFile(
+      startupEntryPath,
+      [
+        '@echo off',
+        'rem OpenClaw Gateway (v2026.4.12)',
+        `start "" /min cmd.exe /d /c ${launcherPath}`,
+      ].join('\r\n')
+    )
+
+    readConfigMock.mockResolvedValue({
+      gateway: {
+        mode: 'local',
+        port: 18789,
+      },
+    })
+    readAuthoritativeWindowsChannelRuntimeSnapshotMock.mockReturnValue(
+      createAuthoritativeWindowsChannelRuntimeSnapshot({
+        homeDir,
+        ownerKind: 'startup-folder',
+        ownerLauncherPath: launcherPath,
+        ownerTaskName: '',
+      })
+    )
+    probeGatewayPortOwnerMock.mockResolvedValueOnce({
+      kind: 'unknown',
+      port: 18789,
+      source: 'lsof',
+    })
+    runShellMock
+      .mockResolvedValueOnce({
+        ok: false,
+        stdout: '',
+        stderr: 'ERROR: The system cannot find the path specified.',
+        code: 1,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: '',
+        stderr: '',
+        code: 0,
+      })
+    gatewayHealthMock
+      .mockResolvedValueOnce({ running: false, raw: '', stderr: '', code: 1 })
+      .mockResolvedValueOnce({ running: true, raw: '{"ok":true}', stderr: '', code: 0 })
+    gatewayStartMock.mockResolvedValueOnce({
+      ok: false,
+      stdout: '',
+      stderr: 'Gateway start failed: Error: spawn EPERM',
+      code: 1,
+    })
+
+    const result = await ensureGatewayRunning()
+
+    expect(gatewayStartMock).toHaveBeenCalledTimes(1)
+    expect(runShellMock).toHaveBeenNthCalledWith(
+      2,
+      'powershell.exe',
+      expect.arrayContaining([
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+      ]),
+      expect.any(Number),
+      'gateway'
+    )
+    expect(result.ok).toBe(true)
+    expect(result.running).toBe(true)
+  })
+
   itOnWindows('authoritative snapshot marks a stale launcher for reinstall before startup', async () => {
     const homeDir = await createOpenClawHome()
     const missingLauncherPath = join(homeDir, 'missing-gateway.cmd')
