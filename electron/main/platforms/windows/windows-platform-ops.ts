@@ -183,6 +183,40 @@ function buildHiddenWindowsStartupLauncherTargetMarker(scriptPath: string): stri
   return `rem QClaw startup launcher target: ${scriptPath}`
 }
 
+function extractGatewayLauncherRuntimeTargets(scriptContent: string): {
+  nodePath: string | null
+  openclawEntryPath: string | null
+} {
+  const matches = String(scriptContent || '').match(/[A-Za-z]:\\[^"\r\n]+?\.(?:exe|js|mjs)\b/gi) || []
+  const nodePath = matches.find((item) => /\.exe$/i.test(item)) || null
+  const openclawEntryPath =
+    matches.find((item) => /node_modules\\openclaw\\.+\.(?:js|mjs)$/i.test(item))
+    || matches.find((item) => /\\openclaw\\dist\\index\.(?:js|mjs)$/i.test(item))
+    || null
+
+  return { nodePath, openclawEntryPath }
+}
+
+async function validateGatewayLauncherContent(params: {
+  launcherPath: string
+  fileExists: (targetPath: string) => boolean | Promise<boolean>
+  readFile: (targetPath: string) => string | Promise<string>
+}): Promise<'healthy' | 'invalid' | 'unknown'> {
+  const scriptContent = await Promise.resolve(params.readFile(params.launcherPath)).catch(() => '')
+  if (!scriptContent.trim()) return 'unknown'
+
+  const { nodePath, openclawEntryPath } = extractGatewayLauncherRuntimeTargets(scriptContent)
+  if (!nodePath && !openclawEntryPath) return 'unknown'
+  if (!nodePath || !openclawEntryPath) return 'unknown'
+
+  const [nodeExists, openclawEntryExists] = await Promise.all([
+    Promise.resolve(params.fileExists(nodePath)).catch(() => false),
+    Promise.resolve(params.fileExists(openclawEntryPath)).catch(() => false),
+  ])
+
+  return nodeExists && openclawEntryExists ? 'healthy' : 'invalid'
+}
+
 function quoteWindowsBatchScriptPath(scriptPath: string): string {
   return `"${escapeBatchPercent(scriptPath).replace(/"/g, '""')}"`
 }
@@ -446,6 +480,29 @@ export async function inspectWindowsGatewayLauncherIntegrity(
       }
     }
 
+    const launcherValidity = await validateGatewayLauncherContent({
+      launcherPath,
+      fileExists,
+      readFile,
+    })
+    if (launcherValidity === 'invalid') {
+      return {
+        launcherPath,
+        shouldReinstallService: true,
+        status: 'launcher-missing',
+        taskName: null,
+      }
+    }
+
+    if (launcherValidity === 'unknown') {
+      return {
+        launcherPath: null,
+        shouldReinstallService: false,
+        status: 'unknown',
+        taskName: null,
+      }
+    }
+
     return {
       launcherPath,
       shouldReinstallService: false,
@@ -473,6 +530,29 @@ export async function inspectWindowsGatewayLauncherIntegrity(
       launcherPath,
       shouldReinstallService: true,
       status: 'launcher-missing',
+      taskName,
+    }
+  }
+
+  const launcherValidity = await validateGatewayLauncherContent({
+    launcherPath,
+    fileExists,
+    readFile,
+  })
+  if (launcherValidity === 'invalid') {
+    return {
+      launcherPath,
+      shouldReinstallService: true,
+      status: 'launcher-missing',
+      taskName,
+    }
+  }
+
+  if (launcherValidity === 'unknown') {
+    return {
+      launcherPath: null,
+      shouldReinstallService: false,
+      status: 'unknown',
       taskName,
     }
   }
@@ -558,19 +638,27 @@ export function buildWindowsGatewayOwnerSnapshotFromLauncherIntegrity(
     }
   }
 
-  if (candidate.taskName) {
-    return {
-      ownerKind: 'scheduled-task',
-      ownerLauncherPath: String(candidate.launcherPath || '').trim(),
-      ownerTaskName: String(candidate.taskName || '').trim(),
-    }
-  }
-
   if (candidate.status === 'service-missing') {
     return {
       ownerKind: 'none',
       ownerLauncherPath: '',
       ownerTaskName: '',
+    }
+  }
+
+  if (candidate.shouldReinstallService || candidate.status !== 'healthy') {
+    return {
+      ownerKind: 'unknown',
+      ownerLauncherPath: '',
+      ownerTaskName: '',
+    }
+  }
+
+  if (candidate.taskName) {
+    return {
+      ownerKind: 'scheduled-task',
+      ownerLauncherPath: String(candidate.launcherPath || '').trim(),
+      ownerTaskName: String(candidate.taskName || '').trim(),
     }
   }
 

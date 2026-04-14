@@ -47,6 +47,22 @@ function buildGatewayOwnerSnapshotFromLauncherIntegrity(input: {
   status: 'healthy' | 'launcher-missing' | 'service-missing' | 'unknown'
   taskName: string | null
 }) {
+  if (input.status === 'service-missing') {
+    return {
+      ownerKind: 'none',
+      ownerLauncherPath: '',
+      ownerTaskName: '',
+    }
+  }
+
+  if (input.shouldReinstallService || input.status !== 'healthy') {
+    return {
+      ownerKind: 'unknown',
+      ownerLauncherPath: '',
+      ownerTaskName: '',
+    }
+  }
+
   if (input.launcherPath || input.taskName) {
     return {
       ownerKind: 'scheduled-task',
@@ -56,7 +72,7 @@ function buildGatewayOwnerSnapshotFromLauncherIntegrity(input: {
   }
 
   return {
-    ownerKind: 'none',
+    ownerKind: 'unknown',
     ownerLauncherPath: '',
     ownerTaskName: '',
   }
@@ -394,6 +410,31 @@ describe('buildAuthoritativeWindowsChannelRuntimeSnapshot', () => {
         ownerKind: 'scheduled-task',
         ownerLauncherPath: 'C:\\Users\\alice\\.openclaw\\gateway.cmd',
         ownerTaskName: '\\OpenClaw Gateway',
+      },
+    })
+  })
+
+  it('does not derive a managed gateway owner when launcher integrity requires reinstall', async () => {
+    const privateSnapshot = createPrivateRuntimeSnapshot()
+
+    const snapshot = await invokeBuilder({
+      config: null,
+      gatewayLauncherIntegrity: {
+        status: 'launcher-missing',
+        launcherPath: 'C:\\Users\\alice\\.openclaw\\gateway.cmd',
+        shouldReinstallService: true,
+        taskName: '\\OpenClaw Gateway',
+      },
+      installedOnDisk: false,
+      registeredPlugins: [],
+      selectedRuntimeSnapshot: privateSnapshot,
+    })
+
+    expect(snapshot).toMatchObject({
+      gatewayOwner: {
+        ownerKind: 'unknown',
+        ownerLauncherPath: '',
+        ownerTaskName: '',
       },
     })
   })

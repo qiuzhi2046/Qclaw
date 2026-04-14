@@ -1657,10 +1657,11 @@ async function ensureGatewayRunningImpl(
     })
     if (confirmed) {
       const cleanupLauncherIntegrity =
-        deriveHealthyManagedLauncherIntegrity(
-          windowsAuthoritativeRuntimeSnapshot?.gatewayOwner
-        )
-        || windowsGatewayLauncherIntegrity
+        windowsGatewayLauncherIntegrity?.status === 'healthy'
+          ? windowsGatewayLauncherIntegrity
+          : deriveHealthyManagedLauncherIntegrity(
+              windowsAuthoritativeRuntimeSnapshot?.gatewayOwner
+            )
       await reconcileWindowsStartupLauncherAfterSuccessfulEnsure(
         windowsGatewayOwnerHomeDir,
         cleanupLauncherIntegrity
@@ -2132,6 +2133,7 @@ async function ensureGatewayRunningImpl(
   let gatewayStartRuntimeSnapshot: WindowsActiveRuntimeSnapshot | null = null
   let gatewayStartPreflightHomeDir: string | null = null
   let windowsGatewayLauncherPathForDirectStart: string | null = null
+  let windowsGatewayLauncherEligibleForDirectStart = false
   if (process.platform === 'win32') {
     // Windows gateway owner repair/provision is intentionally centralized here.
     // Upper layers may request "make the gateway usable", but they must not install
@@ -2172,6 +2174,7 @@ async function ensureGatewayRunningImpl(
       homeDir: preflightHomeDir,
     }).catch(() => null)
     windowsGatewayLauncherIntegrity = launcherIntegrity
+    windowsGatewayLauncherEligibleForDirectStart = launcherIntegrity?.status === 'healthy'
     if (normalizeText(launcherIntegrity?.launcherPath)) {
       windowsGatewayLauncherPathForDirectStart = normalizeText(launcherIntegrity?.launcherPath)
     }
@@ -2492,6 +2495,7 @@ async function ensureGatewayRunningImpl(
     && !startResult.ok
     && isWindowsGatewaySpawnPermissionError(startResult)
     && windowsGatewayLauncherPathForDirectStart
+    && windowsGatewayLauncherEligibleForDirectStart
   ) {
     await appendEnvCheckDiagnostic('gateway-ensure-direct-launch-fallback-start', {
       launcherPath: windowsGatewayLauncherPathForDirectStart,
@@ -2941,10 +2945,11 @@ async function ensureGatewayRunningImpl(
     elapsedMs: ready.elapsedMs,
   })
   const successfulLauncherIntegrity =
-    deriveHealthyManagedLauncherIntegrity(
-      windowsAuthoritativeRuntimeSnapshot?.gatewayOwner
-    )
-    || windowsGatewayLauncherIntegrity
+    windowsGatewayLauncherIntegrity?.status === 'healthy'
+      ? windowsGatewayLauncherIntegrity
+      : deriveHealthyManagedLauncherIntegrity(
+          windowsAuthoritativeRuntimeSnapshot?.gatewayOwner
+        )
   await reconcileWindowsStartupLauncherAfterSuccessfulEnsure(
     windowsGatewayOwnerHomeDir,
     successfulLauncherIntegrity

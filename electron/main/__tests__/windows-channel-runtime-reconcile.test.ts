@@ -61,6 +61,22 @@ function buildGatewayOwnerSnapshotFromLauncherIntegrity(input: {
   status: 'healthy' | 'launcher-missing' | 'service-missing' | 'unknown'
   taskName: string | null
 }) {
+  if (input.status === 'service-missing') {
+    return {
+      ownerKind: 'none',
+      ownerLauncherPath: '',
+      ownerTaskName: '',
+    }
+  }
+
+  if (input.shouldReinstallService || input.status !== 'healthy') {
+    return {
+      ownerKind: 'unknown',
+      ownerLauncherPath: '',
+      ownerTaskName: '',
+    }
+  }
+
   return {
     ownerKind: input.launcherPath || input.taskName ? 'scheduled-task' : 'none',
     ownerLauncherPath: String(input.launcherPath || ''),

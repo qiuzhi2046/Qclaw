@@ -307,6 +307,80 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
     })
   })
 
+  it('marks the scheduled-task launcher stale when gateway.cmd points to a missing node executable', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      stdout: [
+        'Folder: \\',
+        'TaskName: \\OpenClaw Gateway',
+        'Task To Run: C:\\Users\\demo\\.openclaw\\gateway.cmd ',
+      ].join('\n'),
+      stderr: '',
+      code: 0,
+    })
+
+    const launcherPath = 'C:\\Users\\demo\\.openclaw\\gateway.cmd'
+    const nodePath = 'C:\\Users\\demo\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe'
+    const openclawEntryPath = 'C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules\\openclaw\\dist\\index.js'
+
+    await expect(
+      inspectWindowsGatewayLauncherIntegrity({
+        homeDir: 'C:\\Users\\demo\\.openclaw',
+        runShell,
+        fileExists: (targetPath) => targetPath === launcherPath || targetPath === openclawEntryPath,
+        readFile: async (targetPath) =>
+          targetPath === launcherPath
+            ? [
+                '@echo off',
+                'rem OpenClaw Gateway (v2026.4.12)',
+                `"${nodePath}" "${openclawEntryPath}" gateway --port 18789`,
+              ].join('\r\n')
+            : '',
+      })
+    ).resolves.toEqual({
+      status: 'launcher-missing',
+      taskName: '\\OpenClaw Gateway',
+      launcherPath,
+      shouldReinstallService: true,
+    })
+  })
+
+  it('keeps launcher status unknown when gateway.cmd exists but its runtime target cannot be safely parsed', async () => {
+    const runShell = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      stdout: [
+        'Folder: \\',
+        'TaskName: \\OpenClaw Gateway',
+        'Task To Run: C:\\Users\\demo\\.openclaw\\gateway.cmd ',
+      ].join('\n'),
+      stderr: '',
+      code: 0,
+    })
+
+    const launcherPath = 'C:\\Users\\demo\\.openclaw\\gateway.cmd'
+
+    await expect(
+      inspectWindowsGatewayLauncherIntegrity({
+        homeDir: 'C:\\Users\\demo\\.openclaw',
+        runShell,
+        fileExists: (targetPath) => targetPath === launcherPath,
+        readFile: async (targetPath) =>
+          targetPath === launcherPath
+            ? [
+                '@echo off',
+                'rem OpenClaw Gateway (future wrapper format)',
+                'set OPENCLAW_GATEWAY_WRAPPER=1',
+              ].join('\r\n')
+            : '',
+      })
+    ).resolves.toEqual({
+      status: 'unknown',
+      taskName: '\\OpenClaw Gateway',
+      launcherPath: null,
+      shouldReinstallService: false,
+    })
+  })
+
   it('treats a startup-folder login item with a missing launcher as stale when no scheduled task exists', async () => {
     const runShell = vi.fn().mockResolvedValueOnce({
       ok: false,
@@ -351,13 +425,19 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
 
     const startupEntryPath = 'C:\\Users\\demo\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\OpenClaw Gateway.cmd'
     const launcherPath = 'C:\\Users\\demo\\.openclaw\\gateway.cmd'
+    const nodePath = 'C:\\Users\\demo\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe'
+    const openclawEntryPath = 'C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules\\openclaw\\dist\\index.js'
 
     await expect(
       inspectWindowsGatewayLauncherIntegrity({
         appDataDir: 'C:\\Users\\demo\\AppData\\Roaming',
         homeDir: 'C:\\Users\\demo\\.openclaw',
         runShell,
-        fileExists: (targetPath) => targetPath === startupEntryPath || targetPath === launcherPath,
+        fileExists: (targetPath) =>
+          targetPath === startupEntryPath
+          || targetPath === launcherPath
+          || targetPath === nodePath
+          || targetPath === openclawEntryPath,
         readFile: async (targetPath) =>
           targetPath === startupEntryPath
             ? [
@@ -365,7 +445,13 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
                 'rem OpenClaw Gateway (v2026.4.12)',
                 `start "" /min cmd.exe /d /c ${launcherPath}`,
               ].join('\r\n')
-            : '',
+            : targetPath === launcherPath
+              ? [
+                  '@echo off',
+                  'rem OpenClaw Gateway (v2026.4.12)',
+                  `"${nodePath}" "${openclawEntryPath}" gateway --port 18789`,
+                ].join('\r\n')
+              : '',
       })
     ).resolves.toEqual({
       status: 'healthy',
@@ -408,21 +494,35 @@ describe('inspectWindowsGatewayLauncherIntegrity', () => {
 
     const startupEntryPath = 'C:\\Users\\demo\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\OpenClaw Gateway.cmd'
     const launcherPath = 'C:\\Users\\demo\\.openclaw\\gateway.cmd'
+    const nodePath = 'C:\\Users\\demo\\AppData\\Local\\Qclaw\\runtime\\win32\\node\\v24.14.1\\node.exe'
+    const openclawEntryPath = 'C:\\Users\\demo\\AppData\\Roaming\\npm\\node_modules\\openclaw\\dist\\index.js'
 
     await expect(
       inspectWindowsGatewayLauncherIntegrity({
         appDataDir: 'C:\\Users\\demo\\AppData\\Roaming',
         homeDir: 'C:\\Users\\demo\\.openclaw',
         runShell,
-        fileExists: (targetPath) => targetPath === startupEntryPath || targetPath === launcherPath,
-        readFile: async () =>
-          [
-            '@echo off',
-            'rem OpenClaw Gateway (v2026.4.12)',
-            'rem QClaw patched: keep Startup fallback compatible while hiding the long-lived shell window.',
-            `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$scriptPath = '${launcherPath}'; Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$scriptPath -WindowStyle Hidden" || start "" /min cmd.exe /d /c "${launcherPath}"`,
-            `rem QClaw startup launcher target: ${launcherPath}`,
-          ].join('\r\n'),
+        fileExists: (targetPath) =>
+          targetPath === startupEntryPath
+          || targetPath === launcherPath
+          || targetPath === nodePath
+          || targetPath === openclawEntryPath,
+        readFile: async (targetPath) =>
+          targetPath === startupEntryPath
+            ? [
+                '@echo off',
+                'rem OpenClaw Gateway (v2026.4.12)',
+                'rem QClaw patched: keep Startup fallback compatible while hiding the long-lived shell window.',
+                `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$scriptPath = '${launcherPath}'; Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$scriptPath -WindowStyle Hidden" || start "" /min cmd.exe /d /c "${launcherPath}"`,
+                `rem QClaw startup launcher target: ${launcherPath}`,
+              ].join('\r\n')
+            : targetPath === launcherPath
+              ? [
+                  '@echo off',
+                  'rem OpenClaw Gateway (v2026.4.12)',
+                  `"${nodePath}" "${openclawEntryPath}" gateway --port 18789`,
+                ].join('\r\n')
+              : '',
       })
     ).resolves.toEqual({
       status: 'healthy',
@@ -525,15 +625,26 @@ describe('writeStartupLauncherFallback', () => {
 
   it('returns ok:false when startup path cannot be resolved', async () => {
     const writeFile = vi.fn()
-    const result = await writeStartupLauncherFallback({
-      homeDir: '',
-      fileExists: () => true,
-      writeFile,
-    })
+    const previousAppData = process.env.APPDATA
+    delete process.env.APPDATA
 
-    expect(result.ok).toBe(false)
-    expect(result.startupEntryPath).toBeNull()
-    expect(writeFile).not.toHaveBeenCalled()
+    try {
+      const result = await writeStartupLauncherFallback({
+        homeDir: '',
+        fileExists: () => true,
+        writeFile,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.startupEntryPath).toBeNull()
+      expect(writeFile).not.toHaveBeenCalled()
+    } finally {
+      if (previousAppData === undefined) {
+        delete process.env.APPDATA
+      } else {
+        process.env.APPDATA = previousAppData
+      }
+    }
   })
 
   it('generates script recognizable by inspectWindowsGatewayLauncherIntegrity', async () => {
