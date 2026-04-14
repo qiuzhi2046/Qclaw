@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import logoSrc from '@/assets/logo.png'
 import Welcome from './pages/Welcome'
+import StartupUpdatePrompt from './pages/StartupUpdatePrompt'
 import EnvCheck from './pages/EnvCheck'
 import ApiKeys, { type SetupModelContext } from './pages/ApiKeys'
 import ChannelConnect, { type ChannelConnectNextPayload } from './pages/ChannelConnect'
@@ -50,6 +51,8 @@ import {
   formatOpenClawVersionLabel,
   normalizeOpenClawVersionDisplay,
 } from './shared/openclaw-version-display'
+import type { QClawUpdateStatus } from './shared/openclaw-phase4'
+import { shouldShowQClawNewVersionButton } from './shared/qclaw-update-visibility'
 
 type SetupStep = 'api-keys' | 'channel-connect' | 'pairing-code'
 
@@ -279,7 +282,10 @@ function buildPluginRepairRequestKey(options?: PluginRepairOptions): string {
 }
 
 function App() {
-  const [appState, setAppState] = useState<AppState>('welcome')
+  const [appState, setAppState] = useState<AppState>('startup-update')
+  const [startupUpdateStatus, setStartupUpdateStatus] = useState<
+    Pick<QClawUpdateStatus, 'status' | 'availableVersion'> | null
+  >(null)
   const [setupStep, setSetupStep] = useState<SetupStep>('api-keys')
   const [selectedChannel, setSelectedChannel] = useState<string>('feishu')
   const [selectedPairingAccountId, setSelectedPairingAccountId] = useState<string | undefined>(undefined)
@@ -724,8 +730,40 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (appState !== 'startup-update' || startupUpdateStatus) return
+
+    let cancelled = false
+
+    void window.api.checkQClawUpdate()
+      .then((status) => {
+        if (cancelled) return
+
+        const nextStatus = {
+          status: status.status,
+          availableVersion: status.availableVersion,
+        }
+
+        if (shouldShowQClawNewVersionButton(nextStatus)) {
+          setStartupUpdateStatus(nextStatus)
+          return
+        }
+
+        setAppState('welcome')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAppState('welcome')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [appState, startupUpdateStatus])
+
+  useEffect(() => {
     if (startupRepairAttemptedRef.current) return
-    if (appState === 'welcome' || appState === 'env-check') return
+    if (appState === 'startup-update' || appState === 'welcome' || appState === 'env-check') return
     startupRepairAttemptedRef.current = true
     void runPluginRepair('startup')
   }, [appState, runPluginRepair])
@@ -862,6 +900,17 @@ function App() {
       </>
     </MantineThemeProvider>
   )
+
+  if (appState === 'startup-update') {
+    return renderWithContactModal(renderFrame(
+      <StartupUpdatePrompt
+        checking={!startupUpdateStatus}
+        availableVersion={startupUpdateStatus?.availableVersion}
+        onLater={() => setAppState('welcome')}
+        onUpdateNow={() => undefined}
+      />
+    , false))
+  }
 
   if (appState === 'welcome') {
     return renderWithContactModal(renderFrame(

@@ -101,6 +101,40 @@ let currentStatus: QClawUpdateStatus = {
   message: 'Qclaw 自动更新尚未启用。',
 }
 
+function resolveInjectedUpdateStatus(): QClawUpdateStatus | null {
+  let isPackaged = true
+  try {
+    isPackaged = getElectronApp().isPackaged
+  } catch {
+    isPackaged = false
+  }
+
+  if (isPackaged) return null
+
+  const availableVersion = normalizeText(process.env.QCLAW_DEV_UPDATE_VERSION)
+  if (!availableVersion) return null
+
+  const manualDownloadUrl = normalizeText(process.env.QCLAW_DEV_UPDATE_URL)
+  const releaseDate = normalizeText(process.env.QCLAW_DEV_UPDATE_RELEASE_DATE)
+  const releaseNotes = normalizeText(process.env.QCLAW_DEV_UPDATE_NOTES)
+
+  return {
+    ok: true,
+    supported: true,
+    configured: false,
+    currentVersion: resolveCurrentAppVersion(),
+    availableVersion,
+    manualDownloadUrl: manualDownloadUrl || undefined,
+    releaseDate: releaseDate || undefined,
+    releaseNotes: releaseNotes || undefined,
+    feedUrl: currentStatus.feedUrl || resolveFeedUrl(),
+    status: 'available',
+    progressPercent: null,
+    downloaded: false,
+    message: `检测到 Qclaw 新版本 ${availableVersion}（测试注入）。`,
+  }
+}
+
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath)
@@ -417,6 +451,11 @@ function bindUpdaterEvents() {
 }
 
 async function ensureUpdaterAvailability(): Promise<QClawUpdateStatus> {
+  const injectedStatus = resolveInjectedUpdateStatus()
+  if (injectedStatus) {
+    return setStatus(injectedStatus)
+  }
+
   const state = await resolveUpdateConfigurationState()
   bindUpdaterEvents()
 

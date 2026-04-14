@@ -1,4 +1,5 @@
 export type AppState =
+  | 'startup-update'
   | 'welcome'
   | 'env-check'
   | 'setup'

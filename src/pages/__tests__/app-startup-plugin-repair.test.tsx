@@ -5,7 +5,7 @@ import appSource from '../../App.tsx?raw'
 describe('App startup plugin repair gating', () => {
   it('does not auto-start startup plugin repair while the env check gate is active', () => {
     expect(appSource).toMatch(
-      /useEffect\(\(\) => \{\s*if \(startupRepairAttemptedRef\.current\) return\s*if \(appState === 'welcome' \|\| appState === 'env-check'\) return/
+      /useEffect\(\(\) => \{\s*if \(startupRepairAttemptedRef\.current\) return\s*if \(appState === 'startup-update' \|\| appState === 'welcome' \|\| appState === 'env-check'\) return/
     )
   })
 

@@ -7,6 +7,7 @@ describe('canOpenExternalModelsPage', () => {
   })
 
   it('keeps tray routing closed for non-dashboard states', () => {
+    expect(canOpenExternalModelsPage('startup-update')).toBe(false)
     expect(canOpenExternalModelsPage('welcome')).toBe(false)
     expect(canOpenExternalModelsPage('env-check')).toBe(false)
     expect(canOpenExternalModelsPage('setup')).toBe(false)

@@ -1,7 +1,12 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Tooltip } from '@mantine/core'
 import logoSrc from '@/assets/logo.png'
 import tooltips from '@/constants/tooltips.json'
+import { shouldShowQClawNewVersionButton } from '@/shared/qclaw-update-visibility'
+import type { QClawUpdateStatus } from '@/shared/openclaw-phase4'
+
+const UPDATE_STATUS_REFRESH_MS = 30_000
 
 const NAV_ITEMS = [
   {
@@ -58,11 +63,57 @@ const NAV_ITEMS = [
 
 export default function MainLayout() {
   const location = useLocation()
+  const [qclawUpdateStatus, setQclawUpdateStatus] = useState<
+    Pick<QClawUpdateStatus, 'status' | 'availableVersion'> | null
+  >(null)
 
   const isActive = (to: string) => {
     if (to === '/') return location.pathname === '/'
     return location.pathname.startsWith(to)
   }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const syncQClawUpdateStatus = async () => {
+      try {
+        const status = await window.api.getQClawUpdateStatus()
+        if (cancelled) return
+        setQclawUpdateStatus({
+          status: status.status,
+          availableVersion: status.availableVersion,
+        })
+      } catch {
+        if (!cancelled) {
+          setQclawUpdateStatus(null)
+        }
+      }
+    }
+
+    const handleWindowFocus = () => {
+      void syncQClawUpdateStatus()
+    }
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void syncQClawUpdateStatus()
+      }
+    }
+
+    void syncQClawUpdateStatus()
+    const timer = window.setInterval(() => {
+      void syncQClawUpdateStatus()
+    }, UPDATE_STATUS_REFRESH_MS)
+
+    window.addEventListener('focus', handleWindowFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleWindowFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
 
   return (
     <div className="h-screen app-bg-primary app-text-primary flex flex-col">
@@ -105,21 +156,37 @@ export default function MainLayout() {
             ))}
           </div>
           <div className="mt-auto pt-2 border-t app-border">
-            <NavLink
-              to="/settings"
-              end={false}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm no-underline transition-colors ${
-                location.pathname.startsWith('/settings')
-                  ? 'bg-[var(--mantine-color-brand-light)] text-[var(--mantine-color-brand-light-color)]'
-                  : 'app-text-muted hover:app-text-secondary hover:app-bg-tertiary'
-              }`}
-            >
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              <span>设置</span>
-            </NavLink>
+            <div className="flex items-center gap-1.5">
+              <NavLink
+                to="/settings"
+                end={false}
+                className={`flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 rounded-lg text-sm no-underline transition-colors ${
+                  location.pathname.startsWith('/settings')
+                    ? 'bg-[var(--mantine-color-brand-light)] text-[var(--mantine-color-brand-light-color)]'
+                    : 'app-text-muted hover:app-text-secondary hover:app-bg-tertiary'
+                }`}
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="whitespace-nowrap">设置</span>
+              </NavLink>
+              {shouldShowQClawNewVersionButton(qclawUpdateStatus) && (
+                <button
+                  type="button"
+                  className="cursor-default flex-shrink-0 appearance-none rounded-md border-0 bg-[var(--mantine-color-brand-filled)] px-2.5 py-1.5 text-xs font-semibold leading-none text-white shadow-sm outline-none ring-0"
+                  aria-label="检测到 Qclaw 新版本"
+                  title={
+                    qclawUpdateStatus?.availableVersion
+                      ? `检测到 Qclaw 新版本 ${qclawUpdateStatus.availableVersion}`
+                      : '检测到 Qclaw 新版本'
+                  }
+                >
+                  新版本
+                </button>
+              )}
+            </div>
           </div>
         </nav>
 
