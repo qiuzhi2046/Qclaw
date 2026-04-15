@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildFeishuCreateBotConfirmationMessage,
   isFeishuCreateBotConfirmationPrompt,
+  shouldDisableFeishuCreateInstallerButton,
   shouldDisableFeishuInstallerManualInput,
   type FeishuInstallerPendingPrompt,
 } from '../feishu-installer-session'
@@ -36,6 +37,14 @@ describe('feishu installer prompt helpers', () => {
   it('blocks manual stdin input whenever a structured prompt is pending', () => {
     expect(shouldDisableFeishuInstallerManualInput(buildPrompt())).toBe(true)
     expect(shouldDisableFeishuInstallerManualInput(null)).toBe(false)
+  })
+
+  it('blocks create-bot action while an installer operation is already active', () => {
+    expect(shouldDisableFeishuCreateInstallerButton({ installerRunning: true })).toBe(true)
+    expect(shouldDisableFeishuCreateInstallerButton({ installerBusy: true })).toBe(true)
+    expect(shouldDisableFeishuCreateInstallerButton({ preparingManualBinding: true })).toBe(true)
+    expect(shouldDisableFeishuCreateInstallerButton({ finishingSetup: true })).toBe(true)
+    expect(shouldDisableFeishuCreateInstallerButton({})).toBe(false)
   })
 
   it('builds a user-facing confirmation message with the detected app id when available', () => {

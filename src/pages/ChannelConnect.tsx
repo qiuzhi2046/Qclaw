@@ -34,6 +34,7 @@ import {
 import {
   buildFeishuCreateBotConfirmationMessage,
   isFeishuCreateBotConfirmationPrompt,
+  shouldDisableFeishuCreateInstallerButton,
   shouldDisableFeishuInstallerManualInput,
 } from '../shared/feishu-installer-session'
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
@@ -519,6 +520,109 @@ export function canFinishFeishuCreateMode(
   installerExitedSuccessfully: boolean
 ): boolean {
   return hasRecoveredBotConfig && installerExitedSuccessfully
+}
+
+export interface FeishuInstallerFailureView {
+  title: string
+  message: string
+  actionLabel: string
+}
+
+function includesAnyPattern(text: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(text))
+}
+
+export function resolveFeishuInstallerFailureView(params: {
+  setupMode: 'create' | 'link'
+  installerRunning: boolean
+  installerExitCode: number | null
+  installerCanceled: boolean
+  installerOutput: string
+  hasRecoveredBotConfig: boolean
+}): FeishuInstallerFailureView | null {
+  if (params.setupMode !== 'create') return null
+  if (params.installerRunning || params.installerCanceled) return null
+
+  const output = String(params.installerOutput || '')
+  const hasExited = params.installerExitCode !== null
+  const exitedSuccessfully = params.installerExitCode === 0
+
+  if (!hasExited) return null
+  if (exitedSuccessfully && params.hasRecoveredBotConfig) return null
+
+  if (exitedSuccessfully) {
+    return {
+      title: '未检测到新机器人',
+      message: '飞书安装器已经结束，但 Qclaw 没有在配置里检测到新的 App ID。请重新生成二维码再扫码；如果只是复用已有机器人，请改用“关联已有机器人”。',
+      actionLabel: '重新生成二维码',
+    }
+  }
+
+  if (includesAnyPattern(output, [/expired_token/i, /Session expired/i, /会话过期/])) {
+    return {
+      title: '二维码已过期',
+      message: '本次扫码授权会话已经过期。请重新生成二维码，并在新二维码出现后尽快用飞书扫码完成授权。',
+      actionLabel: '重新生成二维码',
+    }
+  }
+
+  if (includesAnyPattern(output, [/access_denied/i, /User denied authorization/i, /用户拒绝授权/])) {
+    return {
+      title: '扫码授权已取消',
+      message: '飞书返回了拒绝授权结果。请重新生成二维码，扫码后确认授权创建机器人。',
+      actionLabel: '重新生成二维码',
+    }
+  }
+
+  if (includesAnyPattern(output, [/npx 命令不可用/i, /\bnpx\b.*not.*available/i, /\bnpx\b.*not.*found/i])) {
+    return {
+      title: '无法启动飞书安装器',
+      message: '当前环境没有可用的 npx。请先修复 Node.js/npm 环境，再重新生成飞书二维码。',
+      actionLabel: '修复后重试',
+    }
+  }
+
+  if (includesAnyPattern(output, [/OpenClaw is not installed/i, /OpenClaw.*not.*PATH/i, /OpenClaw.*配置读取失败/i, /无法安全同步飞书官方插件配置/])) {
+    return {
+      title: 'OpenClaw 环境不可用',
+      message: '飞书安装器无法读取或调用 OpenClaw。请先确认 OpenClaw 已正确安装并可被 Qclaw 识别，然后重新生成二维码。',
+      actionLabel: '修复后重试',
+    }
+  }
+
+  if (
+    includesAnyPattern(output, [
+      /ENOTFOUND/i,
+      /ECONNRESET/i,
+      /ETIMEDOUT/i,
+      /EAI_AGAIN/i,
+      /network/i,
+      /Failed to install plugin from npm/i,
+      /npm ERR/i,
+      /无法连接/i,
+      /网络/,
+    ])
+  ) {
+    return {
+      title: '网络或 npm 环境异常',
+      message: '飞书安装器在下载插件或连接飞书开放平台时失败。请检查网络、代理和 npm registry 后重新生成二维码。',
+      actionLabel: '检查后重试',
+    }
+  }
+
+  if (includesAnyPattern(output, [/Failed to get results/i, /获取机器人配置结果失败/i])) {
+    return {
+      title: '没有拿到扫码结果',
+      message: '安装器没有拿到飞书返回的机器人配置。请重新生成二维码并完成扫码；如果仍失败，再检查飞书开放平台或网络状态。',
+      actionLabel: '重新生成二维码',
+    }
+  }
+
+  return {
+    title: '飞书安装器未完成',
+    message: '本次新建流程没有正常完成。请查看下方安装日志中的具体错误，处理后重新生成二维码。',
+    actionLabel: '重新生成二维码',
+  }
 }
 
 export function shouldAutoFinishFeishuCreateMode(params: {
@@ -1445,6 +1549,20 @@ export default function ChannelConnect({
           feishuCreateModeInstallerExitedSuccessfully
         )
       : ''
+  const feishuInstallerFailureView = resolveFeishuInstallerFailureView({
+    setupMode: feishuBotSetupMode,
+    installerRunning: feishuInstallerRunning,
+    installerExitCode: feishuInstallerExitCode,
+    installerCanceled: feishuInstallerCanceled,
+    installerOutput: feishuInstallerOutput,
+    hasRecoveredBotConfig: feishuCreateModeRecovered,
+  })
+  const feishuCreateInstallerButtonDisabled = shouldDisableFeishuCreateInstallerButton({
+    installerRunning: feishuInstallerRunning,
+    installerBusy: feishuInstallerBusy,
+    preparingManualBinding: preparingFeishuManualBinding,
+    finishingSetup: finishingFeishuSetup,
+  })
   const showInlineFeishuManualError =
     status === 'form' &&
     selectedChannel?.id === 'feishu' &&
@@ -2844,7 +2962,7 @@ export default function ChannelConnect({
                       size="xs"
                       onClick={() => void startFeishuInstallerFlow('create')}
                       loading={feishuInstallerBusy && feishuBotSetupMode === 'create'}
-                      disabled={preparingFeishuManualBinding || finishingFeishuSetup}
+                      disabled={feishuCreateInstallerButtonDisabled}
                     >
                       新建机器人
                     </Button>
@@ -2964,6 +3082,26 @@ export default function ChannelConnect({
                       </div>
                     </div>
                   ) : null}
+
+                  {feishuInstallerFailureView && (
+                    <Alert color="red" variant="light" title={feishuInstallerFailureView.title}>
+                      <div className="space-y-3">
+                        <Text size="xs">
+                          {feishuInstallerFailureView.message}
+                        </Text>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="red"
+                          onClick={() => void startFeishuInstallerFlow('create')}
+                          loading={feishuInstallerBusy && feishuBotSetupMode === 'create'}
+                          disabled={feishuCreateInstallerButtonDisabled}
+                        >
+                          {feishuInstallerFailureView.actionLabel}
+                        </Button>
+                      </div>
+                    </Alert>
+                  )}
 
                   {(feishuInstallerRunning || feishuInstallerOutput.trim() || feishuInstallerExitCode !== null) && (
                     <Card withBorder radius="md" padding="md" className="app-bg-secondary">

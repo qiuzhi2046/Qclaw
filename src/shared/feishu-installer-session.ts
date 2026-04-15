@@ -29,6 +29,20 @@ export function shouldDisableFeishuInstallerManualInput(
   return Boolean(prompt)
 }
 
+export function shouldDisableFeishuCreateInstallerButton(params: {
+  installerRunning?: boolean
+  installerBusy?: boolean
+  preparingManualBinding?: boolean
+  finishingSetup?: boolean
+}): boolean {
+  return Boolean(
+    params.installerRunning
+    || params.installerBusy
+    || params.preparingManualBinding
+    || params.finishingSetup
+  )
+}
+
 export function buildFeishuCreateBotConfirmationMessage(
   prompt: FeishuInstallerPendingPrompt | null | undefined
 ): string {

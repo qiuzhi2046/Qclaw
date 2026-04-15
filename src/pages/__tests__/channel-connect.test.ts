@@ -23,6 +23,7 @@ import {
   resolveFeishuManualBindingPreparationCopy,
   resolveFeishuPairingTarget,
   resolveFeishuCreateModeFinishStrategy,
+  resolveFeishuInstallerFailureView,
   isSafeAlreadyInstalledManagedPluginInstallError,
   resolveManagedPluginInstallPreflight,
   resolveManagedPluginInstallStrategy,
@@ -952,6 +953,64 @@ describe('canFinishFeishuCreateMode', () => {
     expect(canFinishFeishuCreateMode(false, false)).toBe(false)
     expect(canFinishFeishuCreateMode(true, false)).toBe(false)
     expect(canFinishFeishuCreateMode(true, true)).toBe(true)
+  })
+})
+
+describe('resolveFeishuInstallerFailureView', () => {
+  const base = {
+    setupMode: 'create' as const,
+    installerRunning: false,
+    installerExitCode: 1,
+    installerCanceled: false,
+    installerOutput: '',
+    hasRecoveredBotConfig: false,
+  }
+
+  it('does not show failure while running, canceled, or already recovered', () => {
+    expect(resolveFeishuInstallerFailureView({ ...base, installerRunning: true })).toBeNull()
+    expect(resolveFeishuInstallerFailureView({ ...base, installerCanceled: true })).toBeNull()
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerExitCode: 0,
+      hasRecoveredBotConfig: true,
+    })).toBeNull()
+  })
+
+  it('explains QR expiration and authorization denial with retry actions', () => {
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerOutput: 'Session expired. Please try again. (会话过期，请重试)',
+    })?.title).toBe('二维码已过期')
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerOutput: 'User denied authorization. (用户拒绝授权)',
+    })?.title).toBe('扫码授权已取消')
+  })
+
+  it('surfaces environment failures before falling back to the generic installer failure', () => {
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerOutput: 'npx 命令不可用，无法启动飞书官方安装器。',
+    })?.title).toBe('无法启动飞书安装器')
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerOutput: 'Error: OpenClaw is not installed or not in PATH.',
+    })?.title).toBe('OpenClaw 环境不可用')
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerOutput: 'npm ERR! network request to registry failed with ETIMEDOUT',
+    })?.title).toBe('网络或 npm 环境异常')
+    expect(resolveFeishuInstallerFailureView(base)?.title).toBe('飞书安装器未完成')
+  })
+
+  it('handles clean installer exit without a recovered new bot as an actionable retry state', () => {
+    expect(resolveFeishuInstallerFailureView({
+      ...base,
+      installerExitCode: 0,
+    })).toMatchObject({
+      title: '未检测到新机器人',
+      actionLabel: '重新生成二维码',
+    })
   })
 })
 

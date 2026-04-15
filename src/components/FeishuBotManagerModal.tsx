@@ -21,6 +21,7 @@ import {
 import {
   buildFeishuCreateBotConfirmationMessage,
   isFeishuCreateBotConfirmationPrompt,
+  shouldDisableFeishuCreateInstallerButton,
   shouldDisableFeishuInstallerManualInput,
 } from '../shared/feishu-installer-session'
 
@@ -115,6 +116,10 @@ export default function FeishuBotManagerModal({
   const feishuInstallerHasLiveQr =
     feishuInstallerAsciiQr.length > 0 || feishuInstallerQrUrl !== FEISHU_OFFICIAL_GUIDE_URL
   const feishuInstallerManualInputBlocked = shouldDisableFeishuInstallerManualInput(feishuInstallerPendingPrompt)
+  const feishuCreateInstallerButtonDisabled = shouldDisableFeishuCreateInstallerButton({
+    installerRunning: feishuInstallerRunning,
+    installerBusy: feishuInstallerBusy,
+  })
 
   const applyFeishuInstallerSnapshot = useCallback(
     (snapshot: Awaited<ReturnType<typeof window.api.getFeishuInstallerState>>) => {
@@ -513,6 +518,7 @@ export default function FeishuBotManagerModal({
             size="xs"
             onClick={() => void startFeishuInstallerFlow('create')}
             loading={feishuInstallerBusy && feishuBotSetupMode === 'create'}
+            disabled={feishuCreateInstallerButtonDisabled}
           >
             新建机器人
           </Button>
