@@ -1497,7 +1497,7 @@ export async function executeAuthRoute(
     }
 
     if (result.ok && loginProviderId === 'minimax-portal') {
-      void repairMiniMaxOauthProfiles().catch(() => null)
+      await repairMiniMaxOauthProfiles().catch(() => null)
     }
 
     return fromCommand(route.kind, attemptedCommands, result, {

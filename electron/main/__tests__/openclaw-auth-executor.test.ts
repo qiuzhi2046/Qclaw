@@ -296,7 +296,7 @@ describe('executeAuthRoute', () => {
     )
   })
 
-  it('fans out minimax oauth auth after models auth login succeeds', async () => {
+  it('waits for minimax oauth auth fanout after models auth login succeeds', async () => {
     const runCommand = vi.fn(async () => ({ ok: true, stdout: 'enabled', stderr: '', code: 0 }))
     const runStreamingCommand = vi.fn(async (_args: string[], options?: Record<string, any>) => {
       options?.onStdout?.('Open: https://api.minimax.io/oauth/authorize')
@@ -313,8 +313,23 @@ describe('executeAuthRoute', () => {
         },
       },
     }))
+    let releaseRepair = () => {}
+    repairAgentAuthProfilesFromOtherAgentStoresMock.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseRepair = resolve
+      })
+      return {
+        ok: true,
+        repaired: true,
+        updatedAuthStorePaths: ['/tmp/openclaw/agents/main/agent/auth-profiles.json'],
+        importedProfileIds: ['minimax-portal:default'],
+        importedProviders: ['minimax-portal'],
+        sourceAuthStorePaths: ['/tmp/openclaw/agents/backup/agent/auth-profiles.json'],
+      }
+    })
 
-    const result = await executeAuthRoute(
+    let settled = false
+    const resultPromise = executeAuthRoute(
       {
         method: minimaxMethod,
         providerId: 'minimax',
@@ -323,13 +338,23 @@ describe('executeAuthRoute', () => {
       },
       { runCommand, runStreamingCommand, readConfig, writeConfig: vi.fn(async () => undefined) } as any
     )
+    void resultPromise.then(() => {
+      settled = true
+    }, () => {
+      settled = true
+    })
 
-    expect(result.ok).toBe(true)
     await vi.waitFor(() => {
       expect(repairAgentAuthProfilesFromOtherAgentStoresMock).toHaveBeenCalledWith({
         providerIds: ['minimax-portal'],
       })
     })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    releaseRepair()
+
+    const result = await resultPromise
+    expect(result.ok).toBe(true)
   })
 
   it('restarts the gateway and retries plugin-backed login when the provider is not yet loaded', async () => {

@@ -1084,18 +1084,24 @@ function isMiniMaxAuthRepairProvider(providerId: unknown): boolean {
   return normalized === 'minimax' || normalized === 'minimax-portal'
 }
 
-function resolveAuthRepairProviderIds(
+function resolveAuthRepairProviderIds(params: {
   modelStatus?: ModelConfigCommandResult<Record<string, any>> | null
-): string[] {
+  targetModel?: string
+}): string[] {
   const unique = new Set<string>()
-  const missingProvidersInUse = Array.isArray(modelStatus?.data?.auth?.missingProvidersInUse)
-    ? modelStatus?.data?.auth?.missingProvidersInUse
+  const missingProvidersInUse = Array.isArray(params.modelStatus?.data?.auth?.missingProvidersInUse)
+    ? params.modelStatus?.data?.auth?.missingProvidersInUse
     : []
 
   for (const providerId of missingProvidersInUse) {
     for (const candidate of resolveScopedAuthRepairProviderCandidates(providerId)) {
       unique.add(candidate)
     }
+  }
+
+  const targetProviderId = extractProviderIdFromModelRef(params.targetModel)
+  for (const candidate of resolveScopedAuthRepairProviderCandidates(targetProviderId)) {
+    unique.add(candidate)
   }
 
   return Array.from(unique)
@@ -3369,7 +3375,10 @@ export async function sendChatMessage(
     })
   }
 
-  const authRepairProviderIds = resolveAuthRepairProviderIds(modelStatus)
+  const authRepairProviderIds = resolveAuthRepairProviderIds({
+    modelStatus,
+    targetModel,
+  })
   const agentScopedAuthRepairProviderIds = authRepairProviderIds.filter((providerId) =>
     isMiniMaxAuthRepairProvider(providerId)
   )

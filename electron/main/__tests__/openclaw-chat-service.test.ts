@@ -954,6 +954,109 @@ describe('openclaw chat service', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('uses the target minimax model provider as an auth repair fallback before sending', async () => {
+    const discoverOpenClaw = createDiscovery('fingerprint-repair-target-model-auth-before-send')
+    const repairAgentAuthProfiles = vi.fn(async () => ({
+      ok: true,
+      repaired: true,
+      updatedAuthStorePaths: ['/Users/test/.openclaw/agents/channel-bot/agent/auth-profiles.json'],
+      importedProfileIds: ['minimax-portal:default'],
+      importedProviders: ['minimax-portal'],
+      sourceAuthStorePaths: ['/Users/test/.openclaw/agents/channel-default/agent/auth-profiles.json'],
+    }))
+    const repairMainAuthProfiles = vi.fn(async () => ({
+      ok: true,
+      repaired: false,
+      importedProfileIds: [],
+      importedProviders: [],
+      sourceAuthStorePaths: [],
+    }))
+    const transportRun = vi.fn(async () => ({
+      ok: true,
+      stdout: JSON.stringify({
+        response: {
+          text: '目标模型兜底修复后可继续发送',
+        },
+        model: 'minimax-portal/MiniMax-M2.5',
+      }),
+      stderr: '',
+      code: 0,
+      streamedText: '目标模型兜底修复后可继续发送',
+      streamedModel: 'minimax-portal/MiniMax-M2.5',
+    }))
+
+    await appendLocalChatMessages({
+      scopeKey: 'fingerprint-repair-target-model-auth-before-send',
+      sessionId: 'target-model-owned-session',
+      agentId: 'channel-bot',
+      model: 'minimax-portal/MiniMax-M2.5',
+      transportSessionId: 'transport-target-model-owned-session',
+      messages: [
+        {
+          id: 'msg-existing-target-provider',
+          role: 'user',
+          text: '旧消息',
+          createdAt: 1_000,
+          status: 'sent',
+        },
+      ],
+      updatedAt: 1_000,
+    })
+
+    const result = await sendChatMessage(
+      {
+        sessionId: 'target-model-owned-session',
+        text: '继续当前会话',
+      },
+      {
+        discoverOpenClaw,
+        readModelStatus: async () =>
+          ({
+            ok: true,
+            action: 'status',
+            command: ['models', 'status', '--json'],
+            stdout: '',
+            stderr: '',
+            code: 0,
+            data: {
+              defaultModel: 'minimax-portal/MiniMax-M2.5',
+              allowed: ['minimax-portal/MiniMax-M2.5'],
+              auth: {
+                oauth: {
+                  providers: [{ provider: 'minimax-portal', status: 'ok' }],
+                },
+              },
+            },
+          }) as any,
+        repairAgentAuthProfiles: repairAgentAuthProfiles as any,
+        repairMainAuthProfiles: repairMainAuthProfiles as any,
+        ensureGateway: async () => ({
+          ok: true,
+          stdout: '',
+          stderr: '',
+          code: 0,
+          running: true,
+        }),
+        runCommand: async () => ({
+          ok: true,
+          stdout: JSON.stringify({ sessions: [] }),
+          stderr: '',
+          code: 0,
+        }),
+        chatTransport: {
+          run: transportRun as any,
+        },
+      }
+    )
+
+    expect(repairAgentAuthProfiles).toHaveBeenCalledWith({
+      providerIds: ['minimax', 'minimax-portal'],
+      agentId: 'channel-bot',
+    })
+    expect(repairMainAuthProfiles).not.toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+  })
+
   it('keeps non-minimax auth repair on the main store and does not switch to agent repair', async () => {
     const discoverOpenClaw = createDiscovery('fingerprint-repair-openai-provider-only-before-send')
     const repairAgentAuthProfiles = vi.fn(async () => ({
