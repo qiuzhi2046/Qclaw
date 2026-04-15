@@ -3,6 +3,8 @@ import { UI_RUNTIME_DEFAULTS } from '../../src/shared/runtime-policies'
 import { classifyGatewayRuntimeState } from '../../src/shared/gateway-runtime-diagnostics'
 import type { CliResult, GatewayStatusCheckResult } from './cli'
 import {
+  gatewayHealth,
+  gatewayForceRestart,
   gatewayRestart,
   gatewayStart,
   gatewayStatus,
@@ -127,7 +129,7 @@ async function waitForGatewayHealthyAfterReload(
   const readiness = await pollWithBackoff({
     policy: UI_RUNTIME_DEFAULTS.gatewayReadiness.poll,
     execute: async () => {
-      lastStatus = await gatewayStatus().catch(() => ({
+      const status = await gatewayStatus().catch((): GatewayStatusCheckResult => ({
         running: false,
         raw: '',
         stderr: '',
@@ -135,6 +137,19 @@ async function waitForGatewayHealthyAfterReload(
         stateCode: 'gateway_not_running',
         summary: '网关重载后尚未恢复可用',
       }))
+      if (status.running) {
+        lastStatus = status
+        return lastStatus
+      }
+
+      const health = await gatewayHealth().catch(() => null)
+      lastStatus = health?.running
+        ? {
+            ...health,
+            rpcReachable: status.rpcReachable,
+            summary: health.summary || status.summary || '网关已确认可用',
+          }
+        : status
       return lastStatus
     },
     isSuccess: (value) => Boolean(value.running),
@@ -222,6 +237,17 @@ export async function startGatewayLifecycle(reason = 'start'): Promise<CliResult
 
 export async function restartGatewayLifecycle(reason = 'restart'): Promise<CliResult> {
   return runSharedLifecycleMutation('restart', 'restart', reason, () => gatewayRestart())
+}
+
+export async function forceRestartGatewayLifecycle(reason = 'force-restart'): Promise<GatewayReloadResult> {
+  return runSharedLifecycleMutation('force-restart', 'restart', reason, async () => {
+    const restartResult = await gatewayForceRestart()
+    if (!restartResult.ok) {
+      return restartResult
+    }
+
+    return waitForGatewayHealthyAfterReload(restartResult)
+  })
 }
 
 export async function reloadGatewayForConfigChange(

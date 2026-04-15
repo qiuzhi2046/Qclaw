@@ -286,6 +286,7 @@ interface FeishuOfficialPluginState {
   legacyPluginIdsPresent: string[]
   configChanged: boolean
   normalizedConfig: Record<string, any>
+  configAvailable: boolean
 }
 
 interface EnsureFeishuOfficialPluginReadyResult extends CliResult {
@@ -1704,7 +1705,7 @@ interface ElectronApi {
   gatewayHealth: () => Promise<GatewayHealthCheckResult>
   getOpenClawRuntimeReconcileState: () => Promise<OpenClawRuntimeReconcileStore>
   requestGatewayServiceElevation: () => Promise<{ ok: boolean; message: string }>
-  gatewayForceRestart: () => Promise<CliResult>
+  gatewayForceRestart: () => Promise<GatewayReloadResult>
   reloadGatewayAfterModelChange: () => Promise<GatewayReloadResult>
   reloadGatewayAfterChannelChange: () => Promise<GatewayReloadResult>
   reloadGatewayManual: () => Promise<GatewayReloadResult>

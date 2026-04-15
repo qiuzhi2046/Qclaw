@@ -143,7 +143,37 @@ describe('gateway runtime owner', () => {
     expect(result.ok).toBe(true)
     expect(result.action).toBe('reload')
     expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledTimes(1)
+    expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('channel-change', {
+      preferEnsureWhenNotRunning: true,
+      ensureOptions: {
+        skipRuntimePrecheck: undefined,
+      },
+    })
     expect(ensureGatewayReadyMock).not.toHaveBeenCalled()
+  })
+
+  it('chooses ensure when channel config changes and the gateway status precheck says it is not running', async () => {
+    gatewayStatusMock.mockResolvedValueOnce({
+      running: false,
+      summary: 'gateway stopped',
+      stateCode: 'gateway_not_running',
+    })
+
+    const result = await reconcileGatewayRuntimeMutation({
+      kind: 'channel-change',
+      reason: 'channel-change',
+      preferEnsureWhenNotRunning: true,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.action).toBe('ensure')
+    expect(ensureGatewayReadyMock).toHaveBeenCalledWith(
+      {
+        skipRuntimePrecheck: undefined,
+      },
+      'channel-change'
+    )
+    expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
   })
 
   it('chooses ensure when model config changes while gateway is not running', async () => {

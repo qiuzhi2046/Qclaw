@@ -275,6 +275,7 @@ export async function reconcileGatewayRuntimeMutation(
   const preferEnsureWhenNotRunning =
     request.kind.startsWith('auth-') || request.preferEnsureWhenNotRunning !== false
   const gatewayStatusResult = await readGatewayStatusForMutation(options.readGatewayStatus)
+  const requiresGatewayReload = request.kind === 'model-change' || request.kind === 'channel-change'
 
   if (!gatewayStatusResult.running && preferEnsureWhenNotRunning) {
     const ensured = await ensureGatewayRunning({
@@ -288,7 +289,7 @@ export async function reconcileGatewayRuntimeMutation(
     )
   }
 
-  if (request.kind === 'model-change' || request.kind === 'channel-change') {
+  if (requiresGatewayReload) {
     const reloadResult = await reloadGateway(request.reason, {
       preferEnsureWhenNotRunning: request.preferEnsureWhenNotRunning !== false,
       ensureOptions: {

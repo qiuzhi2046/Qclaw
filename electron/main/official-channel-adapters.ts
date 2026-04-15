@@ -19,6 +19,7 @@ interface FeishuOfficialRepairResultLike {
     installedOnDisk: boolean
     officialPluginConfigured: boolean
     configChanged: boolean
+    configAvailable?: boolean
   }
   stdout: string
   stderr: string
@@ -244,6 +245,14 @@ async function getFeishuOfficialChannelStatus(): Promise<OfficialChannelStatusVi
           message: '检测到飞书官方插件配置仍待同步，当前 status 只确认到安装 / 注册层级',
         }]
       : []),
+    ...(state.configAvailable === false
+      ? [{
+          source: 'config' as const,
+          channelId: 'feishu',
+          pluginId: state.pluginId,
+          message: '当前无法读取 OpenClaw 配置，已跳过飞书官方插件配置同步',
+        }]
+      : []),
     {
       source: 'status',
       channelId: 'feishu',
@@ -280,6 +289,8 @@ async function getFeishuOfficialChannelStatus(): Promise<OfficialChannelStatusVi
     pluginId: state.pluginId,
     summary: !state.installedOnDisk
       ? '飞书官方插件尚未安装。'
+      : state.configAvailable === false
+        ? '飞书官方插件已安装，但当前配置暂时不可读取；loaded / ready 仍待上游证据。'
       : state.configChanged
         ? '飞书官方插件已安装，但配置仍待同步；loaded / ready 仍待上游证据。'
         : registered.state === 'verified'
@@ -301,6 +312,13 @@ function mapFeishuRepairResult(result: FeishuOfficialRepairResultLike): Official
       channelId: 'feishu',
       pluginId: result.state.pluginId,
       message: '已安装飞书官方插件，并完成必要配置归一化',
+    })
+  } else if (!result.ok && result.state.configAvailable === false) {
+    evidence.push({
+      source: 'config',
+      channelId: 'feishu',
+      pluginId: result.state.pluginId,
+      message: '当前无法读取 OpenClaw 配置，已停止飞书官方插件配置同步',
     })
   } else {
     evidence.push({

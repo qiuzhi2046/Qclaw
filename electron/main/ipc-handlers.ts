@@ -19,7 +19,6 @@ import {
   uninstallAll,
   runOnboard,
   gatewayHealth,
-  gatewayForceRestart,
   getStatus,
   readConfig,
   readEnvFile,
@@ -141,6 +140,7 @@ import { checkCombinedUpdate, runCombinedUpdate } from './combined-update-orches
 import { wecomQrGenerate, wecomQrCheckResult } from './wecom-qr'
 import {
   ensureGatewayReady,
+  forceRestartGatewayLifecycle,
   reloadGatewayForConfigChange,
 } from './gateway-lifecycle-controller'
 import { reconcileGatewayRuntimeMutation } from './gateway-runtime-owner'
@@ -709,7 +709,7 @@ export function registerIpcHandlers() {
   // Gateway
   ipcMain.handle('gateway:health', () => gatewayHealth())
   ipcMain.handle('gateway:runtime-reconcile:state:get', () => readOpenClawRuntimeReconcileStore())
-  ipcMain.handle('gateway:force-restart', () => gatewayForceRestart())
+  ipcMain.handle('gateway:force-restart', () => forceRestartGatewayLifecycle('manual-force-restart'))
   ipcMain.handle('gateway:service:elevate', () =>
     withManagedOperationLock('gateway-service-elevate', async () => {
     await appendEnvCheckDiagnostic('ipc-gateway-service-elevate-requested', {})

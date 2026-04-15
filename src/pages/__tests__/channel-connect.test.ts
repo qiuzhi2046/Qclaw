@@ -8,6 +8,8 @@ import {
   canFinalizeWeixinSetup,
   canPrepareFeishuManualBindingWithoutInstall,
   canFinishFeishuCreateMode,
+  canUseFeishuManualBindingOpenClawHotReload,
+  clearFeishuManualCredentialInput,
   captureFeishuBotConfigSnapshot,
   ensureGatewayReadyForChannelConnect,
   hasRecoveredFeishuCreateMode,
@@ -25,7 +27,10 @@ import {
   resolveManagedPluginInstallStrategy,
   restoreCapturedFeishuBotConfig,
   shouldAllowFeishuLinkPairingAfterGatewayFailure,
+  shouldAutoFinishFeishuCreateMode,
   shouldValidateFeishuManualCredentials,
+  isFeishuManualBindingOpenClawHotReloadPath,
+  upsertFeishuManualBindingConfig,
 } from '../ChannelConnect'
 import { getChannelDefinition } from '../../lib/openclaw-channel-registry'
 describe('ChannelConnect source copy cleanup', () => {
@@ -530,7 +535,7 @@ describe('ensureGatewayReadyForChannelConnect', () => {
 })
 
 describe('shouldAllowFeishuLinkPairingAfterGatewayFailure', () => {
-  it('allows link mode to continue to pairing after a retriable websocket_1006 failure', () => {
+  it('allows link mode to continue to pairing after transient gateway readiness failures', () => {
     expect(
       shouldAllowFeishuLinkPairingAfterGatewayFailure({
         setupMode: 'link',
@@ -539,6 +544,24 @@ describe('shouldAllowFeishuLinkPairingAfterGatewayFailure', () => {
           stateCode: 'websocket_1006',
           safeToRetry: true,
         },
+      })
+    ).toBe(true)
+
+    expect(
+      shouldAllowFeishuLinkPairingAfterGatewayFailure({
+        setupMode: 'link',
+        pairingTarget: { accountId: 'default' },
+        gatewayFailure: {
+          stateCode: 'gateway_not_running',
+        },
+      })
+    ).toBe(true)
+
+    expect(
+      shouldAllowFeishuLinkPairingAfterGatewayFailure({
+        setupMode: 'link',
+        pairingTarget: { accountId: 'default' },
+        gatewayFailure: {},
       })
     ).toBe(true)
   })
@@ -565,6 +588,18 @@ describe('shouldAllowFeishuLinkPairingAfterGatewayFailure', () => {
         },
       })
     ).toBe(false)
+  })
+
+  it('keeps hard runtime failures on the manual binding failure path', () => {
+    for (const stateCode of ['config_invalid', 'plugin_load_failure', 'auth_missing']) {
+      expect(
+        shouldAllowFeishuLinkPairingAfterGatewayFailure({
+          setupMode: 'link',
+          pairingTarget: { accountId: 'default' },
+          gatewayFailure: { stateCode },
+        })
+      ).toBe(false)
+    }
   })
 })
 
@@ -918,11 +953,11 @@ describe('resolveFeishuCreateModeRecoveryNotice', () => {
   it('asks the user to wait while the installer is still finishing its own cleanup', () => {
     expect(resolveFeishuCreateModeRecoveryNotice(false, true, false)).toBe('')
     expect(resolveFeishuCreateModeRecoveryNotice(true, true, false)).toContain('等待飞书安装器完成收尾')
-    expect(resolveFeishuCreateModeRecoveryNotice(true, true, false)).toContain('安装器退出后')
+    expect(resolveFeishuCreateModeRecoveryNotice(true, true, false)).toContain('安装器退出后会自动完成配置')
   })
 
-  it('unlocks completion messaging only after the installer exited successfully', () => {
-    expect(resolveFeishuCreateModeRecoveryNotice(true, false, true)).toContain('现在可以点击“完成配置”')
+  it('switches to automatic completion messaging only after the installer exited successfully', () => {
+    expect(resolveFeishuCreateModeRecoveryNotice(true, false, true)).toContain('正在自动完成配置')
   })
 
   it('keeps completion locked when the installer exited abnormally', () => {
@@ -962,6 +997,88 @@ describe('hasFeishuManualCredentialInput', () => {
   })
 })
 
+describe('clearFeishuManualCredentialInput', () => {
+  it('removes hidden manual credentials while preserving unrelated form fields', () => {
+    expect(
+      clearFeishuManualCredentialInput({
+        appId: 'cli_test',
+        appSecret: 'secret',
+        name: '机器人',
+      })
+    ).toEqual({ name: '机器人' })
+  })
+})
+
+describe('upsertFeishuManualBindingConfig', () => {
+  it('reuses and updates an existing default bot with the same App ID', () => {
+    const result = upsertFeishuManualBindingConfig(
+      {
+        channels: {
+          feishu: {
+            enabled: false,
+            name: '旧机器人',
+            appId: 'cli_existing',
+            appSecret: 'old-secret',
+          },
+        },
+      },
+      {
+        name: '新机器人',
+        appId: 'cli_existing',
+        appSecret: 'new-secret',
+      }
+    )
+
+    expect(result.pairingTarget).toEqual({
+      accountId: 'default',
+      accountName: '新机器人',
+    })
+    expect(result.nextConfig.channels.feishu).toMatchObject({
+      enabled: true,
+      name: '新机器人',
+      appId: 'cli_existing',
+      appSecret: 'new-secret',
+    })
+  })
+
+  it('reuses and updates an existing account bot instead of adding a duplicate', () => {
+    const result = upsertFeishuManualBindingConfig(
+      {
+        channels: {
+          feishu: {
+            enabled: true,
+            appId: 'cli_default',
+            appSecret: 'default-secret',
+            accounts: {
+              support: {
+                enabled: false,
+                name: '支持机器人',
+                appId: 'cli_support',
+                appSecret: 'old-secret',
+              },
+            },
+          },
+        },
+      },
+      {
+        appId: 'cli_support',
+        appSecret: 'new-secret',
+      }
+    )
+
+    expect(result.pairingTarget).toEqual({
+      accountId: 'support',
+      accountName: '支持机器人',
+    })
+    expect(Object.keys(result.nextConfig.channels.feishu.accounts)).toEqual(['support'])
+    expect(result.nextConfig.channels.feishu.accounts.support).toMatchObject({
+      enabled: true,
+      appId: 'cli_support',
+      appSecret: 'new-secret',
+    })
+  })
+})
+
 describe('resolveFeishuCreateModeFinishStrategy', () => {
   it('prefers manual credentials over existing bot config when the user typed new values', () => {
     expect(resolveFeishuCreateModeFinishStrategy(1, true, true)).toBe('manual')
@@ -983,6 +1100,62 @@ describe('shouldValidateFeishuManualCredentials', () => {
     expect(shouldValidateFeishuManualCredentials('link', false, true)).toBe(false)
     expect(shouldValidateFeishuManualCredentials('create', true, true)).toBe(false)
     expect(shouldValidateFeishuManualCredentials('link', true, false)).toBe(false)
+  })
+})
+
+describe('shouldAutoFinishFeishuCreateMode', () => {
+  it('allows auto finish only for ready Feishu create-mode setup', () => {
+    expect(
+      shouldAutoFinishFeishuCreateMode({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        canFinish: true,
+        finishing: false,
+        finishStrategy: 'existing',
+      })
+    ).toBe(true)
+  })
+
+  it('blocks auto finish while manual create-mode input is incomplete', () => {
+    expect(
+      shouldAutoFinishFeishuCreateMode({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        canFinish: true,
+        finishing: false,
+        finishStrategy: 'invalid-manual',
+      })
+    ).toBe(false)
+  })
+
+  it('blocks auto finish outside create mode or while another finish is in progress', () => {
+    expect(
+      shouldAutoFinishFeishuCreateMode({
+        selectedChannelId: 'feishu',
+        setupMode: 'link',
+        canFinish: true,
+        finishing: false,
+        finishStrategy: 'existing',
+      })
+    ).toBe(false)
+    expect(
+      shouldAutoFinishFeishuCreateMode({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        canFinish: true,
+        finishing: true,
+        finishStrategy: 'existing',
+      })
+    ).toBe(false)
+    expect(
+      shouldAutoFinishFeishuCreateMode({
+        selectedChannelId: 'dingtalk',
+        setupMode: 'create',
+        canFinish: true,
+        finishing: false,
+        finishStrategy: 'existing',
+      })
+    ).toBe(false)
   })
 })
 
@@ -1009,6 +1182,171 @@ describe('canPrepareFeishuManualBindingWithoutInstall', () => {
         installedOnDisk: false,
         officialPluginConfigured: true,
         configChanged: true,
+      })
+    ).toBe(false)
+
+    expect(
+      canPrepareFeishuManualBindingWithoutInstall({
+        installedOnDisk: true,
+        officialPluginConfigured: false,
+        configChanged: true,
+        configAvailable: false,
+      })
+    ).toBe(false)
+  })
+})
+
+describe('isFeishuManualBindingOpenClawHotReloadPath', () => {
+  it('matches OpenClaw hot/noop config reload paths used by Feishu manual binding', () => {
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.channels.feishu.accounts.support.appSecret')).toBe(true)
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.agents.list[0].workspace')).toBe(true)
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.bindings[0].match.accountId')).toBe(true)
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.session.dmScope')).toBe(true)
+  })
+
+  it('rejects paths that OpenClaw treats as full gateway restart or unknown runtime changes', () => {
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.plugins.allow[0]')).toBe(false)
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.gateway.port')).toBe(false)
+    expect(isFeishuManualBindingOpenClawHotReloadPath('$.channels.weixin.enabled')).toBe(false)
+  })
+})
+
+describe('canUseFeishuManualBindingOpenClawHotReload', () => {
+  const pluginReady = {
+    installedOnDisk: true,
+    officialPluginConfigured: true,
+    configChanged: false,
+    configAvailable: true,
+  }
+
+  it('allows Feishu link-mode writes that OpenClaw can hot-apply while the gateway is already running', () => {
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'support',
+        pluginState: pluginReady,
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: [
+            '$.channels.feishu.accounts.support.appSecret',
+            '$.agents.list[0].workspace',
+            '$.bindings[0].match.accountId',
+            '$.session.dmScope',
+          ],
+        },
+        nextConfig: {},
+      })
+    ).toBe(true)
+  })
+
+  it('allows no-op finish writes only when the existing gateway and plugin state are ready', () => {
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'default',
+        pluginState: pluginReady,
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: false,
+          changedJsonPaths: [],
+        },
+        nextConfig: {},
+      })
+    ).toBe(true)
+  })
+
+  it('falls back to the existing gateway reload path when hot reload preconditions are not met', () => {
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'create',
+        targetAccountId: 'support',
+        pluginState: pluginReady,
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: ['$.channels.feishu.accounts.support.appSecret'],
+        },
+        nextConfig: {},
+      })
+    ).toBe(false)
+
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'support',
+        pluginState: { ...pluginReady, configChanged: true },
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: ['$.channels.feishu.accounts.support.appSecret'],
+        },
+        nextConfig: {},
+      })
+    ).toBe(false)
+
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'support',
+        pluginState: pluginReady,
+        gatewayWasRunning: false,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: ['$.channels.feishu.accounts.support.appSecret'],
+        },
+        nextConfig: {},
+      })
+    ).toBe(false)
+  })
+
+  it('falls back when the write includes restart paths, sanitize changes, or disabled OpenClaw reload mode', () => {
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'support',
+        pluginState: pluginReady,
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: ['$.plugins.allow[0]'],
+        },
+        nextConfig: {},
+      })
+    ).toBe(false)
+
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'support',
+        pluginState: pluginReady,
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: ['$.channels.feishu.accounts.support.appSecret'],
+        },
+        sanitizedConfigChanged: true,
+        nextConfig: {},
+      })
+    ).toBe(false)
+
+    expect(
+      canUseFeishuManualBindingOpenClawHotReload({
+        setupMode: 'link',
+        targetAccountId: 'support',
+        pluginState: pluginReady,
+        gatewayWasRunning: true,
+        writeResult: {
+          wrote: true,
+          changedJsonPaths: ['$.channels.feishu.accounts.support.appSecret'],
+        },
+        nextConfig: {
+          gateway: {
+            reload: {
+              mode: 'off',
+            },
+          },
+        },
       })
     ).toBe(false)
   })

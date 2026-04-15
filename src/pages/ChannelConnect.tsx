@@ -5,6 +5,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import FeishuInstallTutorialModal from '../components/FeishuInstallTutorialModal'
 import {
   applyChannelConfig,
+  DEFAULT_FEISHU_CHANNEL_SETTINGS,
   getChannelDefinition,
   isChannelPluginConfigured,
   isPluginAlreadyInstalledError,
@@ -39,7 +40,7 @@ import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '
 import type { ManagedChannelPluginStatusView } from '../shared/managed-channel-plugin-lifecycle'
 import { pollWithBackoff } from '../shared/polling'
 import { UI_RUNTIME_DEFAULTS } from '../shared/runtime-policies'
-import type { OpenClawGuardedWriteReason } from '../shared/openclaw-phase2'
+import type { OpenClawGuardedWriteReason, OpenClawGuardedWriteResult } from '../shared/openclaw-phase2'
 
 type Status = 'form' | 'installing' | 'starting' | 'connected' | 'error'
 
@@ -60,6 +61,8 @@ type ManagedPluginInstallPreflightApi =
 type ChannelConnectGatewayReadyApi =
   Pick<typeof window.api, 'reloadGatewayAfterChannelChange'>
   & Partial<Pick<typeof window.api, 'repairManagedChannelPlugin' | 'getManagedChannelPluginStatus' | 'ensureGatewayRunning'>>
+type FeishuManualBindingOpenClawHotReloadApi =
+  Partial<Pick<typeof window.api, 'gatewayHealth' | 'getFeishuRuntimeStatus'>>
 
 const CHANNELS = listChannelDefinitions()
 
@@ -254,11 +257,12 @@ function extractAsciiQrBlock(text: string): string {
 async function writeConfigDirect(
   config: Record<string, unknown>,
   reason: OpenClawGuardedWriteReason = 'channel-connect-configure'
-) {
+): Promise<OpenClawGuardedWriteResult> {
   const result = await window.api.writeConfigGuarded({ config, reason })
   if (!result.ok) {
     throw new Error(result.message || '配置文件写入失败')
   }
+  return result
 }
 
 async function writeConfigPatch(
@@ -323,6 +327,14 @@ export function buildDingtalkOfficialSetupLog(result: DingtalkOfficialSetupResul
 
 function cloneJsonValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function hasOwnRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeChannelConnectText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function listPluginCleanupTargets(channel: { plugin?: { cleanupPluginIds?: string[] } } | null | undefined): string[] {
@@ -509,6 +521,20 @@ export function canFinishFeishuCreateMode(
   return hasRecoveredBotConfig && installerExitedSuccessfully
 }
 
+export function shouldAutoFinishFeishuCreateMode(params: {
+  selectedChannelId?: string | null
+  setupMode: 'create' | 'link'
+  canFinish: boolean
+  finishing: boolean
+  finishStrategy: 'manual' | 'existing' | 'invalid-manual' | 'none'
+}): boolean {
+  return params.selectedChannelId === 'feishu'
+    && params.setupMode === 'create'
+    && params.canFinish
+    && !params.finishing
+    && params.finishStrategy !== 'invalid-manual'
+}
+
 function didFeishuInstallerExitSuccessfully(params: {
   installerRunning: boolean
   installerExitCode: number | null
@@ -541,14 +567,146 @@ export function resolveFeishuCreateModeRecoveryNotice(
 ): string {
   if (!hasRecoveredBotConfig) return ''
   return installerRunning
-    ? '已检测到飞书机器人配置，正在等待飞书安装器完成收尾；安装器退出后才能点击“完成配置”。'
+    ? '已检测到飞书机器人配置，正在等待飞书安装器完成收尾；安装器退出后会自动完成配置。'
     : installerExitedSuccessfully
-      ? '已检测到飞书机器人配置，飞书安装器已完成；现在可以点击“完成配置”。'
+      ? '已检测到飞书机器人配置，飞书安装器已完成；正在自动完成配置。'
       : '已检测到飞书机器人配置，但飞书安装器未正常完成；请先检查安装日志并重新运行新建流程。'
 }
 
 export function hasFeishuManualCredentialInput(formData: Record<string, string>): boolean {
   return Boolean(String(formData.appId || '').trim() || String(formData.appSecret || '').trim())
+}
+
+export function clearFeishuManualCredentialInput(formData: Record<string, string>): Record<string, string> {
+  const { appId: _appId, appSecret: _appSecret, ...rest } = formData
+  return rest
+}
+
+export function upsertFeishuManualBindingConfig(
+  config: Record<string, any> | null,
+  input: {
+    name?: string
+    appId: string
+    appSecret: unknown
+  }
+): {
+  nextConfig: Record<string, any>
+  pairingTarget: { accountId: string; accountName: string } | null
+} {
+  const appId = normalizeChannelConnectText(input.appId)
+  const normalizedAppId = appId.toLowerCase()
+  const manualName = normalizeChannelConnectText(input.name)
+  const existingBots = listFeishuBots(config)
+  const existingBot = existingBots.find(
+    (bot) => bot.appId.trim().toLowerCase() === normalizedAppId
+  )
+
+  if (!existingBot) {
+    if (existingBots.length > 0) {
+      const added = addFeishuBotConfig(config, {
+        name: manualName || '飞书机器人',
+        appId,
+        appSecret: input.appSecret,
+      })
+      return {
+        nextConfig: added.nextConfig,
+        pairingTarget: {
+          accountId: added.accountId,
+          accountName: manualName || `机器人 ${added.accountId}`,
+        },
+      }
+    }
+
+    const nextConfig = applyChannelConfig(config, 'feishu', {
+      appId,
+      appSecret: String(input.appSecret || ''),
+    })
+    const matchedBot = listFeishuBots(nextConfig).find(
+      (bot) => bot.appId.trim().toLowerCase() === normalizedAppId
+    )
+    return {
+      nextConfig,
+      pairingTarget: matchedBot
+        ? {
+            accountId: matchedBot.accountId,
+            accountName: matchedBot.name,
+          }
+        : null,
+    }
+  }
+
+  const nextConfig = hasOwnRecord(config) ? cloneJsonValue(config) : {}
+  nextConfig.channels = hasOwnRecord(nextConfig.channels) ? nextConfig.channels : {}
+  const feishu = hasOwnRecord(nextConfig.channels.feishu) ? nextConfig.channels.feishu : {}
+  nextConfig.channels.feishu = feishu
+  const accountName = manualName || existingBot.name || `机器人 ${existingBot.accountId}`
+
+  if (existingBot.accountId === 'default') {
+    nextConfig.channels.feishu = {
+      ...feishu,
+      enabled: true,
+      name: accountName,
+      appId,
+      appSecret: input.appSecret,
+      dmPolicy: normalizeChannelConnectText(feishu.dmPolicy) || DEFAULT_FEISHU_CHANNEL_SETTINGS.dmPolicy,
+      domain: normalizeChannelConnectText(feishu.domain) || DEFAULT_FEISHU_CHANNEL_SETTINGS.domain,
+      groupPolicy: normalizeChannelConnectText(feishu.groupPolicy) || DEFAULT_FEISHU_CHANNEL_SETTINGS.groupPolicy,
+      streaming:
+        typeof feishu.streaming === 'boolean'
+          ? feishu.streaming
+          : DEFAULT_FEISHU_CHANNEL_SETTINGS.streaming,
+      blockStreaming:
+        typeof feishu.blockStreaming === 'boolean'
+          ? feishu.blockStreaming
+          : DEFAULT_FEISHU_CHANNEL_SETTINGS.blockStreaming,
+    }
+  } else {
+    const accounts = hasOwnRecord(feishu.accounts) ? feishu.accounts : {}
+    const existingAccount = hasOwnRecord(accounts[existingBot.accountId])
+      ? accounts[existingBot.accountId]
+      : {}
+    feishu.accounts = accounts
+    feishu.accounts[existingBot.accountId] = {
+      ...existingAccount,
+      enabled: true,
+      name: accountName,
+      appId,
+      appSecret: input.appSecret,
+      dmPolicy:
+        normalizeChannelConnectText(existingAccount.dmPolicy)
+        || normalizeChannelConnectText(feishu.dmPolicy)
+        || DEFAULT_FEISHU_CHANNEL_SETTINGS.dmPolicy,
+      domain:
+        normalizeChannelConnectText(existingAccount.domain)
+        || normalizeChannelConnectText(feishu.domain)
+        || DEFAULT_FEISHU_CHANNEL_SETTINGS.domain,
+      groupPolicy:
+        normalizeChannelConnectText(existingAccount.groupPolicy)
+        || normalizeChannelConnectText(feishu.groupPolicy)
+        || DEFAULT_FEISHU_CHANNEL_SETTINGS.groupPolicy,
+      streaming:
+        typeof existingAccount.streaming === 'boolean'
+          ? existingAccount.streaming
+          : typeof feishu.streaming === 'boolean'
+            ? feishu.streaming
+            : DEFAULT_FEISHU_CHANNEL_SETTINGS.streaming,
+      blockStreaming:
+        typeof existingAccount.blockStreaming === 'boolean'
+          ? existingAccount.blockStreaming
+          : typeof feishu.blockStreaming === 'boolean'
+            ? feishu.blockStreaming
+            : DEFAULT_FEISHU_CHANNEL_SETTINGS.blockStreaming,
+    }
+    feishu.enabled = true
+  }
+
+  return {
+    nextConfig,
+    pairingTarget: {
+      accountId: existingBot.accountId,
+      accountName,
+    },
+  }
 }
 
 export function resolveFeishuCreateModeFinishStrategy(
@@ -586,6 +744,7 @@ interface FeishuManualBindingPluginStateLike {
   installedOnDisk: boolean
   officialPluginConfigured: boolean
   configChanged: boolean
+  configAvailable?: boolean
 }
 
 export function isFeishuManualBindingReady(
@@ -597,7 +756,244 @@ export function isFeishuManualBindingReady(
 export function canPrepareFeishuManualBindingWithoutInstall(
   state: FeishuManualBindingPluginStateLike
 ): boolean {
-  return state.installedOnDisk && (state.officialPluginConfigured || state.configChanged)
+  return state.configAvailable !== false && state.installedOnDisk && (state.officialPluginConfigured || state.configChanged)
+}
+
+const FEISHU_MANUAL_BINDING_OPENCLAW_HOT_RELOAD_INITIAL_SETTLE_MS = 700
+const FEISHU_MANUAL_BINDING_OPENCLAW_HOT_RELOAD_POLL_POLICY = Object.freeze({
+  timeoutMs: 6_000,
+  initialIntervalMs: 500,
+  maxIntervalMs: 1_000,
+  backoffFactor: 1.25,
+})
+
+// OpenClaw 2026.4.x can hot-apply these paths without a full gateway restart.
+const FEISHU_MANUAL_BINDING_OPENCLAW_HOT_RELOAD_PREFIXES = [
+  'channels.feishu',
+  'agents.defaults.heartbeat',
+  'agents.defaults.models',
+  'agents.defaults.model',
+  'agents.list',
+  'models',
+  'cron',
+  'gateway.channelHealthCheckMinutes',
+  'gateway.channelStaleEventThresholdMinutes',
+  'gateway.channelMaxRestartsPerHour',
+]
+
+const FEISHU_MANUAL_BINDING_OPENCLAW_NOOP_RELOAD_PREFIXES = [
+  'gateway.remote',
+  'gateway.reload',
+  'diagnostics.stuckSessionWarnMs',
+  'meta',
+  'identity',
+  'wizard',
+  'logging',
+  'agents',
+  'tools',
+  'bindings',
+  'audio',
+  'agent',
+  'routing',
+  'messages',
+  'session',
+  'talk',
+  'skills',
+  'secrets',
+  'ui',
+]
+
+const FEISHU_MANUAL_BINDING_OPENCLAW_GATEWAY_RESTART_PREFIXES = [
+  'plugins',
+  'gateway',
+  'discovery',
+  'canvasHost',
+]
+
+function normalizeOpenClawJsonPath(jsonPath: unknown): string {
+  let normalized = String(jsonPath || '').trim()
+  if (normalized === '$') return ''
+  if (normalized.startsWith('$.')) {
+    normalized = normalized.slice(2)
+  } else if (normalized.startsWith('$')) {
+    normalized = normalized.slice(1).replace(/^\./, '')
+  }
+  return normalized
+}
+
+function isOpenClawJsonPathUnderPrefix(jsonPath: string, prefix: string): boolean {
+  return jsonPath === prefix || jsonPath.startsWith(`${prefix}.`) || jsonPath.startsWith(`${prefix}[`)
+}
+
+export function isFeishuManualBindingOpenClawHotReloadPath(jsonPath: unknown): boolean {
+  const normalizedPath = normalizeOpenClawJsonPath(jsonPath)
+  if (!normalizedPath) return true
+  if (
+    FEISHU_MANUAL_BINDING_OPENCLAW_HOT_RELOAD_PREFIXES.some((prefix) =>
+      isOpenClawJsonPathUnderPrefix(normalizedPath, prefix)
+    )
+  ) {
+    return true
+  }
+  if (
+    FEISHU_MANUAL_BINDING_OPENCLAW_NOOP_RELOAD_PREFIXES.some((prefix) =>
+      isOpenClawJsonPathUnderPrefix(normalizedPath, prefix)
+    )
+  ) {
+    return true
+  }
+  if (
+    FEISHU_MANUAL_BINDING_OPENCLAW_GATEWAY_RESTART_PREFIXES.some((prefix) =>
+      isOpenClawJsonPathUnderPrefix(normalizedPath, prefix)
+    )
+  ) {
+    return false
+  }
+  return false
+}
+
+function resolveOpenClawGatewayReloadMode(
+  config: Record<string, any> | null | undefined
+): 'hot' | 'hybrid' | 'restart' | 'off' {
+  const mode = normalizeChannelConnectText(config?.gateway?.reload?.mode).toLowerCase()
+  if (mode === 'hot' || mode === 'hybrid' || mode === 'restart' || mode === 'off') return mode
+  return 'hybrid'
+}
+
+export function canUseFeishuManualBindingOpenClawHotReload(params: {
+  setupMode: 'create' | 'link'
+  targetAccountId?: string | null
+  pluginState?: FeishuManualBindingPluginStateLike | null
+  gatewayWasRunning: boolean
+  writeResult?: Pick<OpenClawGuardedWriteResult, 'wrote' | 'changedJsonPaths'> | null
+  sanitizedConfigChanged?: boolean
+  nextConfig?: Record<string, any> | null
+}): boolean {
+  if (params.setupMode !== 'link') return false
+  if (!normalizeChannelConnectText(params.targetAccountId)) return false
+  if (params.sanitizedConfigChanged) return false
+  if (!params.gatewayWasRunning) return false
+  if (!params.pluginState) return false
+  if (params.pluginState.configAvailable === false) return false
+  if (!params.pluginState.installedOnDisk || !params.pluginState.officialPluginConfigured) return false
+  if (params.pluginState.configChanged) return false
+  if (!params.writeResult) return false
+
+  const reloadMode = resolveOpenClawGatewayReloadMode(params.nextConfig)
+  if (reloadMode !== 'hot' && reloadMode !== 'hybrid') return false
+
+  const changedJsonPaths = Array.isArray(params.writeResult.changedJsonPaths)
+    ? params.writeResult.changedJsonPaths
+    : []
+  if (!params.writeResult.wrote && changedJsonPaths.length === 0) return true
+  return changedJsonPaths.every(isFeishuManualBindingOpenClawHotReloadPath)
+}
+
+function findFeishuTargetRuntimeStatus(
+  runtimeStatuses: Record<string, any> | null | undefined,
+  accountId: string
+): Record<string, any> | null {
+  if (!hasOwnRecord(runtimeStatuses)) return null
+  const keyedStatus = runtimeStatuses[accountId]
+  if (hasOwnRecord(keyedStatus)) return keyedStatus
+  for (const status of Object.values(runtimeStatuses)) {
+    if (hasOwnRecord(status) && normalizeChannelConnectText(status.accountId) === accountId) {
+      return status
+    }
+  }
+  return null
+}
+
+async function waitForFeishuManualBindingOpenClawHotReload(
+  api: FeishuManualBindingOpenClawHotReloadApi,
+  params: {
+    targetAccountId: string
+  }
+): Promise<{ ok: boolean; message?: string }> {
+  if (!api.gatewayHealth || !api.getFeishuRuntimeStatus) {
+    return {
+      ok: false,
+      message: '当前版本缺少网关热重载确认接口',
+    }
+  }
+
+  await new Promise<void>((resolve) =>
+    setTimeout(resolve, FEISHU_MANUAL_BINDING_OPENCLAW_HOT_RELOAD_INITIAL_SETTLE_MS)
+  )
+
+  const targetAccountId = normalizeChannelConnectText(params.targetAccountId)
+  const result = await pollWithBackoff({
+    policy: FEISHU_MANUAL_BINDING_OPENCLAW_HOT_RELOAD_POLL_POLICY,
+    execute: async () => {
+      const health = await api.gatewayHealth!().catch((error: unknown) => ({
+        running: false,
+        summary: error instanceof Error ? error.message : String(error),
+      }))
+      if (!health.running) {
+        return {
+          gatewayRunning: false,
+          runtimeReady: false,
+          message: getGatewayReadyFailureMessage(health, '网关暂未就绪'),
+        }
+      }
+
+      const runtimeStatuses = await api.getFeishuRuntimeStatus!().catch((error: unknown) => ({
+        __qclawRuntimeStatusError: error instanceof Error ? error.message : String(error),
+      }))
+      if (hasOwnRecord(runtimeStatuses) && normalizeChannelConnectText(runtimeStatuses.__qclawRuntimeStatusError)) {
+        return {
+          gatewayRunning: true,
+          runtimeReady: false,
+          message: normalizeChannelConnectText(runtimeStatuses.__qclawRuntimeStatusError),
+        }
+      }
+      const targetRuntimeStatus = findFeishuTargetRuntimeStatus(runtimeStatuses, targetAccountId)
+      if (!targetRuntimeStatus) {
+        return {
+          gatewayRunning: true,
+          runtimeReady: false,
+          message: '尚未确认 OpenClaw 已加载目标飞书账号运行态',
+        }
+      }
+      if (targetRuntimeStatus.credentialsComplete === false) {
+        return {
+          gatewayRunning: true,
+          runtimeReady: false,
+          message: 'OpenClaw 已加载目标飞书账号，但凭据仍未完整',
+        }
+      }
+      if (targetRuntimeStatus.gatewayRunning === false || targetRuntimeStatus.runtimeState === 'disabled') {
+        return {
+          gatewayRunning: true,
+          runtimeReady: false,
+          message: targetRuntimeStatus.summary || 'OpenClaw 目标飞书账号运行态尚未就绪',
+        }
+      }
+
+      return {
+        gatewayRunning: true,
+        runtimeReady: true,
+        message: '',
+      }
+    },
+    isSuccess: (value) => value.gatewayRunning && value.runtimeReady,
+  }).catch((error: unknown) => ({
+    ok: false,
+    attempts: 0,
+    elapsedMs: 0,
+    aborted: false,
+    value: {
+      gatewayRunning: false,
+      runtimeReady: false,
+      message: error instanceof Error ? error.message : String(error),
+    },
+  }))
+
+  if (result.ok) return { ok: true }
+  return {
+    ok: false,
+    message: result.value?.message || 'OpenClaw 配置热重载未在预期时间内完成',
+  }
 }
 
 type FeishuAutoRecoveryTarget = 'wait' | 'heal-config' | 'recover-manual' | 'recover-create'
@@ -858,10 +1254,22 @@ export function shouldAllowFeishuLinkPairingAfterGatewayFailure(params: {
     safeToRetry?: boolean
   }
 }): boolean {
-  return params.setupMode === 'link'
-    && Boolean(String(params.pairingTarget?.accountId || '').trim())
-    && params.gatewayFailure.stateCode === 'websocket_1006'
-    && params.gatewayFailure.safeToRetry === true
+  if (
+    params.setupMode !== 'link' ||
+    !String(params.pairingTarget?.accountId || '').trim()
+  ) {
+    return false
+  }
+
+  const stateCode = String(params.gatewayFailure.stateCode || '').trim()
+  if (!stateCode) return true
+
+  return (
+    stateCode === 'websocket_1006' ||
+    stateCode === 'gateway_not_running' ||
+    stateCode === 'network_blocked' ||
+    stateCode === 'unknown_runtime_failure'
+  )
 }
 
 export function canFinalizeWeixinSetup(params: {
@@ -930,6 +1338,8 @@ export default function ChannelConnect({
   const qrTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const qrResolveRef = useRef<((result: { botId: string; secret: string } | null) => void) | null>(null)
   const feishuInstallerHandledPromptIdRef = useRef('')
+  const feishuFinishInFlightRef = useRef(false)
+  const feishuAutoFinishTriggerKeyRef = useRef('')
   const feishuCreateStartConfigSnapshotRef = useRef<Record<string, any> | null>(null)
   const feishuManualBindingRequestVersionRef = useRef(0)
 
@@ -978,7 +1388,6 @@ export default function ChannelConnect({
     channelValidation.ok
   const feishuHasManualCredentialInput =
     selectedChannel?.id === 'feishu' &&
-    feishuBotSetupMode === 'link' &&
     hasFeishuManualCredentialInput(formData)
   const feishuCreateModeFinishStrategy = resolveFeishuCreateModeFinishStrategy(
     feishuBotsOrdered.length,
@@ -1056,7 +1465,7 @@ export default function ChannelConnect({
 
   const loadFeishuSetupState = useCallback(async (options?: { syncConfig?: boolean }) => {
     let pluginState = await window.api.getFeishuOfficialPluginState()
-    if (options?.syncConfig && pluginState.configChanged) {
+    if (options?.syncConfig && pluginState.configChanged && pluginState.configAvailable !== false) {
       try {
         await writeConfigDirect(pluginState.normalizedConfig, 'channel-connect-feishu-sync-config')
         pluginState = await window.api.getFeishuOfficialPluginState()
@@ -1076,7 +1485,13 @@ export default function ChannelConnect({
       return { pluginState, bots }
     }
 
-    const pairingStatus = await window.api.pairingFeishuStatus(bots.map((bot) => bot.accountId))
+    const pairingStatus = await window.api.pairingFeishuStatus(bots.map((bot) => bot.accountId)).catch(() => null)
+    if (!pairingStatus) {
+      setPairingStatusByBot({})
+      setCanSkip(false)
+      return { pluginState, bots }
+    }
+
     setPairingStatusByBot(pairingStatus)
     setCanSkip(shouldShowSkipButtonForFeishuPairing(pairingStatus))
     return { pluginState, bots }
@@ -1299,6 +1714,7 @@ export default function ChannelConnect({
   useEffect(() => {
     const unsubscribe = window.api.onFeishuInstallerEvent((payload) => {
       if (payload.type === 'started') {
+        feishuAutoFinishTriggerKeyRef.current = ''
         setFeishuInstallerSessionId(payload.sessionId || '')
         setFeishuInstallerRunning(true)
         setFeishuInstallerExitCode(null)
@@ -1417,6 +1833,7 @@ export default function ChannelConnect({
     setFeishuInstallerPendingPrompt(null)
     setPreparingFeishuManualBinding(false)
     feishuInstallerHandledPromptIdRef.current = ''
+    feishuAutoFinishTriggerKeyRef.current = ''
     setWeixinInstallerSessionId('')
     setWeixinInstallerRunning(false)
     setWeixinInstallerOutput('')
@@ -1456,7 +1873,11 @@ export default function ChannelConnect({
 
   const startFeishuInstallerFlow = async (mode: 'create' | 'link') => {
     invalidateFeishuManualBindingRequest()
+    feishuAutoFinishTriggerKeyRef.current = ''
     setFeishuBotSetupMode(mode)
+    if (mode === 'create') {
+      setFormData(clearFeishuManualCredentialInput)
+    }
     setFeishuInstallerBusy(true)
     setError('')
     setFeishuInstallerNotice('')
@@ -1685,7 +2106,9 @@ export default function ChannelConnect({
     }
   }
 
-  const finishFeishuChannelConnect = async () => {
+  const finishFeishuChannelConnect = useCallback(async () => {
+    if (feishuFinishInFlightRef.current) return
+    feishuFinishInFlightRef.current = true
     setFinishingFeishuSetup(true)
     setError('')
 
@@ -1701,13 +2124,19 @@ export default function ChannelConnect({
       const existingConfig = await window.api.readConfig()
       const sanitizedConfig = stripLegacyOpenClawRootKeys(existingConfig)
       const preservedFeishuConfig = captureFeishuBotConfigSnapshot(sanitizedConfig)
+      let sanitizedConfigChanged = false
       if (JSON.stringify(existingConfig || {}) !== JSON.stringify(sanitizedConfig)) {
-        await writeConfigDirect(sanitizedConfig, 'channel-connect-sanitize')
+        const sanitizeWriteResult = await writeConfigDirect(sanitizedConfig, 'channel-connect-sanitize')
+        sanitizedConfigChanged = sanitizeWriteResult.wrote
       }
 
       const config = sanitizeFeishuPluginConfig(await window.api.readConfig())
       let nextConfig = config
       let pairingTarget: { accountId: string; accountName: string } | null = null
+      let manualBindingHotReloadPreflight: {
+        pluginState: FeishuManualBindingPluginStateLike | null
+        gatewayWasRunning: boolean
+      } | null = null
 
       if (feishuBotSetupMode === 'link') {
         if (!shouldValidateFeishuManualCredentials(feishuBotSetupMode, hasFeishuManualCredentialInput(formData), channelValidation.ok)) {
@@ -1730,30 +2159,22 @@ export default function ChannelConnect({
           )
         }
 
-        const existingBots = listFeishuBots(config)
-        if (existingBots.length > 0) {
-          const added = addFeishuBotConfig(config, {
-            name: String(formData.name || '').trim() || '飞书机器人',
-            appId: channelValidation.values.appId,
-            appSecret: channelValidation.values.appSecret,
-          })
-          nextConfig = added.nextConfig
-          pairingTarget = {
-            accountId: added.accountId,
-            accountName: String(formData.name || '').trim() || `机器人 ${added.accountId}`,
-          }
-        } else {
-          nextConfig = applyChannelConfig(config, 'feishu', channelValidation.values)
-          const matchedBot = listFeishuBots(nextConfig).find(
-            (bot) => bot.appId.trim().toLowerCase() === channelValidation.values.appId.trim().toLowerCase()
-          )
-          pairingTarget = matchedBot
-            ? {
-                accountId: matchedBot.accountId,
-                accountName: matchedBot.name,
-              }
-            : null
+        const [pluginStateBeforeWrite, gatewayHealthBeforeWrite] = await Promise.all([
+          window.api.getFeishuOfficialPluginState().catch(() => null),
+          window.api.gatewayHealth().catch(() => null),
+        ])
+        manualBindingHotReloadPreflight = {
+          pluginState: pluginStateBeforeWrite,
+          gatewayWasRunning: gatewayHealthBeforeWrite?.running === true,
         }
+
+        const manualBindingConfig = upsertFeishuManualBindingConfig(config, {
+          name: formData.name,
+          appId: channelValidation.values.appId,
+          appSecret: channelValidation.values.appSecret,
+        })
+        nextConfig = manualBindingConfig.nextConfig
+        pairingTarget = manualBindingConfig.pairingTarget
 
         if (feishuInstallerRunning) {
           await window.api.stopFeishuInstaller().catch(() => {
@@ -1780,13 +2201,13 @@ export default function ChannelConnect({
 
       nextConfig = reconcileFeishuOfficialPluginConfig(nextConfig)
 
-      await writeConfigDirect(
+      const configWriteResult = await writeConfigDirect(
         nextConfig,
         feishuBotSetupMode === 'create'
           ? 'channel-connect-feishu-finish-create'
           : 'channel-connect-feishu-finish-link'
       )
-      await refreshFeishuBotsFromConfig()
+      await loadFeishuSetupState({ syncConfig: false })
 
       if (!pairingTarget && feishuBotSetupMode === 'create') {
         pairingTarget = resolveFeishuPairingTarget({
@@ -1799,16 +2220,37 @@ export default function ChannelConnect({
         })
       }
 
-      const gatewayReady = await ensureGatewayReadyForChannelConnect(window.api, () => {
-        // Keep the wizard UI focused; setup errors are surfaced directly below the form.
-      }, {
-        channelId: 'feishu',
-        acceptFailureResult: (result) => shouldAllowFeishuLinkPairingAfterGatewayFailure({
+      const ensureFeishuGatewayReady = () =>
+        ensureGatewayReadyForChannelConnect(window.api, () => {
+          // Keep the wizard UI focused; setup errors are surfaced directly below the form.
+        }, {
+          channelId: 'feishu',
+          acceptFailureResult: (result) => shouldAllowFeishuLinkPairingAfterGatewayFailure({
+            setupMode: feishuBotSetupMode,
+            pairingTarget,
+            gatewayFailure: result,
+          }),
+        })
+
+      let gatewayReady: { ok: boolean; message?: string }
+      if (
+        canUseFeishuManualBindingOpenClawHotReload({
           setupMode: feishuBotSetupMode,
-          pairingTarget,
-          gatewayFailure: result,
-        }),
-      })
+          targetAccountId: pairingTarget?.accountId,
+          pluginState: manualBindingHotReloadPreflight?.pluginState,
+          gatewayWasRunning: manualBindingHotReloadPreflight?.gatewayWasRunning === true,
+          writeResult: configWriteResult,
+          sanitizedConfigChanged,
+          nextConfig,
+        })
+      ) {
+        const hotReloadReady = await waitForFeishuManualBindingOpenClawHotReload(window.api, {
+          targetAccountId: pairingTarget!.accountId,
+        })
+        gatewayReady = hotReloadReady.ok ? { ok: true } : await ensureFeishuGatewayReady()
+      } else {
+        gatewayReady = await ensureFeishuGatewayReady()
+      }
       if (!gatewayReady.ok) {
         throw new Error(
           toUserFacingCliFailureMessage({
@@ -1818,7 +2260,7 @@ export default function ChannelConnect({
         )
       }
 
-      await refreshFeishuBotsFromConfig()
+      await loadFeishuSetupState({ syncConfig: false })
       onNext({
         channelId: 'feishu',
         accountId: pairingTarget?.accountId,
@@ -1828,9 +2270,56 @@ export default function ChannelConnect({
     } catch (e: any) {
       setError(toUserFacingUnknownErrorMessage(e, '飞书配置完成收尾失败'))
     } finally {
+      feishuFinishInFlightRef.current = false
       setFinishingFeishuSetup(false)
     }
-  }
+  }, [
+    channelValidation.ok,
+    channelValidation.values.appId,
+    channelValidation.values.appSecret,
+    feishuBotSetupMode,
+    feishuCreateModeCanFinish,
+    feishuCreateModeFinishStrategy,
+    feishuInstallerRunning,
+    formData,
+    loadFeishuSetupState,
+    onNext,
+  ])
+
+  useEffect(() => {
+    if (!shouldAutoFinishFeishuCreateMode({
+      selectedChannelId: selectedChannel?.id,
+      setupMode: feishuBotSetupMode,
+      canFinish: feishuCreateModeCanFinish,
+      finishing: finishingFeishuSetup,
+      finishStrategy: feishuCreateModeFinishStrategy,
+    })) {
+      return
+    }
+
+    if (feishuFinishInFlightRef.current) return
+
+    const autoFinishKey = [
+      feishuInstallerSessionId || 'sessionless',
+      String(feishuInstallerExitCode ?? 'no-exit'),
+      feishuBotsOrdered.map((bot) => `${bot.accountId}:${bot.appId}`).join('|'),
+    ].join('::')
+    if (feishuAutoFinishTriggerKeyRef.current === autoFinishKey) return
+
+    feishuAutoFinishTriggerKeyRef.current = autoFinishKey
+    setFeishuInstallerNotice('已检测到飞书安装器完成收尾，正在自动完成配置。')
+    void finishFeishuChannelConnect()
+  }, [
+    feishuBotSetupMode,
+    feishuBotsOrdered,
+    feishuCreateModeCanFinish,
+    feishuCreateModeFinishStrategy,
+    feishuInstallerExitCode,
+    feishuInstallerSessionId,
+    finishFeishuChannelConnect,
+    finishingFeishuSetup,
+    selectedChannel?.id,
+  ])
 
   useEffect(() => {
     const unsubscribe = window.api.onWeixinInstallerEvent((payload) => {
@@ -2289,7 +2778,7 @@ export default function ChannelConnect({
                       size="xs"
                       onClick={() => void startFeishuInstallerFlow('create')}
                       loading={feishuInstallerBusy && feishuBotSetupMode === 'create'}
-                      disabled={preparingFeishuManualBinding}
+                      disabled={preparingFeishuManualBinding || finishingFeishuSetup}
                     >
                       新建机器人
                     </Button>
@@ -2306,7 +2795,7 @@ export default function ChannelConnect({
                       size="xs"
                       onClick={() => void prepareFeishuManualBinding()}
                       loading={preparingFeishuManualBinding}
-                      disabled={feishuInstallerRunning || feishuInstallerBusy}
+                      disabled={feishuInstallerRunning || feishuInstallerBusy || finishingFeishuSetup}
                     >
                       关联已有机器人
                     </Button>
@@ -2315,7 +2804,7 @@ export default function ChannelConnect({
                       size="xs"
                       color="danger"
                       onClick={() => void stopFeishuInstallerFlow()}
-                      disabled={!feishuInstallerRunning || feishuInstallerBusy || preparingFeishuManualBinding}
+                      disabled={!feishuInstallerRunning || feishuInstallerBusy || preparingFeishuManualBinding || finishingFeishuSetup}
                     >
                       中止安装
                     </Button>

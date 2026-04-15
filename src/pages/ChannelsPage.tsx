@@ -229,7 +229,7 @@ export default function ChannelsPage() {
         .catch(() => ({} as FeishuRuntimeStatusRecord))
 
       const normalizedConfig = feishuPluginState?.normalizedConfig || sanitizeFeishuPluginConfig(config)
-      if (feishuPluginState?.configChanged) {
+      if (feishuPluginState?.configChanged && feishuPluginState.configAvailable !== false) {
         void window.api.applyConfigPatchGuarded({
           beforeConfig: config,
           afterConfig: normalizedConfig,

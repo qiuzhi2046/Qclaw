@@ -173,7 +173,7 @@ function buildNormalizedConfig(params: {
 }
 
 function isStateReady(state: FeishuOfficialPluginState): boolean {
-  return state.installedOnDisk && state.officialPluginConfigured
+  return state.configAvailable && state.installedOnDisk && state.officialPluginConfigured
 }
 
 function resolveFeishuOfficialPluginManifestPath(homeDir: string): string {
@@ -198,6 +198,7 @@ export interface FeishuOfficialPluginState {
   legacyPluginIdsPresent: string[]
   configChanged: boolean
   normalizedConfig: Record<string, any>
+  configAvailable: boolean
 }
 
 export interface EnsureFeishuOfficialPluginReadyResult {
@@ -212,8 +213,14 @@ export interface EnsureFeishuOfficialPluginReadyResult {
 
 async function applyNormalizedConfigIfNeeded(state: FeishuOfficialPluginState): Promise<boolean> {
   if (!state.configChanged) return false
+  if (!state.configAvailable) {
+    throw new Error('当前 OpenClaw 配置读取失败，已停止飞书插件配置同步以避免覆盖现有配置')
+  }
 
   const currentConfig = await readConfig().catch(() => null)
+  if (!hasOwnRecord(currentConfig)) {
+    throw new Error('当前 OpenClaw 配置读取失败，已停止飞书插件配置同步以避免覆盖现有配置')
+  }
   const writeResult = await applyConfigPatchGuarded(
     {
       beforeConfig: currentConfig,
@@ -247,6 +254,20 @@ export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPlug
   const installedOnDisk = await isFeishuOfficialPluginInstalledOnDisk(homeDir)
 
   const baseConfig = cloneConfig(config)
+  const configAvailable = hasOwnRecord(config)
+  if (!configAvailable) {
+    return {
+      pluginId: FEISHU_OFFICIAL_PLUGIN_ID,
+      installedOnDisk,
+      installPath,
+      officialPluginConfigured: false,
+      legacyPluginIdsPresent: [],
+      configChanged: false,
+      normalizedConfig: baseConfig,
+      configAvailable,
+    }
+  }
+
   const legacyPluginIdsPresent = collectLegacyPluginIds(baseConfig)
   const normalizedConfig = buildNormalizedConfig({
     config: baseConfig,
@@ -263,6 +284,7 @@ export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPlug
     legacyPluginIdsPresent,
     configChanged,
     normalizedConfig,
+    configAvailable,
   }
 }
 
@@ -272,6 +294,9 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   let lastAppliedConfigFingerprint = ''
 
   try {
+    if (!beforeState.configAvailable) {
+      throw new Error('当前 OpenClaw 配置读取失败，无法安全同步飞书官方插件配置')
+    }
     appliedBeforeReady = await applyNormalizedConfigIfNeeded(beforeState)
     if (appliedBeforeReady) {
       lastAppliedConfigFingerprint = JSON.stringify(beforeState.normalizedConfig)
@@ -308,6 +333,17 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   }
   if (repairResult.repaired) {
     beforeState = await getFeishuOfficialPluginState()
+    if (!beforeState.configAvailable) {
+      return {
+        ok: false,
+        installedThisRun: false,
+        state: beforeState,
+        stdout: '',
+        stderr: '当前 OpenClaw 配置读取失败，无法安全同步飞书官方插件配置',
+        code: 1,
+        message: '飞书插件预检查失败',
+      }
+    }
     const repairedOfficialPlugin =
       repairResult.quarantinedPluginIds.includes(FEISHU_OFFICIAL_PLUGIN_ID)
       || repairResult.prunedPluginIds.includes(FEISHU_OFFICIAL_PLUGIN_ID)
@@ -353,6 +389,9 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   let appliedAfterInstall = false
 
   try {
+    if (!afterState.configAvailable) {
+      throw new Error('当前 OpenClaw 配置读取失败，无法安全同步飞书官方插件配置')
+    }
     const afterConfigFingerprint = JSON.stringify(afterState.normalizedConfig)
     const alreadyAppliedSameConfig =
       Boolean(lastAppliedConfigFingerprint)

@@ -131,7 +131,7 @@ export default function FeishuBotManagerModal({
   const refreshFeishuBotsFromConfig = useCallback(async () => {
     const pluginState = await window.api.getFeishuOfficialPluginState()
     const normalizedConfig = pluginState.normalizedConfig
-    if (pluginState.configChanged) {
+    if (pluginState.configChanged && pluginState.configAvailable !== false) {
       void (async () => {
         const writeResult = await window.api.applyConfigPatchGuarded({
           beforeConfig: await window.api.readConfig().then((value) => (

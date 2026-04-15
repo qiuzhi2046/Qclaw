@@ -414,6 +414,10 @@ export async function waitForDashboardGatewayRunning(
   }
 }
 
+function isGatewayLifecycleReady(result: { running?: boolean; stateCode?: string } | null | undefined): boolean {
+  return result?.running === true || result?.stateCode === 'healthy'
+}
+
 function resolveDashboardActionErrorMessage(
   error: unknown,
   fallbackMessage: string,
@@ -845,17 +849,23 @@ export default function Dashboard({
       message: '正在重新连接网关，请稍候...',
     })
     try {
-      const result = await window.api.reloadGatewayManual()
+      const result = gateway.running
+        ? await window.api.reloadGatewayManual()
+        : await window.api.ensureGatewayRunning({ skipRuntimePrecheck: true })
       if (!result?.ok) {
-        throw new Error(result?.stderr || result?.stdout || '网关重载失败')
+        throw new Error(result?.summary || result?.stderr || result?.stdout || '网关重载失败')
       }
-      const readyResult = await waitForDashboardGatewayRunning({
-        gatewayHealth: () => window.api.gatewayHealth(),
-      })
-      if (!readyResult.ok) {
-        throw new Error('已执行重新启动，但网关暂时不可用。')
+      if (!isGatewayLifecycleReady(result)) {
+        const readyResult = await waitForDashboardGatewayRunning({
+          gatewayHealth: () => window.api.gatewayHealth(),
+        })
+        if (!readyResult.ok) {
+          throw new Error('已执行重新启动，但网关暂时不可用。')
+        }
+        setGateway({ running: readyResult.health.running || false })
+      } else {
+        setGateway({ running: true })
       }
-      await fetchGatewayStatus()
       notifications.hide(notificationId)
       notifications.show({
         color: 'teal',
@@ -909,13 +919,17 @@ export default function Dashboard({
       if (!result?.ok) {
         throw new Error(result?.stderr || result?.stdout || '强制重启失败')
       }
-      const readyResult = await waitForDashboardGatewayRunning({
-        gatewayHealth: () => window.api.gatewayHealth(),
-      })
-      if (!readyResult.ok) {
-        throw new Error('已执行强制重启，但网关暂时不可用。')
+      if (!isGatewayLifecycleReady(result)) {
+        const readyResult = await waitForDashboardGatewayRunning({
+          gatewayHealth: () => window.api.gatewayHealth(),
+        })
+        if (!readyResult.ok) {
+          throw new Error('已执行强制重启，但网关暂时不可用。')
+        }
+        setGateway({ running: readyResult.health.running || false })
+      } else {
+        setGateway({ running: true })
       }
-      await fetchGatewayStatus()
       notifications.hide(notificationId)
       notifications.show({
         color: 'teal',

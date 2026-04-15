@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   gatewayHealthMock,
+  gatewayForceRestartMock,
   gatewayStatusMock,
   gatewayStartMock,
   gatewayRestartMock,
@@ -9,6 +10,7 @@ const {
   ensureGatewayRunningMock,
 } = vi.hoisted(() => ({
   gatewayHealthMock: vi.fn(),
+  gatewayForceRestartMock: vi.fn(),
   gatewayStatusMock: vi.fn(),
   gatewayStartMock: vi.fn(),
   gatewayRestartMock: vi.fn(),
@@ -18,6 +20,7 @@ const {
 
 vi.mock('../cli', () => ({
   gatewayHealth: gatewayHealthMock,
+  gatewayForceRestart: gatewayForceRestartMock,
   gatewayStatus: gatewayStatusMock,
   gatewayStart: gatewayStartMock,
   gatewayRestart: gatewayRestartMock,
@@ -30,6 +33,7 @@ vi.mock('../openclaw-gateway-service', () => ({
 
 import {
   ensureGatewayReady,
+  forceRestartGatewayLifecycle,
   reloadGatewayForConfigChange,
   restartGatewayLifecycle,
   startGatewayLifecycle,
@@ -66,6 +70,7 @@ function createCliOkResult() {
 describe('gateway lifecycle controller', () => {
   beforeEach(() => {
     gatewayHealthMock.mockReset()
+    gatewayForceRestartMock.mockReset()
     gatewayStatusMock.mockReset()
     gatewayStartMock.mockReset()
     gatewayRestartMock.mockReset()
@@ -80,6 +85,7 @@ describe('gateway lifecycle controller', () => {
       stateCode: 'healthy',
       summary: 'ok',
     })
+    gatewayForceRestartMock.mockResolvedValue(createCliOkResult())
     gatewayStatusMock.mockResolvedValue({
       ok: true,
       running: true,
@@ -225,6 +231,60 @@ describe('gateway lifecycle controller', () => {
     expect(gatewayRestartMock).toHaveBeenCalledTimes(1)
     expect(ensureGatewayRunningMock).toHaveBeenCalledTimes(0)
     expect(gatewayStatusMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('force restarts and returns the confirmed gateway status from the main process', async () => {
+    gatewayStatusMock.mockResolvedValueOnce({
+      running: true,
+      rpcReachable: true,
+      raw: '{"ok":true}',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: '网关已确认可用',
+    })
+
+    const result = await forceRestartGatewayLifecycle('manual-force-restart')
+
+    expect(result).toMatchObject({
+      ok: true,
+      running: true,
+      stateCode: 'healthy',
+      summary: '网关已确认可用',
+    })
+    expect(gatewayForceRestartMock).toHaveBeenCalledTimes(1)
+    expect(gatewayStatusMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('force restart accepts gateway health when status confirmation misses a running gateway', async () => {
+    gatewayStatusMock.mockResolvedValueOnce({
+      running: false,
+      raw: '{}',
+      stderr: '',
+      code: 1,
+      stateCode: 'gateway_not_running',
+      summary: 'status did not see the gateway',
+    })
+    gatewayHealthMock.mockResolvedValueOnce({
+      running: true,
+      raw: '{"ok":true}',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'health confirmed the gateway',
+    })
+
+    const result = await forceRestartGatewayLifecycle('manual-force-restart')
+
+    expect(result).toMatchObject({
+      ok: true,
+      running: true,
+      stateCode: 'healthy',
+      summary: 'health confirmed the gateway',
+    })
+    expect(gatewayForceRestartMock).toHaveBeenCalledTimes(1)
+    expect(gatewayStatusMock).toHaveBeenCalledTimes(1)
+    expect(gatewayHealthMock).toHaveBeenCalledTimes(1)
   })
 
   it('treats a reload as ready when service status is healthy even if the follow-up rpc probe fails', async () => {

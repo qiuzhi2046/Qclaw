@@ -94,11 +94,11 @@ export const FEISHU_INSTALL_TUTORIAL_STEPS: FeishuInstallTutorialStep[] = [
   },
   {
     title: '第 6 步：完成配置',
-    description: '回到 Qclaw Lite，点击「完成配置」按钮。',
+    description: '回到 Qclaw Lite，等待安装器完成收尾，Qclaw 会自动完成配置。',
     images: [
       {
-        alt: '飞书步骤 6：在 Qclaw Lite 中点击完成配置',
-        caption: '确认安装器输出正常后，点击右下角「完成配置」。',
+        alt: '飞书步骤 6：在 Qclaw Lite 中等待自动完成配置',
+        caption: '确认安装器输出正常后，等待 Qclaw 自动完成配置。',
         src: feishuStep6Finish,
       },
     ],

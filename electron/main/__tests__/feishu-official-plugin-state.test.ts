@@ -95,6 +95,30 @@ describe('getFeishuOfficialPluginState', () => {
     expect(result.normalizedConfig.plugins.installs).toEqual({})
   })
 
+  it('does not synthesize a writable config when the current config cannot be read', async () => {
+    getOpenClawPathsMock.mockResolvedValue({
+      homeDir: '/Users/alice/.openclaw',
+    })
+    readConfigMock.mockRejectedValue(new Error('temporarily unavailable'))
+
+    const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+    const accessSpy = vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined)
+
+    try {
+      const { getFeishuOfficialPluginState } = await import('../feishu-official-plugin-state')
+      const result = await getFeishuOfficialPluginState()
+
+      expect(result.installedOnDisk).toBe(true)
+      expect(result.configAvailable).toBe(false)
+      expect(result.configChanged).toBe(false)
+      expect(result.officialPluginConfigured).toBe(false)
+      expect(result.legacyPluginIdsPresent).toEqual([])
+      expect(result.normalizedConfig).toEqual({})
+    } finally {
+      accessSpy.mockRestore()
+    }
+  })
+
   it('keeps official plugin config when the plugin is installed on disk while still removing legacy residue', async () => {
     getOpenClawPathsMock.mockResolvedValue({
       homeDir: '/Users/alice/.openclaw',
@@ -307,6 +331,32 @@ describe('getFeishuOfficialPluginState', () => {
       expect(result.state.installedOnDisk).toBe(true)
       expect(applyConfigPatchGuardedMock).toHaveBeenCalled()
       expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('feishu-official-plugin-install')
+    } finally {
+      accessSpy.mockRestore()
+    }
+  })
+
+  it('stops readiness repair without writing or reinstalling when config cannot be read', async () => {
+    getOpenClawPathsMock.mockResolvedValue({
+      homeDir: '/Users/alice/.openclaw',
+    })
+    readConfigMock.mockRejectedValue(new Error('temporarily unavailable'))
+
+    const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+    const accessSpy = vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined)
+
+    try {
+      const { ensureFeishuOfficialPluginReady } = await import('../feishu-official-plugin-state')
+      const result = await ensureFeishuOfficialPluginReady()
+
+      expect(result.ok).toBe(false)
+      expect(result.state.configAvailable).toBe(false)
+      expect(result.message).toBe('飞书插件预检查失败')
+      expect(result.stderr).toContain('配置读取失败')
+      expect(applyConfigPatchGuardedMock).not.toHaveBeenCalled()
+      expect(repairIncompatibleExtensionPluginsMock).not.toHaveBeenCalled()
+      expect(installPluginNpxMock).not.toHaveBeenCalled()
+      expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
     } finally {
       accessSpy.mockRestore()
     }
