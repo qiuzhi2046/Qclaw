@@ -39,4 +39,16 @@ describe('formatDisplayPath', () => {
       '~/.openclaw/openclaw.json'
     )
   })
+
+  it('does not convert same-length paths outside the user home', () => {
+    expect(formatDisplayPath('/Users/bobby/.openclaw/openclaw.json', '/Users/alice')).toBe(
+      '/Users/bobby/.openclaw/openclaw.json'
+    )
+  })
+
+  it('accepts either path separator after a matching Windows home prefix', () => {
+    expect(formatDisplayPath('C:\\Users\\alice/.openclaw/openclaw.json', 'C:\\Users\\alice', 'win32')).toBe(
+      '~/.openclaw/openclaw.json'
+    )
+  })
 })

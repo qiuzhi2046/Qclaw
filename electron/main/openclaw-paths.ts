@@ -81,8 +81,8 @@ export function formatDisplayPath(
   const remainder = normalizedPath.slice(normalizedHomeDir.length)
   const isMatch =
     normalizedPath === normalizedHomeDir ||
-    remainder.startsWith('/') ||
-    remainder.startsWith('\\')
+    (normalizedPath.startsWith(normalizedHomeDir) &&
+      (remainder.startsWith('/') || remainder.startsWith('\\')))
 
   if (!isMatch) return normalizedPath
   return `~${normalizedPath.slice(normalizedHomeDir.length)}`
