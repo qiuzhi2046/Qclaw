@@ -14,6 +14,7 @@ const {
   resolveMainAuthStorePathMock,
   resolveLocalAuthStorePathMock,
   upsertApiKeyAuthProfileMock,
+  applyOpenClawProviderApiKeyAuthChoiceMock,
 } = vi.hoisted(() => ({
   confirmRuntimeReconcileMock: vi.fn(),
   defaultEnsureGatewayRunningMock: vi.fn(),
@@ -38,6 +39,7 @@ const {
   resolveMainAuthStorePathMock: vi.fn(),
   resolveLocalAuthStorePathMock: vi.fn(),
   upsertApiKeyAuthProfileMock: vi.fn(),
+  applyOpenClawProviderApiKeyAuthChoiceMock: vi.fn(),
 }))
 
 vi.mock('../openclaw-runtime-reconcile', () => ({
@@ -62,6 +64,10 @@ vi.mock('../local-model-probe', () => ({
   upsertApiKeyAuthProfile: upsertApiKeyAuthProfileMock,
 }))
 
+vi.mock('../openclaw-direct-api-key-auth', () => ({
+  applyOpenClawProviderApiKeyAuthChoice: applyOpenClawProviderApiKeyAuthChoiceMock,
+}))
+
 const qwenMethod: OpenClawAuthMethodDescriptor = {
   authChoice: 'qwen-portal',
   label: 'OAuth · qwen-portal',
@@ -82,6 +88,18 @@ const openaiApiKeyMethod: OpenClawAuthMethodDescriptor = {
   route: {
     kind: 'onboard',
     cliFlag: '--openai-api-key',
+    requiresSecret: true,
+  },
+}
+
+const zaiCnApiKeyMethod: OpenClawAuthMethodDescriptor = {
+  authChoice: 'zai-cn',
+  label: 'API Key · zai-cn',
+  kind: 'apiKey',
+  route: {
+    kind: 'onboard',
+    providerId: 'zai',
+    cliFlag: '--zai-api-key',
     requiresSecret: true,
   },
 }
@@ -147,6 +165,7 @@ describe('executeAuthRoute', () => {
     resolveMainAuthStorePathMock.mockReset()
     resolveLocalAuthStorePathMock.mockReset()
     upsertApiKeyAuthProfileMock.mockReset()
+    applyOpenClawProviderApiKeyAuthChoiceMock.mockReset()
 
     confirmRuntimeReconcileMock.mockResolvedValue({
       runtime: {
@@ -616,6 +635,357 @@ describe('executeAuthRoute', () => {
       apiKey: 'sk-live-123',
     })
     expect(result.ok).toBe(true)
+  })
+
+  it('uses a direct ZAI api key path and writes the CN provider preset without running onboard', async () => {
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const readGatewayStatus = vi.fn(async () => ({
+      ok: true,
+      running: false,
+      raw: '',
+      stdout: '',
+      stderr: '',
+      code: 0,
+      stateCode: 'gateway_not_running',
+      summary: 'not running',
+    }))
+    const writeConfig = vi.fn(async (_config: any) => {})
+    const readConfig = vi.fn().mockResolvedValue({
+      agents: {
+        defaults: {
+          models: {},
+        },
+      },
+      models: {
+        providers: {
+          zai: {
+            baseUrl: 'https://api.z.ai/api/paas/v4',
+            models: [{ id: 'glm-4.5', name: 'GLM-4.5' }],
+          },
+        },
+      },
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: zaiCnApiKeyMethod,
+        providerId: 'zai',
+        methodId: 'zai-cn',
+        secret: 'zai-live-123',
+      },
+      { runCommand, readConfig, writeConfig, readGatewayStatus } as any
+    )
+
+    expect(upsertApiKeyAuthProfileMock).toHaveBeenCalledWith(
+      {
+        provider: 'zai',
+        apiKey: 'zai-live-123',
+      },
+      expect.objectContaining({
+        getModelStatusCommand: expect.any(Function),
+        resolveRuntimePaths: expect.any(Function),
+      })
+    )
+    expect(runCommand).not.toHaveBeenCalled()
+    expect(defaultEnsureGatewayRunningMock).toHaveBeenCalledTimes(1)
+    expect(writeConfig).toHaveBeenCalledTimes(1)
+    const writtenConfig = writeConfig.mock.calls[0][0]
+    expect(writtenConfig.models.providers.zai.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4')
+    expect(writtenConfig.models.providers.zai.api).toBe('openai-completions')
+    expect(writtenConfig.models.providers.zai.models.map((entry: any) => entry.id)).toContain('glm-5.1')
+    expect(writtenConfig.models.providers.zai.models.map((entry: any) => entry.id)).toContain('glm-4.5')
+    expect(writtenConfig.agents.defaults.model.primary).toBe('zai/glm-5.1')
+    expect(writtenConfig.agents.defaults.models['zai/glm-5.1'].alias).toBe('GLM')
+    expect(result.ok).toBe(true)
+    expect(result.attemptedCommands).toEqual([['health', '--json']])
+  })
+
+  it('does not fail direct ZAI auth when gateway reload confirmation is not ready', async () => {
+    defaultEnsureGatewayRunningMock.mockResolvedValueOnce({
+      ok: false,
+      running: false,
+      autoInstalledNode: false,
+      autoInstalledOpenClaw: false,
+      autoInstalledGatewayService: false,
+      autoPortMigrated: false,
+      effectivePort: 0,
+      stateCode: 'gateway_not_running',
+      attemptedCommands: [['health', '--json']],
+      evidence: [],
+      repairActionsTried: [],
+      repairOutcome: 'failed',
+      safeToRetry: true,
+      reasonDetail: null,
+      stdout: '',
+      stderr: '',
+      code: 1,
+      summary: '网关可用性确认失败',
+    })
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const readGatewayStatus = vi.fn(async () => ({
+      ok: true,
+      running: false,
+      raw: '',
+      stdout: '',
+      stderr: '',
+      code: 0,
+      stateCode: 'gateway_not_running',
+      summary: 'not running',
+    }))
+    const writeConfig = vi.fn(async (_config: any) => {})
+    const readConfig = vi.fn().mockResolvedValue({
+      models: {
+        providers: {},
+      },
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: zaiCnApiKeyMethod,
+        providerId: 'zai',
+        methodId: 'zai-cn',
+        secret: 'zai-live-123',
+      },
+      { runCommand, readConfig, writeConfig, readGatewayStatus } as any
+    )
+
+    expect(runCommand).not.toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.stderr).toContain('无法确认网关已加载最新模型配置')
+    expect(result.attemptedCommands).toEqual([['health', '--json']])
+  })
+
+  it('uses the OpenClaw provider direct api key path for other supported providers and reloads the gateway', async () => {
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'restarted', stderr: '', code: 0 }))
+    const readGatewayStatus = vi.fn(async () => ({
+      ok: true,
+      running: true,
+      raw: '',
+      stdout: '',
+      stderr: '',
+      code: 0,
+      stateCode: 'healthy',
+      summary: 'running',
+    }))
+    const writeConfig = vi.fn(async (_config: any) => {})
+    const readConfig = vi.fn().mockResolvedValue({
+      models: {
+        providers: {},
+      },
+    })
+    const applyDirectProviderApiKeyAuthChoice = vi.fn(async ({ config }: any) => ({
+      ok: true,
+      providerId: 'openai',
+      methodId: 'api-key',
+      config: {
+        ...config,
+        models: {
+          providers: {
+            openai: {
+              api: 'openai-responses',
+              models: [{ id: 'gpt-5.1', name: 'GPT-5.1' }],
+            },
+          },
+        },
+      },
+    }))
+
+    const result = await executeAuthRoute(
+      {
+        method: openaiApiKeyMethod,
+        providerId: 'openai',
+        methodId: 'openai-api-key',
+        secret: 'sk-live-123',
+      },
+      {
+        runCommand,
+        readConfig,
+        writeConfig,
+        readGatewayStatus,
+        applyDirectProviderApiKeyAuthChoice,
+      } as any
+    )
+
+    expect(applyDirectProviderApiKeyAuthChoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authChoice: 'openai-api-key',
+        apiKey: 'sk-live-123',
+        agentDir: expect.any(String),
+      })
+    )
+    expect(writeConfig).toHaveBeenCalledTimes(1)
+    expect(runCommand).toHaveBeenCalledWith(['gateway', 'restart'], expect.any(Number))
+    expect(defaultEnsureGatewayRunningMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(result.attemptedCommands).toEqual([['gateway', 'restart'], ['health', '--json']])
+  })
+
+  it('can enable the default OpenClaw provider direct api key path even when a command runner is supplied', async () => {
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'restarted', stderr: '', code: 0 }))
+    const readGatewayStatus = vi.fn(async () => ({
+      ok: true,
+      running: false,
+      raw: '',
+      stdout: '',
+      stderr: '',
+      code: 0,
+      stateCode: 'gateway_not_running',
+      summary: 'stopped',
+    }))
+    const writeConfig = vi.fn(async (_config: any) => {})
+    const readConfig = vi.fn().mockResolvedValue({
+      models: {
+        providers: {},
+      },
+    })
+    applyOpenClawProviderApiKeyAuthChoiceMock.mockResolvedValue({
+      ok: true,
+      providerId: 'openai',
+      methodId: 'api-key',
+      config: {
+        models: {
+          providers: {
+            openai: {
+              api: 'openai-responses',
+              models: [{ id: 'gpt-5.1', name: 'GPT-5.1' }],
+            },
+          },
+        },
+      },
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: openaiApiKeyMethod,
+        providerId: 'openai',
+        methodId: 'openai-api-key',
+        secret: 'sk-live-123',
+      },
+      {
+        runCommand,
+        readConfig,
+        writeConfig,
+        readGatewayStatus,
+        enableDefaultDirectProviderApiKeyAuth: true,
+      } as any
+    )
+
+    expect(applyOpenClawProviderApiKeyAuthChoiceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authChoice: 'openai-api-key',
+        apiKey: 'sk-live-123',
+      })
+    )
+    expect(runCommand).not.toHaveBeenCalledWith(expect.arrayContaining(['onboard']), expect.any(Number))
+    expect(result.ok).toBe(true)
+  })
+
+  it('reports direct ZAI config write failures without hiding them behind onboard fallback', async () => {
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const writeConfig = vi.fn(async () => {
+      throw new Error('DataGuard baseline backup failed')
+    })
+    const readConfig = vi.fn().mockResolvedValue({
+      models: {
+        providers: {},
+      },
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: zaiCnApiKeyMethod,
+        providerId: 'zai',
+        methodId: 'zai-cn',
+        secret: 'zai-live-123',
+      },
+      { runCommand, readConfig, writeConfig } as any
+    )
+
+    expect(runCommand).not.toHaveBeenCalled()
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('写入 OpenClaw 模型配置失败')
+    expect(result.message).toContain('DataGuard baseline backup failed')
+    expect(result.attemptedCommands).toEqual([])
+  })
+
+  it('falls back to official ZAI onboard when the direct api key path cannot write the auth profile', async () => {
+    upsertApiKeyAuthProfileMock.mockResolvedValueOnce({
+      ok: false,
+      created: false,
+      updated: false,
+      profileId: 'zai:default',
+      error: 'auth store locked',
+    })
+    const runCommand = vi.fn(async () => ({ ok: true, stdout: 'configured', stderr: '', code: 0 }))
+    const readConfig = vi.fn().mockResolvedValue({
+      gateway: {
+        auth: {
+          token: 'same-token',
+        },
+      },
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: zaiCnApiKeyMethod,
+        providerId: 'zai',
+        methodId: 'zai-cn',
+        secret: 'zai-live-123',
+      },
+      { runCommand, readConfig } as any
+    )
+
+    expect(runCommand).toHaveBeenCalledWith(
+      [
+        'onboard',
+        '--non-interactive',
+        '--auth-choice',
+        'zai-cn',
+        '--zai-api-key',
+        'zai-live-123',
+        '--accept-risk',
+        '--no-install-daemon',
+        '--skip-channels',
+        '--skip-health',
+        '--skip-skills',
+        '--skip-ui',
+      ],
+      expect.any(Number)
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it('keeps the direct ZAI auth-profile failure when onboard fallback also fails generically', async () => {
+    upsertApiKeyAuthProfileMock.mockResolvedValueOnce({
+      ok: false,
+      created: false,
+      updated: false,
+      profileId: 'zai:default',
+      error: 'auth store locked',
+    })
+    const runCommand = vi.fn(async () => ({ ok: false, stdout: '', stderr: '', code: 1 }))
+    const readConfig = vi.fn().mockResolvedValue({
+      gateway: {
+        auth: {
+          token: 'same-token',
+        },
+      },
+    })
+
+    const result = await executeAuthRoute(
+      {
+        method: zaiCnApiKeyMethod,
+        providerId: 'zai',
+        methodId: 'zai-cn',
+        secret: 'zai-live-123',
+      },
+      { runCommand, readConfig } as any
+    )
+
+    expect(runCommand).toHaveBeenCalled()
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('同步 main agent 的 auth profile')
+    expect(result.message).toContain('auth store locked')
   })
 
   it('temporarily makes main the default agent for onboard auth flows and restores the original agent order', async () => {

@@ -27,6 +27,11 @@ import { extractStalePluginConfigEntryIds, pruneStalePluginConfigEntries } from 
 import { repairKnownProviderConfigGaps } from './openclaw-provider-config-repair'
 import { applyGatewaySecretAction } from './gateway-secret-apply'
 import {
+  applyOpenClawProviderApiKeyAuthChoice,
+  type DirectProviderApiKeyAuthApplyParams,
+  type DirectProviderApiKeyAuthApplyResult,
+} from './openclaw-direct-api-key-auth'
+import {
   confirmRuntimeReconcile,
   issueDesiredRuntimeRevision,
   markRuntimeRevisionInProgress,
@@ -128,6 +133,10 @@ interface ExecuteAuthRouteOptions {
   ensureGatewayRunning?: () => Promise<GatewayEnsureRunningResult>
   readGatewayStatus?: () => Promise<GatewayStatusCheckResult>
   repairMiniMaxOauthAgentAuthProfiles?: () => Promise<void>
+  applyDirectProviderApiKeyAuthChoice?: (
+    params: DirectProviderApiKeyAuthApplyParams
+  ) => Promise<DirectProviderApiKeyAuthApplyResult>
+  enableDefaultDirectProviderApiKeyAuth?: boolean
 }
 
 async function defaultRunCommand(args: string[], timeout?: number): Promise<CliResult> {
@@ -724,6 +733,669 @@ async function syncMainApiKeyAuthProfile(params: {
   }
 }
 
+async function syncMainApiKeyAuthProfileViaRuntimePath(params: {
+  providerId: string
+  apiKey?: string
+}): Promise<
+  | {
+      ok: true
+    }
+  | {
+      ok: false
+      message: string
+    }
+> {
+  const providerId = String(params.providerId || '').trim()
+  const apiKey = String(params.apiKey || '').trim()
+  if (!providerId || !apiKey) {
+    return { ok: true }
+  }
+
+  const { upsertApiKeyAuthProfile } = await import('./local-model-probe')
+  const { resolveRuntimeOpenClawPaths } = await import('./openclaw-runtime-paths')
+  const syncResult = await upsertApiKeyAuthProfile(
+    {
+      provider: providerId,
+      apiKey,
+    },
+    {
+      getModelStatusCommand: async () => ({
+        ok: false,
+        stdout: '',
+        stderr: 'skipped for direct api-key auth profile write',
+        code: null,
+      }),
+      resolveRuntimePaths: () => resolveRuntimeOpenClawPaths(),
+    }
+  )
+  if (syncResult.ok) {
+    return { ok: true }
+  }
+
+  return {
+    ok: false,
+    message: buildMainAuthProfileSyncFailureMessage({
+      providerId,
+      error: syncResult.error || 'Failed to write main auth profile',
+    }),
+  }
+}
+
+async function resolveMainAgentDirViaRuntimePath(): Promise<string> {
+  const { resolveMainAuthStorePath } = await import('./local-model-probe')
+  const { resolveRuntimeOpenClawPaths } = await import('./openclaw-runtime-paths')
+  const authStorePath = await resolveMainAuthStorePath({
+    getModelStatusCommand: async () => ({
+      ok: false,
+      stdout: '',
+      stderr: 'skipped for direct provider api-key auth',
+      code: null,
+    }),
+    resolveRuntimePaths: () => resolveRuntimeOpenClawPaths(),
+  })
+  return dirname(authStorePath)
+}
+
+const ZAI_DIRECT_AUTH_CHOICES = new Set([
+  'zai-api-key',
+  'zai-global',
+  'zai-cn',
+  'zai-coding-global',
+  'zai-coding-cn',
+])
+
+const ZAI_BASE_URL_BY_AUTH_CHOICE: Record<string, string> = {
+  'zai-api-key': 'https://api.z.ai/api/paas/v4',
+  'zai-global': 'https://api.z.ai/api/paas/v4',
+  'zai-cn': 'https://open.bigmodel.cn/api/paas/v4',
+  'zai-coding-global': 'https://api.z.ai/api/coding/paas/v4',
+  'zai-coding-cn': 'https://open.bigmodel.cn/api/coding/paas/v4',
+}
+
+const ZAI_DEFAULT_MODEL_REF = 'zai/glm-5.1'
+const ZAI_DEFAULT_COST = {
+  input: 1,
+  output: 3.2,
+  cacheRead: 0.2,
+  cacheWrite: 0,
+}
+const ZAI_MODEL_CATALOG: Record<
+  string,
+  {
+    name: string
+    reasoning: boolean
+    input: string[]
+    contextWindow: number
+    maxTokens: number
+    cost: typeof ZAI_DEFAULT_COST
+  }
+> = {
+  'glm-5.1': {
+    name: 'GLM-5.1',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 202800,
+    maxTokens: 131100,
+    cost: {
+      input: 1.2,
+      output: 4,
+      cacheRead: 0.24,
+      cacheWrite: 0,
+    },
+  },
+  'glm-5': {
+    name: 'GLM-5',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 202800,
+    maxTokens: 131100,
+    cost: ZAI_DEFAULT_COST,
+  },
+  'glm-5-turbo': {
+    name: 'GLM-5 Turbo',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 202800,
+    maxTokens: 131100,
+    cost: {
+      input: 1.2,
+      output: 4,
+      cacheRead: 0.24,
+      cacheWrite: 0,
+    },
+  },
+  'glm-5v-turbo': {
+    name: 'GLM-5V Turbo',
+    reasoning: true,
+    input: ['text', 'image'],
+    contextWindow: 202800,
+    maxTokens: 131100,
+    cost: {
+      input: 1.2,
+      output: 4,
+      cacheRead: 0.24,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.7': {
+    name: 'GLM-4.7',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 204800,
+    maxTokens: 131072,
+    cost: {
+      input: 0.6,
+      output: 2.2,
+      cacheRead: 0.11,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.7-flash': {
+    name: 'GLM-4.7 Flash',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 200000,
+    maxTokens: 131072,
+    cost: {
+      input: 0.07,
+      output: 0.4,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.7-flashx': {
+    name: 'GLM-4.7 FlashX',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 200000,
+    maxTokens: 128000,
+    cost: {
+      input: 0.06,
+      output: 0.4,
+      cacheRead: 0.01,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.6': {
+    name: 'GLM-4.6',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 204800,
+    maxTokens: 131072,
+    cost: {
+      input: 0.6,
+      output: 2.2,
+      cacheRead: 0.11,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.6v': {
+    name: 'GLM-4.6V',
+    reasoning: true,
+    input: ['text', 'image'],
+    contextWindow: 128000,
+    maxTokens: 32768,
+    cost: {
+      input: 0.3,
+      output: 0.9,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.5': {
+    name: 'GLM-4.5',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 131072,
+    maxTokens: 98304,
+    cost: {
+      input: 0.6,
+      output: 2.2,
+      cacheRead: 0.11,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.5-air': {
+    name: 'GLM-4.5 Air',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 131072,
+    maxTokens: 98304,
+    cost: {
+      input: 0.2,
+      output: 1.1,
+      cacheRead: 0.03,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.5-flash': {
+    name: 'GLM-4.5 Flash',
+    reasoning: true,
+    input: ['text'],
+    contextWindow: 131072,
+    maxTokens: 98304,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  },
+  'glm-4.5v': {
+    name: 'GLM-4.5V',
+    reasoning: true,
+    input: ['text', 'image'],
+    contextWindow: 64000,
+    maxTokens: 16384,
+    cost: {
+      input: 0.6,
+      output: 1.8,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  },
+}
+
+const ZAI_DEFAULT_MODEL_IDS = [
+  'glm-5.1',
+  'glm-5',
+  'glm-5-turbo',
+  'glm-5v-turbo',
+  'glm-4.7',
+  'glm-4.7-flash',
+  'glm-4.7-flashx',
+  'glm-4.6',
+  'glm-4.6v',
+  'glm-4.5',
+  'glm-4.5-air',
+  'glm-4.5-flash',
+  'glm-4.5v',
+]
+
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function cloneJsonValue<T>(value: T): T {
+  if (value === undefined) return value
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function normalizeString(value: unknown): string {
+  return String(value || '').trim()
+}
+
+function normalizeProviderKey(value: unknown): string {
+  return normalizeString(value).toLowerCase()
+}
+
+function findNormalizedProviderKey(providers: Record<string, any>, providerId: string): string | undefined {
+  const normalizedProviderId = normalizeProviderKey(providerId)
+  return Object.keys(providers).find((key) => normalizeProviderKey(key) === normalizedProviderId)
+}
+
+function buildZaiModelDefinition(modelId: string): Record<string, any> {
+  const catalog = ZAI_MODEL_CATALOG[modelId]
+  return {
+    id: modelId,
+    name: catalog?.name || `GLM ${modelId}`,
+    reasoning: catalog?.reasoning ?? true,
+    input: catalog?.input ? [...catalog.input] : ['text'],
+    cost: catalog?.cost ? { ...catalog.cost } : { ...ZAI_DEFAULT_COST },
+    contextWindow: catalog?.contextWindow ?? 202800,
+    maxTokens: catalog?.maxTokens ?? 131100,
+  }
+}
+
+function resolveModelEntryId(entry: unknown): string {
+  if (typeof entry === 'string') return normalizeString(entry)
+  if (!isPlainRecord(entry)) return ''
+  return normalizeString(entry.id ?? entry.key ?? entry.model)
+}
+
+function mergeZaiModelCatalog(existingModels: unknown): Record<string, any>[] {
+  const existing: Record<string, any>[] = []
+  if (Array.isArray(existingModels)) {
+    for (const entry of existingModels) {
+      const cloned = cloneJsonValue(entry)
+      if (typeof cloned === 'string') {
+        existing.push({ id: cloned, name: cloned })
+      } else if (isPlainRecord(cloned)) {
+        existing.push(cloned)
+      }
+    }
+  }
+  const seen = new Set(existing.map((entry) => resolveModelEntryId(entry)).filter(Boolean))
+  const merged = [...existing]
+  for (const modelId of ZAI_DEFAULT_MODEL_IDS) {
+    if (seen.has(modelId)) continue
+    merged.push(buildZaiModelDefinition(modelId))
+    seen.add(modelId)
+  }
+  return merged.length > 0 ? merged : ZAI_DEFAULT_MODEL_IDS.map(buildZaiModelDefinition)
+}
+
+function buildConfigWithZaiPreset(
+  currentConfig: Record<string, any> | null | undefined,
+  authChoice: string
+): Record<string, any> {
+  const nextConfig = isPlainRecord(currentConfig) ? cloneJsonValue(currentConfig) : {}
+  const models = isPlainRecord(nextConfig.models) ? { ...nextConfig.models } : {}
+  const providers = isPlainRecord(models.providers) ? { ...models.providers } : {}
+  const existingProviderKey = findNormalizedProviderKey(providers, 'zai')
+  const existingProvider = existingProviderKey && isPlainRecord(providers[existingProviderKey])
+    ? cloneJsonValue(providers[existingProviderKey])
+    : {}
+  if (existingProviderKey && existingProviderKey !== 'zai') {
+    delete providers[existingProviderKey]
+  }
+
+  providers.zai = {
+    ...existingProvider,
+    baseUrl: ZAI_BASE_URL_BY_AUTH_CHOICE[authChoice] || ZAI_BASE_URL_BY_AUTH_CHOICE['zai-api-key'],
+    api: 'openai-completions',
+    models: mergeZaiModelCatalog(existingProvider.models),
+  }
+  nextConfig.models = {
+    ...models,
+    mode: models.mode ?? 'merge',
+    providers,
+  }
+
+  const agents = isPlainRecord(nextConfig.agents) ? { ...nextConfig.agents } : {}
+  const defaults = isPlainRecord(agents.defaults) ? { ...agents.defaults } : {}
+  const defaultModels = isPlainRecord(defaults.models) ? { ...defaults.models } : {}
+  const existingAliasEntry = isPlainRecord(defaultModels[ZAI_DEFAULT_MODEL_REF])
+    ? defaultModels[ZAI_DEFAULT_MODEL_REF]
+    : {}
+  defaultModels[ZAI_DEFAULT_MODEL_REF] = {
+    ...existingAliasEntry,
+    alias: normalizeString(existingAliasEntry.alias) || 'GLM',
+  }
+  const defaultModel = isPlainRecord(defaults.model) ? { ...defaults.model } : {}
+  defaultModel.primary = ZAI_DEFAULT_MODEL_REF
+  nextConfig.agents = {
+    ...agents,
+    defaults: {
+      ...defaults,
+      models: defaultModels,
+      model: defaultModel,
+    },
+  }
+
+  return nextConfig
+}
+
+function resolveDirectZaiApiKeyAuthChoice(input: ExecuteAuthRouteInput): string {
+  if (input.method.kind !== 'apiKey') return ''
+  if (input.method.route.kind !== 'onboard') return ''
+  if (!input.method.route.requiresSecret) return ''
+  const authChoice = normalizeAuthChoice(input.method.authChoice || input.methodId)
+  if (!ZAI_DIRECT_AUTH_CHOICES.has(authChoice)) return ''
+  const providerId = normalizeProviderKey(input.providerId || input.method.route.providerId || 'zai')
+  if (providerId && providerId !== 'zai') return ''
+  return authChoice
+}
+
+function formatUnknownError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error || '')
+  return normalizeString(message) || fallback
+}
+
+function buildZaiConfigWriteFailureMessage(error: unknown): string {
+  return [
+    '智谱 API Key 已写入本地认证存储，但 Qclaw 写入 OpenClaw 模型配置失败。',
+    `失败原因：${formatUnknownError(error, 'unknown error')}`,
+  ].join('\n')
+}
+
+function buildDirectApiKeyGatewayReloadFailureMessage(params: {
+  authChoice: string
+  detail: string
+}): string {
+  return [
+    `API Key 认证信息 "${params.authChoice}" 已写入，但 Qclaw 无法确认网关已加载最新模型配置。`,
+    `失败原因：${params.detail}`,
+  ].join('\n')
+}
+
+async function reloadGatewayAfterDirectApiKeyAuth(params: {
+  routeKind: OnboardRouteKind
+  authChoice: string
+  attemptedCommands: string[][]
+  runCommand: (args: string[], timeout?: number) => Promise<CliResult>
+  ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
+  readGatewayStatus?: () => Promise<GatewayStatusCheckResult>
+  extras: Partial<ExecuteAuthRouteResult>
+  successResult: CliResult
+}): Promise<{ ok: true; warning?: string }> {
+  const gatewayStatus = params.readGatewayStatus ? await params.readGatewayStatus().catch(() => null) : null
+  const gatewayKnownStopped = gatewayStatus?.running === false
+  const gatewayKnownRunning = gatewayStatus?.running === true
+
+  if (!gatewayKnownStopped) {
+    const restartCommand = ['gateway', 'restart']
+    params.attemptedCommands.push(restartCommand)
+    const restartResult = await params.runCommand(restartCommand, GATEWAY_RESTART_TIMEOUT_MS)
+    if (!restartResult.ok && gatewayKnownRunning) {
+      return {
+        ok: true,
+        warning: buildDirectApiKeyGatewayReloadFailureMessage({
+          authChoice: params.authChoice,
+          detail: getCliFailureMessage(restartResult, '网关重启失败'),
+        }),
+      }
+    }
+  }
+
+  const ensureResult = await params.ensureGatewayRunning()
+  appendAttemptedCommands(params.attemptedCommands, ensureResult.attemptedCommands)
+  if (!ensureResult.ok || !ensureResult.running) {
+    return {
+      ok: true,
+      warning: buildDirectApiKeyGatewayReloadFailureMessage({
+        authChoice: params.authChoice,
+        detail: ensureResult.summary || getCliFailureMessage(ensureResult, '网关可用性确认失败'),
+      }),
+    }
+  }
+
+  return { ok: true }
+}
+
+async function executeDirectZaiApiKeyAuthRoute(params: {
+  input: ExecuteAuthRouteInput
+  routeMethodId?: string
+  readConfig: () => Promise<Record<string, any> | null>
+  writeConfig: (beforeConfig: Record<string, any> | null, nextConfig: Record<string, any>) => Promise<void>
+  runCommand: (args: string[], timeout?: number) => Promise<CliResult>
+  ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
+  readGatewayStatus?: () => Promise<GatewayStatusCheckResult>
+  onFallback?: (message: string) => void
+}): Promise<ExecuteAuthRouteResult | null> {
+  const authChoice = resolveDirectZaiApiKeyAuthChoice(params.input)
+  const apiKey = normalizeString(params.input.secret)
+  if (!authChoice || !apiKey) return null
+
+  const authProfileSync = await syncMainApiKeyAuthProfileViaRuntimePath({
+    providerId: 'zai',
+    apiKey,
+  }).catch((error) => ({
+    ok: false as const,
+    message: buildMainAuthProfileSyncFailureMessage({
+      providerId: 'zai',
+      error: formatUnknownError(error, 'Failed to write main auth profile'),
+    }),
+  }))
+  if (!authProfileSync.ok) {
+    params.onFallback?.(authProfileSync.message)
+    return null
+  }
+
+  const configBeforeAuth = await params.readConfig().catch(() => null)
+  const nextConfig = buildConfigWithZaiPreset(configBeforeAuth, authChoice)
+  try {
+    await params.writeConfig(configBeforeAuth, nextConfig)
+  } catch (error) {
+    return failed(params.input.method.route.kind, [], buildZaiConfigWriteFailureMessage(error), 'command_failed', {
+      loginProviderId: 'zai',
+      routeMethodId: params.routeMethodId,
+    })
+  }
+
+  const attemptedCommands: string[][] = []
+  const successResult: CliResult = {
+    ok: true,
+    stdout: 'configured via Qclaw direct api-key path',
+    stderr: '',
+    code: 0,
+  }
+  const reloadResult = await reloadGatewayAfterDirectApiKeyAuth({
+    routeKind: params.input.method.route.kind as OnboardRouteKind,
+    authChoice,
+    attemptedCommands,
+    runCommand: params.runCommand,
+    ensureGatewayRunning: params.ensureGatewayRunning,
+    readGatewayStatus: params.readGatewayStatus,
+    successResult,
+    extras: {
+      loginProviderId: 'zai',
+      routeMethodId: params.routeMethodId,
+    },
+  })
+
+  return {
+    ...successResult,
+    stderr: [successResult.stderr, reloadResult.warning].filter(Boolean).join('\n'),
+    attemptedCommands,
+    routeKind: params.input.method.route.kind,
+    loginProviderId: 'zai',
+    routeMethodId: params.routeMethodId,
+  }
+}
+
+function resolveDirectProviderApiKeyAuthChoice(input: ExecuteAuthRouteInput): string {
+  if (input.method.kind !== 'apiKey') return ''
+  if (input.method.route.kind !== 'onboard') return ''
+  if (!input.method.route.requiresSecret) return ''
+  return normalizeAuthChoice(input.method.authChoice || input.methodId)
+}
+
+async function executeDirectProviderApiKeyAuthRoute(params: {
+  input: ExecuteAuthRouteInput
+  routeMethodId?: string
+  readConfig: () => Promise<Record<string, any> | null>
+  writeConfig: (beforeConfig: Record<string, any> | null, nextConfig: Record<string, any>) => Promise<void>
+  runCommand: (args: string[], timeout?: number) => Promise<CliResult>
+  ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
+  readGatewayStatus?: () => Promise<GatewayStatusCheckResult>
+  applyDirectProviderApiKeyAuthChoice: (
+    params: DirectProviderApiKeyAuthApplyParams
+  ) => Promise<DirectProviderApiKeyAuthApplyResult>
+  onFallback?: (message: string) => void
+}): Promise<ExecuteAuthRouteResult | null> {
+  const authChoice = resolveDirectProviderApiKeyAuthChoice(params.input)
+  const apiKey = normalizeString(params.input.secret)
+  if (!authChoice || !apiKey) return null
+
+  const configBeforeAuth = await params.readConfig().catch(() => null)
+  const mainAgentScope = await prepareTemporaryMainAgentDefaultScope({
+    configBeforeAuth,
+    readConfig: params.readConfig,
+    writeConfig: params.writeConfig,
+  })
+  if (!mainAgentScope.ok) {
+    params.onFallback?.(mainAgentScope.message)
+    return null
+  }
+
+  let restoreScopeResult: { ok: true } | { ok: false; message: string } = { ok: true }
+  let applyResult: DirectProviderApiKeyAuthApplyResult | null = null
+  let configForAuth = configBeforeAuth
+  let wroteConfig = false
+  let directFailure: ExecuteAuthRouteResult | null = null
+  try {
+    configForAuth = await params.readConfig().catch(() => configBeforeAuth)
+    const agentDir = await resolveMainAgentDirViaRuntimePath()
+    applyResult = await params.applyDirectProviderApiKeyAuthChoice({
+      authChoice,
+      apiKey,
+      config: configForAuth,
+      agentDir,
+      workspaceDir: process.cwd(),
+      env: process.env,
+    })
+    if (!applyResult.ok || !applyResult.config) {
+      params.onFallback?.(applyResult.message || `direct provider API-key auth did not support ${authChoice}`)
+    } else {
+      try {
+        await params.writeConfig(configForAuth, applyResult.config)
+        wroteConfig = true
+      } catch (error) {
+        directFailure = failed(
+          params.input.method.route.kind,
+          [],
+          [
+            `API Key 已写入本地认证存储，但 Qclaw 写入 OpenClaw 模型配置失败。`,
+            `失败原因：${formatUnknownError(error, 'unknown error')}`,
+          ].join('\n'),
+          'command_failed',
+          {
+            loginProviderId: applyResult.providerId || params.input.method.route.providerId || params.input.providerId,
+            routeMethodId: params.routeMethodId,
+          }
+        )
+      }
+    }
+  } finally {
+    restoreScopeResult = await mainAgentScope.restore()
+  }
+
+  if (!restoreScopeResult.ok) {
+    return failed(params.input.method.route.kind, [], restoreScopeResult.message, 'command_failed', {
+      loginProviderId: applyResult?.providerId || params.input.method.route.providerId || params.input.providerId,
+      routeMethodId: params.routeMethodId,
+    })
+  }
+  if (directFailure) {
+    return directFailure
+  }
+
+  if (!wroteConfig || !applyResult?.ok) {
+    return null
+  }
+
+  const attemptedCommands: string[][] = []
+  const successResult: CliResult = {
+    ok: true,
+    stdout: 'configured via OpenClaw provider direct api-key path',
+    stderr: '',
+    code: 0,
+  }
+  const reloadResult = await reloadGatewayAfterDirectApiKeyAuth({
+    routeKind: params.input.method.route.kind as OnboardRouteKind,
+    authChoice,
+    attemptedCommands,
+    runCommand: params.runCommand,
+    ensureGatewayRunning: params.ensureGatewayRunning,
+    readGatewayStatus: params.readGatewayStatus,
+    successResult,
+    extras: {
+      loginProviderId: applyResult.providerId || params.input.method.route.providerId || params.input.providerId,
+      routeMethodId: params.routeMethodId,
+    },
+  })
+
+  return {
+    ...successResult,
+    stderr: [successResult.stderr, reloadResult.warning].filter(Boolean).join('\n'),
+    attemptedCommands,
+    routeKind: params.input.method.route.kind,
+    loginProviderId: applyResult.providerId || params.input.method.route.providerId || params.input.providerId,
+    routeMethodId: params.routeMethodId,
+  }
+}
+
 async function repairMiniMaxOauthAgentAuthProfiles(): Promise<void> {
   const { repairAgentAuthProfilesFromOtherAgentStores } = await import('./local-model-probe')
   await repairAgentAuthProfilesFromOtherAgentStores({
@@ -1171,6 +1843,12 @@ export async function executeAuthRoute(
   const readConfig = options.readConfig || defaultReadConfig
   const writeConfig = options.writeConfig
   const ensureGatewayRunning = options.ensureGatewayRunning || defaultEnsureGatewayRunning
+  const enableDefaultDirectProviderApiKeyAuth =
+    options.enableDefaultDirectProviderApiKeyAuth ??
+    (!options.runCommand && !options.runCommandWithEnv && !options.runStreamingCommand)
+  const directProviderApiKeyAuthApplier =
+    options.applyDirectProviderApiKeyAuthChoice ||
+    (enableDefaultDirectProviderApiKeyAuth ? applyOpenClawProviderApiKeyAuthChoice : undefined)
   const attemptedCommands: string[][] = []
   const method = input.method
   const route = method.route
@@ -1627,6 +2305,43 @@ export async function executeAuthRoute(
   }
 
   if (route.kind === 'onboard') {
+    let directZaiFallbackMessage = ''
+    let directProviderFallbackMessage = ''
+    const directZaiResult = await executeDirectZaiApiKeyAuthRoute({
+      input,
+      routeMethodId: resolvedRouteMethodId.value,
+      readConfig,
+      writeConfig: writeAuthConfig,
+      runCommand,
+      ensureGatewayRunning,
+      readGatewayStatus: options.readGatewayStatus,
+      onFallback: (message) => {
+        directZaiFallbackMessage = message
+      },
+    })
+    if (directZaiResult) {
+      return directZaiResult
+    }
+
+    if (directProviderApiKeyAuthApplier) {
+      const directProviderResult = await executeDirectProviderApiKeyAuthRoute({
+        input,
+        routeMethodId: resolvedRouteMethodId.value,
+        readConfig,
+        writeConfig: writeAuthConfig,
+        runCommand,
+        ensureGatewayRunning,
+        readGatewayStatus: options.readGatewayStatus,
+        applyDirectProviderApiKeyAuthChoice: directProviderApiKeyAuthApplier,
+        onFallback: (message) => {
+          directProviderFallbackMessage = message
+        },
+      })
+      if (directProviderResult) {
+        return directProviderResult
+      }
+    }
+
     const configBeforeAuth = await readConfig().catch(() => null)
     gatewayTokenBeforeAuth = readGatewayAuthToken(configBeforeAuth)
     const mainAgentAuthEnv = await resolveCommandAuthEnv().catch(() => null)
@@ -1751,11 +2466,19 @@ export async function executeAuthRoute(
         return runtimeReconcileResult.failure
       }
     }
-    return fromCommand(route.kind, attemptedCommands, result, {
+    const commandResult = fromCommand(route.kind, attemptedCommands, result, {
       loginProviderId: route.providerId,
       routeMethodId: resolvedRouteMethodId.value,
       pluginId,
     })
+    const directFallbackMessage = directZaiFallbackMessage || directProviderFallbackMessage
+    if (!commandResult.ok && directFallbackMessage && commandResult.message === 'Auth command failed') {
+      return {
+        ...commandResult,
+        message: directFallbackMessage,
+      }
+    }
+    return commandResult
   }
 
   if (route.kind === 'onboard-custom') {

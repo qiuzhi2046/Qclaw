@@ -10,7 +10,7 @@ const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 export const DEFAULT_NODE_DIST_BASE_URL = 'https://nodejs.org/dist'
 const DEFAULT_OPENCLAW_METADATA_URL = 'https://registry.npmmirror.com/openclaw/latest'
-export const DEFAULT_BUNDLED_NODE_REQUIREMENT = '22.16.0'
+export const DEFAULT_BUNDLED_NODE_REQUIREMENT = '22.19.0'
 
 const ENV_NODE_MIN_VERSION = 'QCLAW_NODE_MIN_VERSION'
 const ENV_NODE_INSTALL_VERSION = 'QCLAW_NODE_INSTALL_VERSION'
@@ -145,6 +145,15 @@ function isNodeVersionAtLeast(currentVersion: string, requiredVersion: string): 
   if (current.major !== required.major) return current.major > required.major
   if (current.minor !== required.minor) return current.minor > required.minor
   return current.patch >= required.patch
+}
+
+function enforceBundledNodeRequirementFloor(requirement: OpenClawNodeRequirement): OpenClawNodeRequirement {
+  if (requirement.source === 'env-override') return requirement
+  if (isNodeVersionAtLeast(requirement.minVersion, DEFAULT_BUNDLED_NODE_REQUIREMENT)) return requirement
+  return {
+    ...requirement,
+    minVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
+  }
 }
 
 function readEnginesNode(packageJson: Record<string, unknown> | null | undefined): string {
@@ -511,10 +520,10 @@ export async function resolveOpenClawNodeRequirement(
     const installedPackageJson = await readInstalledOpenClawPackageJson()
     const installedEnginesNode = extractMinNodeVersionFromRange(readEnginesNode(installedPackageJson))
     if (installedEnginesNode) {
-      return {
+      return enforceBundledNodeRequirementFloor({
         minVersion: installedEnginesNode,
         source: 'installed-openclaw-package' as const,
-      }
+      })
     }
 
     const fetchOpenClawMetadata = options.fetchOpenClawMetadata || getDefaultFetchOpenClawMetadata(env)
@@ -522,10 +531,10 @@ export async function resolveOpenClawNodeRequirement(
       const metadata = await fetchOpenClawMetadata()
       const registryEnginesNode = extractMinNodeVersionFromRange(readEnginesNode(metadata))
       if (registryEnginesNode) {
-        return {
+        return enforceBundledNodeRequirementFloor({
           minVersion: registryEnginesNode,
           source: 'openclaw-registry' as const,
-        }
+        })
       }
     } catch {
       // ignore metadata fetch failures and fall back to the bundled requirement.

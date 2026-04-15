@@ -446,7 +446,7 @@ export async function discoverOpenClawCapabilities(
   )
   const authRegistry = await authRegistryPromise
   const shouldSkipBootstrapOnboardHelp =
-    profile === 'bootstrap' && authRegistry.ok && authRegistry.providers.length > 0
+    profile === 'bootstrap' && authRegistry.providers.length > 0
   if (shouldSkipBootstrapOnboardHelp) {
     void appendEnvCheckDiagnostic('main-openclaw-capabilities-probe-skipped', {
       probe: 'onboard-help',

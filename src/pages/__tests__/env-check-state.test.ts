@@ -232,7 +232,7 @@ describe('createEnvCheckRestartState', () => {
 
   it('only offers the manual Node upgrade action when the installed version is below the minimum requirement', () => {
     expect(shouldOfferManualNodeUpgrade('v22.15.0')).toBe(true)
-    expect(shouldOfferManualNodeUpgrade('v22.16.0')).toBe(false)
+    expect(shouldOfferManualNodeUpgrade('v22.19.0')).toBe(false)
     expect(shouldOfferManualNodeUpgrade('v24.14.0')).toBe(false)
   })
 

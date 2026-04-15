@@ -37,7 +37,7 @@ import {
 import logoSrc from '@/assets/logo.png'
 import tooltips from '@/constants/tooltips.json'
 
-const MIN_NODE_VERSION = '22.16.0'
+const MIN_NODE_VERSION = '22.19.0'
 const MAX_OPENCLAW_LATEST_CHECK_ATTEMPTS = 3
 const ENV_CHECK_TOOLTIPS = tooltips.envCheck
 const ENV_CHECK_STEP_TOOLTIPS: Record<string, string> = {

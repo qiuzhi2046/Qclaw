@@ -27,6 +27,18 @@ describe('user-facing-cli-feedback', () => {
     expect(message).toBe('配置写入失败，请检查本机权限后重试。')
   })
 
+  it('maps local OpenClaw auth profile failures away from api-key wording', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: [
+        'OpenClaw 已完成提供商 "zai" 的认证写入，但 Qclaw 在同步 main agent 的 auth profile 时失败了。',
+        '失败原因：auth store locked',
+      ].join('\n'),
+      fallback: '认证失败，请检查 API Key 或认证配置。',
+    })
+
+    expect(message).toBe('本地 OpenClaw 认证配置写入失败，请检查配置目录权限或关闭占用后重试。')
+  })
+
   it('prefers unified permission repair diagnostics emitted by the main process marker', () => {
     const message = toUserFacingCliFailureMessage({
       stderr: [
@@ -65,6 +77,18 @@ describe('user-facing-cli-feedback', () => {
     const message = toUserFacingCliFailureMessage({
       stderr: 'Gateway did not become reachable at ws://127.0.0.1:18789.',
       fallback: 'fallback',
+    })
+
+    expect(message).toBe('网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。')
+  })
+
+  it('maps Chinese gateway reload failures instead of falling back to auth wording', () => {
+    const message = toUserFacingCliFailureMessage({
+      stderr: [
+        'API Key 认证信息 "zai-cn" 已写入，但 Qclaw 无法确认网关已加载最新模型配置。',
+        '失败原因：网关可用性确认失败',
+      ].join('\n'),
+      fallback: '认证失败，请检查 API Key 或认证配置。',
     })
 
     expect(message).toBe('网关尚未就绪，请稍后重试。若持续失败，请重启网关后再试。')

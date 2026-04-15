@@ -58,7 +58,7 @@ describe('resolveOpenClawNodeRequirement', () => {
     })
   })
 
-  it('prefers installed openclaw package metadata over remote metadata and fallback', async () => {
+  it('floors lower OpenClaw package metadata to Qclaw Node 22.19 minimum', async () => {
     const result = await resolveOpenClawNodeRequirement({
       readInstalledOpenClawPackageJson: async () => ({
         engines: {
@@ -73,7 +73,27 @@ describe('resolveOpenClawNodeRequirement', () => {
     })
 
     expect(result).toEqual({
-      minVersion: '22.16.0',
+      minVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
+      source: 'installed-openclaw-package',
+    })
+  })
+
+  it('keeps OpenClaw package metadata when it is stricter than Qclaw minimum', async () => {
+    const result = await resolveOpenClawNodeRequirement({
+      readInstalledOpenClawPackageJson: async () => ({
+        engines: {
+          node: '>=24.4.0',
+        },
+      }),
+      fetchOpenClawMetadata: async () => ({
+        engines: {
+          node: '>=24.0.0',
+        },
+      }),
+    })
+
+    expect(result).toEqual({
+      minVersion: '24.4.0',
       source: 'installed-openclaw-package',
     })
   })
@@ -112,7 +132,7 @@ describe('resolveNodeInstallPlan', () => {
 
     expect(plan).toMatchObject({
       version: 'v22.22.1',
-      requiredVersion: '22.16.0',
+      requiredVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
       source: 'official-dist-index',
       artifactKind: 'pkg',
       installerArch: 'universal',
@@ -137,7 +157,7 @@ describe('resolveNodeInstallPlan', () => {
 
     expect(plan).toMatchObject({
       version: 'v24.14.1',
-      requiredVersion: '22.16.0',
+      requiredVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
       source: 'bundled-fallback',
       artifactKind: 'zip',
       platform: 'win32',
@@ -165,7 +185,7 @@ describe('resolveNodeInstallPlan', () => {
 
     expect(plan).toMatchObject({
       version: 'v24.14.1',
-      requiredVersion: '22.16.0',
+      requiredVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
       source: 'bundled-fallback',
       artifactKind: 'zip',
       platform: 'win32',
@@ -262,7 +282,7 @@ describe('resolveNodeInstallPlan', () => {
 
     expect(plan).toMatchObject({
       version: 'v22.22.1',
-      requiredVersion: '22.16.0',
+      requiredVersion: DEFAULT_BUNDLED_NODE_REQUIREMENT,
       source: 'bundled-fallback',
       artifactKind: 'pkg',
       installerArch: 'universal',

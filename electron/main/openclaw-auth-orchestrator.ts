@@ -19,6 +19,10 @@ import {
   loadEffectiveAuthRegistry,
   resolveAuthMethodDescriptor,
 } from './openclaw-auth-executor'
+import type {
+  DirectProviderApiKeyAuthApplyParams,
+  DirectProviderApiKeyAuthApplyResult,
+} from './openclaw-direct-api-key-auth'
 import {
   loadOpenClawAuthRegistry,
   type OpenClawAuthRegistry,
@@ -125,6 +129,9 @@ interface RunAuthActionOptions {
   loadAuthRegistry?: () => Promise<OpenClawAuthRegistry>
   capabilities?: OpenClawCapabilities
   loadCapabilities?: () => Promise<OpenClawCapabilities>
+  applyDirectProviderApiKeyAuthChoice?: (
+    params: DirectProviderApiKeyAuthApplyParams
+  ) => Promise<DirectProviderApiKeyAuthApplyResult>
 }
 
 async function defaultRunCommand(args: string[], timeout?: number): Promise<CliCommandResult> {
@@ -332,6 +339,8 @@ export async function runAuthAction(
           ensureGatewayRunning,
           capabilities,
           loadCapabilities: options.loadCapabilities,
+          applyDirectProviderApiKeyAuthChoice: options.applyDirectProviderApiKeyAuthChoice,
+          enableDefaultDirectProviderApiKeyAuth: !useInjectedCommand,
         }
       )
 

@@ -983,7 +983,43 @@ export function registerIpcHandlers() {
   ipcMain.handle('models:upstream-write:apply', (_e, request) => applyModelConfigViaUpstreamControlUi(request))
   ipcMain.handle('models:provider:validate', (_e, input: ValidateProviderCredentialInput) => validateProviderCredential(input))
   ipcMain.handle('models:config:apply', (_e, action: ModelConfigAction) => applyModelConfigAction(action))
-  ipcMain.handle('models:auth:run', (_e, action: AuthAction) => runAuthAction(action))
+  ipcMain.handle('models:auth:run', async (_e, action: AuthAction) => {
+    await appendEnvCheckDiagnostic('ipc-model-auth-run-requested', {
+      kind: action?.kind || null,
+      providerId: action?.kind === 'login' ? action.providerId : null,
+      methodId: action?.kind === 'login' ? action.methodId : null,
+      hasSecret: action?.kind === 'login' ? Boolean(String(action.secret || '').trim()) : false,
+    })
+    try {
+      const result = await runAuthAction(action)
+      await appendEnvCheckDiagnostic('ipc-model-auth-run-result', {
+        kind: action?.kind || null,
+        providerId: action?.kind === 'login' ? action.providerId : null,
+        methodId: action?.kind === 'login' ? action.methodId : null,
+        ok: result.ok,
+        errorCode: result.errorCode || null,
+        code: result.code,
+        message: String(result.message || '').slice(0, 500),
+        stdout: String(result.stdout || '').slice(0, 500),
+        stderr: String(result.stderr || '').slice(0, 500),
+        attemptedCommands: result.attemptedCommands.map((command) =>
+          command.map((part, index) => {
+            const previous = index > 0 ? command[index - 1] : ''
+            return /key|token|secret/i.test(previous) ? '<redacted>' : part
+          })
+        ),
+      })
+      return result
+    } catch (error) {
+      await appendEnvCheckDiagnostic('ipc-model-auth-run-threw', {
+        kind: action?.kind || null,
+        providerId: action?.kind === 'login' ? action.providerId : null,
+        methodId: action?.kind === 'login' ? action.methodId : null,
+        message: error instanceof Error ? error.message : String(error || ''),
+      })
+      throw error
+    }
+  })
   ipcMain.handle('models:oauth:start', (event, request: StartModelOAuthRequest) =>
     startModelOAuthFlow(request, {
       emit: (channel, payload) => {

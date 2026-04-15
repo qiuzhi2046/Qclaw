@@ -221,6 +221,29 @@ describe('buildProviderOptions', () => {
     })
   })
 
+  it('uses explicit ZAI endpoint copy for standard and coding auth methods', () => {
+    expect(
+      resolveModelCenterMethodDisplayCopy({
+        providerId: 'zai',
+        methodId: 'zai-cn',
+        fallbackLabel: 'CN',
+      })
+    ).toMatchObject({
+      label: '标准 API（国内 / BigModel）',
+      hint: '使用 ZAI_API_KEY，连接 open.bigmodel.cn 标准 GLM 接口。',
+    })
+    expect(
+      resolveModelCenterMethodDisplayCopy({
+        providerId: 'zai',
+        methodId: 'zai-coding-cn',
+        fallbackLabel: 'CN',
+      })
+    ).toMatchObject({
+      label: 'Coding API（国内 / BigModel）',
+      hint: '使用 ZAI_API_KEY，连接 open.bigmodel.cn Coding Plan 接口。',
+    })
+  })
+
   it('keeps unsupported methods visible with a clear disabled reason', () => {
     const providers = buildProviderOptions(CAPABILITIES)
     const unsupportedMethod = providers[1]?.methods.find((method) => method.id === 'minimax-unsupported')
@@ -254,7 +277,7 @@ describe('buildProviderOptions', () => {
     expect(apiKeyMethod?.disabledReason).toContain('命令行参数')
   })
 
-  it('collapses provider methods that resolve to the same auth surface', () => {
+  it('keeps ZAI region and coding endpoints distinct even when they share the same api-key flag', () => {
     const providers = buildProviderOptions({
       ...CAPABILITIES,
       authRegistry: {
@@ -265,6 +288,16 @@ describe('buildProviderOptions', () => {
             id: 'zai',
             label: '智谱',
             methods: [
+              {
+                authChoice: 'zai-api-key',
+                label: '智谱 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--zai-api-key',
+                  requiresSecret: true,
+                },
+              },
               {
                 authChoice: 'zai-global',
                 label: '智谱 API Key',
@@ -296,6 +329,17 @@ describe('buildProviderOptions', () => {
                   extraOptions: [{ id: 'coding', label: 'Coding' }],
                 },
               },
+              {
+                authChoice: 'zai-coding-cn',
+                label: '智谱 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--zai-api-key',
+                  requiresSecret: true,
+                  extraOptions: [{ id: 'coding-cn', label: 'Coding CN' }],
+                },
+              },
             ],
           } as any,
         ],
@@ -303,9 +347,11 @@ describe('buildProviderOptions', () => {
     })
     const zaiProvider = providers.find((provider) => provider.id === 'zai')
 
-    expect(zaiProvider?.methods.map((method) => method.id)).toEqual([
-      'zai-global',
-      'zai-coding-global',
+    expect(zaiProvider?.methods.map((method) => ({ id: method.id, label: method.label }))).toEqual([
+      { id: 'zai-global', label: '标准 API（国际 / Z.AI）' },
+      { id: 'zai-cn', label: '标准 API（国内 / BigModel）' },
+      { id: 'zai-coding-global', label: 'Coding API（国际 / Z.AI）' },
+      { id: 'zai-coding-cn', label: 'Coding API（国内 / BigModel）' },
     ])
   })
 

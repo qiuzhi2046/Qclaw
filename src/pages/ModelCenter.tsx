@@ -219,6 +219,40 @@ interface ModelCenterMethodDisplayCopy {
   hint?: string
 }
 
+const ZAI_METHOD_DISPLAY_COPY: Record<string, ModelCenterMethodDisplayCopy> = {
+  'zai-api-key': {
+    label: '标准 API（国际 / Z.AI）',
+    hint: '使用 ZAI_API_KEY，连接 api.z.ai 标准 GLM 接口。',
+  },
+  'zai-global': {
+    label: '标准 API（国际 / Z.AI）',
+    hint: '使用 ZAI_API_KEY，连接 api.z.ai 标准 GLM 接口。',
+  },
+  'zai-cn': {
+    label: '标准 API（国内 / BigModel）',
+    hint: '使用 ZAI_API_KEY，连接 open.bigmodel.cn 标准 GLM 接口。',
+  },
+  'zai-coding-global': {
+    label: 'Coding API（国际 / Z.AI）',
+    hint: '使用 ZAI_API_KEY，连接 api.z.ai Coding Plan 接口。',
+  },
+  'zai-coding-cn': {
+    label: 'Coding API（国内 / BigModel）',
+    hint: '使用 ZAI_API_KEY，连接 open.bigmodel.cn Coding Plan 接口。',
+  },
+}
+
+const ZAI_ENDPOINT_AUTH_CHOICES = new Set([
+  'zai-global',
+  'zai-cn',
+  'zai-coding-global',
+  'zai-coding-cn',
+])
+
+const ZAI_METHOD_DEDUPE_ALIASES: Record<string, string> = {
+  'zai-api-key': 'zai-global',
+}
+
 export function resolveModelCenterProviderDisplayCopy(params: {
   providerId: string
   fallbackName: string
@@ -253,6 +287,10 @@ export function resolveModelCenterMethodDisplayCopy(params: {
 }): ModelCenterMethodDisplayCopy {
   const providerId = String(params.providerId || '').trim()
   const methodId = normalizeMethodId(params.methodId)
+  if (providerId === 'zai' && ZAI_METHOD_DISPLAY_COPY[methodId]) {
+    return ZAI_METHOD_DISPLAY_COPY[methodId]
+  }
+
   if (providerId === 'custom' && methodId === 'custom-api-key') {
     return {
       label: '手动填写接口信息',
@@ -401,6 +439,25 @@ function buildMethodExtraOptionsFingerprint(extraOptions?: OpenClawAuthExtraOpti
     .join('|')
 }
 
+function shouldKeepProviderMethodAuthChoiceDistinct(providerId: string, methodId: string): boolean {
+  const canonicalMethodId = ZAI_METHOD_DEDUPE_ALIASES[methodId] || methodId
+  return providerId === 'zai' && ZAI_ENDPOINT_AUTH_CHOICES.has(canonicalMethodId)
+}
+
+function shouldReplaceProviderMethodDedupeEntry(
+  providerId: string,
+  existingMethodId: string,
+  nextMethodId: string
+): boolean {
+  if (providerId !== 'zai') return false
+
+  const existingCanonical = ZAI_METHOD_DEDUPE_ALIASES[existingMethodId] || existingMethodId
+  const nextCanonical = ZAI_METHOD_DEDUPE_ALIASES[nextMethodId] || nextMethodId
+  if (existingCanonical !== nextCanonical) return false
+
+  return existingMethodId !== existingCanonical && nextMethodId === nextCanonical
+}
+
 function buildProviderMethodDedupeKey(
   providerId: string,
   method: OpenClawAuthMethodDescriptor,
@@ -414,6 +471,10 @@ function buildProviderMethodDedupeKey(
 
   if (!envKey) {
     return `method-id::${methodId}`
+  }
+
+  if (shouldKeepProviderMethodAuthChoiceDistinct(normalizedProviderId, methodId)) {
+    return `method-id::${normalizedProviderId}::${ZAI_METHOD_DEDUPE_ALIASES[methodId] || methodId}`
   }
 
   return [
@@ -1045,7 +1106,13 @@ export function buildProviderOptions(
           fallbackHint: method.hint,
         })
         const dedupeKey = buildProviderMethodDedupeKey(provider.id, method, methodDisplay)
-        if (methodsByKey.has(dedupeKey)) continue
+        const existingMethod = methodsByKey.get(dedupeKey)
+        if (
+          existingMethod &&
+          !shouldReplaceProviderMethodDedupeEntry(normalizeProviderCandidate(provider.id), existingMethod.id, methodId)
+        ) {
+          continue
+        }
         methodsByKey.set(dedupeKey, {
           id: methodId,
           kind: method.kind,

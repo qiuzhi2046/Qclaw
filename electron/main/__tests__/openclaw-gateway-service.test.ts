@@ -276,7 +276,7 @@ describe('openclaw gateway service', () => {
       version: 'v22.22.1',
       needsUpgrade: false,
       meetsRequirement: true,
-      requiredVersion: '22.16.0',
+      requiredVersion: '22.19.0',
       targetVersion: 'v24.14.0',
       installStrategy: 'installer',
     })
@@ -603,7 +603,7 @@ describe('openclaw gateway service', () => {
         version: '',
         needsUpgrade: false,
         meetsRequirement: false,
-        requiredVersion: '22.16.0',
+        requiredVersion: '22.19.0',
         targetVersion: 'v24.14.0',
         installStrategy: 'installer',
       })
@@ -612,7 +612,7 @@ describe('openclaw gateway service', () => {
         version: 'v24.14.0',
         needsUpgrade: false,
         meetsRequirement: true,
-        requiredVersion: '22.16.0',
+        requiredVersion: '22.19.0',
         targetVersion: 'v24.14.0',
         installStrategy: 'installer',
       })
@@ -675,7 +675,7 @@ describe('openclaw gateway service', () => {
       version: 'v22.15.0',
       needsUpgrade: true,
       meetsRequirement: false,
-      requiredVersion: '22.16.0',
+      requiredVersion: '22.19.0',
       targetVersion: 'v24.14.0',
       installStrategy: 'installer',
     })
@@ -687,7 +687,7 @@ describe('openclaw gateway service', () => {
     expect(result.ok).toBe(false)
     expect(result.running).toBe(false)
     expect(result.summary).toContain('Node.js 版本过低')
-    expect(result.stderr).toContain('OpenClaw 需要 Node.js 22.16.0 或更高版本')
+    expect(result.stderr).toContain('OpenClaw 需要 Node.js 22.19.0 或更高版本')
   })
 
   it('does not attempt plugin installation when config enables Feishu', async () => {
