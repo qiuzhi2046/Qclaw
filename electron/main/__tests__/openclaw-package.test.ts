@@ -101,6 +101,45 @@ function createNestedBinaryOpenClawInstall(): {
   return { tempDir, commandPath, packageRoot, packageJsonPath }
 }
 
+function createWindowsGlobalShimOpenClawInstall(): {
+  npmPrefix: string
+  packageRoot: string
+  packageJsonPath: string
+  shimPath: string
+  tempDir: string
+} {
+  const tempDir = makeTempDir()
+  const npmPrefix = path.join(tempDir, 'npm')
+  const packageRoot = path.join(npmPrefix, 'node_modules', 'openclaw')
+  const packageJsonPath = path.join(packageRoot, 'package.json')
+  const shimPath = path.join(npmPrefix, 'openclaw.cmd')
+
+  fs.mkdirSync(packageRoot, { recursive: true })
+  fs.writeFileSync(
+    packageJsonPath,
+    JSON.stringify(
+      {
+        name: 'openclaw',
+        version: '2026.4.15',
+        bin: { openclaw: 'dist/index.mjs' },
+      },
+      null,
+      2
+    )
+  )
+  fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true })
+  fs.writeFileSync(path.join(packageRoot, 'dist', 'index.mjs'), '#!/usr/bin/env node\n')
+  fs.writeFileSync(shimPath, '@echo off\r\nnode "%~dp0node_modules\\openclaw\\dist\\index.mjs" %*\r\n')
+
+  return {
+    tempDir,
+    npmPrefix,
+    packageRoot,
+    packageJsonPath,
+    shimPath,
+  }
+}
+
 function createPluginPollutionLayout(): {
   pollutedPackageRoot: string
   pluginEntryPath: string
@@ -507,6 +546,17 @@ describe('resolveOpenClawPackageRoot', () => {
 
     const packageRoot = await resolveOpenClawPackageRoot({
       binaryPath: install.commandPath,
+    })
+
+    await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)
+  })
+
+  itOnWindows('resolves the package root from a Windows npm global openclaw.cmd shim', async () => {
+    const install = createWindowsGlobalShimOpenClawInstall()
+
+    const packageRoot = await resolveOpenClawPackageRoot({
+      binaryPath: install.shimPath,
+      platform: 'win32',
     })
 
     await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)

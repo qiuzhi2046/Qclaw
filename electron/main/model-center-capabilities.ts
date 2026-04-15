@@ -8,6 +8,7 @@ import {
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import type { ModelCatalogQuery, ModelCatalogResult } from './openclaw-model-catalog'
 import type { ModelConfigCommandResult, ModelStatusOptions } from './openclaw-model-config'
+import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 
 interface GetModelCenterCapabilitiesOptions {
   forceRefresh?: boolean
@@ -87,8 +88,15 @@ interface RefreshModelDataDeps extends GetModelCenterCapabilitiesDeps {
   ) => Promise<ModelCommandResult>
 }
 
-const DEFAULT_MODEL_CAPABILITIES_TIMEOUT_MS = 45_000
+const DEFAULT_MODEL_CAPABILITIES_TIMEOUT_MS = MAIN_RUNTIME_POLICY.capabilities.discoveryTimeoutMs
 const MODEL_CENTER_CAPABILITIES_PROFILE: OpenClawCapabilitiesProfile = 'bootstrap'
+
+class ModelCenterTimeoutError extends Error {
+  constructor(label: string, timeoutMs: number) {
+    super(`${label} timed out after ${timeoutMs}ms`)
+    this.name = 'TimeoutError'
+  }
+}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | null = null
@@ -97,7 +105,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
       promise,
       new Promise<T>((_resolve, reject) => {
         timer = setTimeout(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+          reject(new ModelCenterTimeoutError(label, timeoutMs))
         }, timeoutMs)
       }),
     ])
@@ -151,7 +159,9 @@ export async function getModelCenterCapabilities(
     })
     return loaded
   } catch (error) {
-    ;(deps.resetCapabilitiesCache ?? resetOpenClawCapabilitiesCache)()
+    if (!(error instanceof ModelCenterTimeoutError)) {
+      ;(deps.resetCapabilitiesCache ?? resetOpenClawCapabilitiesCache)()
+    }
     void appendEnvCheckDiagnostic('main-model-capabilities-failed', {
       forceRefresh: options.forceRefresh === true,
       timeoutMs,

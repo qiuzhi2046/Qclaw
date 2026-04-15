@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getModelCatalog } from '../openclaw-model-catalog'
+import { getAllModelCatalogItems, getModelCatalog } from '../openclaw-model-catalog'
 import type { CliCommandResult } from '../openclaw-capabilities'
 
 const SAMPLE_MODELS = [
@@ -137,6 +137,7 @@ describe('getModelCatalog', () => {
     const runCommand = vi.fn(async () => ok(JSON.stringify({ models: SAMPLE_MODELS })))
 
     const result = await getModelCatalog({
+      cachePolicy: 'prefer-stale',
       query: { includeUnavailable: false, bypassCache: true },
       runCommand,
       readCache: async () => ({
@@ -151,6 +152,31 @@ describe('getModelCatalog', () => {
     expect(result.source).toBe('live')
     expect(result.stale).toBe(false)
     expect(result.total).toBe(3)
+  })
+
+  it('returns stale cache immediately when snapshot prefers cached catalog data', async () => {
+    const runCommand = vi.fn(
+      () =>
+        new Promise<never>(() => {
+          // Intentionally never settles. Prefer-stale should return the cache without waiting for CLI.
+        })
+    )
+
+    const result = await getAllModelCatalogItems({
+      cachePolicy: 'prefer-stale',
+      runCommand,
+      readCache: async () => ({
+        fetchedAt: '2026-03-01T00:00:00.000Z',
+        models: SAMPLE_MODELS,
+      }),
+      now: () => new Date('2026-03-12T00:00:00.000Z'),
+      ttlMs: 60 * 1000,
+    })
+
+    expect(result.source).toBe('cache')
+    expect(result.stale).toBe(true)
+    expect(result.total).toBe(SAMPLE_MODELS.length)
+    expect(runCommand).not.toHaveBeenCalled()
   })
 
   it('marks cached result as stale when cache is older than ttl', async () => {

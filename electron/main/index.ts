@@ -12,6 +12,7 @@ import {
   resolveMainWindowBounds,
   shouldDisableHardwareAccelerationForPlatform,
 } from '../../src/shared/desktop-window-policy'
+import { clearDevRendererCache } from './dev-renderer-cache'
 import { tryNormalizeProcessCwd } from './runtime-working-directory'
 import { revealWindow, showOrCreateWindow } from './window-lifecycle'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
@@ -75,6 +76,28 @@ function loadRuntimeAppIcon() {
   return icon.isEmpty() ? null : icon
 }
 
+async function loadRendererWindow(browserWindow: BrowserWindow) {
+  if (VITE_DEV_SERVER_URL) {
+    try {
+      await clearDevRendererCache(browserWindow.webContents.session, VITE_DEV_SERVER_URL)
+      void appendEnvCheckDiagnostic('main-dev-renderer-cache-cleared', {
+        devServerUrl: VITE_DEV_SERVER_URL,
+      })
+    } catch (error) {
+      console.error('Failed to clear dev renderer cache:', error)
+      void appendEnvCheckDiagnostic('main-dev-renderer-cache-clear-failed', {
+        devServerUrl: VITE_DEV_SERVER_URL,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    await browserWindow.loadURL(VITE_DEV_SERVER_URL)
+    return
+  }
+
+  await browserWindow.loadFile(indexHtml)
+}
+
 function createWindow() {
   process.env.QCLAW_USER_DATA_DIR = app.getPath('userData')
   process.env.QCLAW_SAFE_WORK_DIR = path.join(process.env.QCLAW_USER_DATA_DIR, 'runtime')
@@ -131,11 +154,7 @@ function createWindow() {
     browserWindow.hide()
   })
 
-  if (VITE_DEV_SERVER_URL) {
-    void browserWindow.loadURL(VITE_DEV_SERVER_URL)
-  } else {
-    void browserWindow.loadFile(indexHtml)
-  }
+  void loadRendererWindow(browserWindow)
 
   if (IS_DEV) {
     browserWindow.webContents.openDevTools({ mode: 'detach' })

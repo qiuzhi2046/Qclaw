@@ -75,6 +75,7 @@ import {
   parseAgentReplyOutput,
   resetDashboardChatAvailabilityTrackerForTests,
   sendChatMessage,
+  shouldPreferControlUiBrowserChatTransportForSend,
 } from '../openclaw-chat-service'
 import type { OpenClawCapabilities } from '../openclaw-capabilities'
 import { executeAuthRoute } from '../openclaw-auth-executor'
@@ -5721,6 +5722,258 @@ Sender (untrusted metadata):
       })
     )
     expect(runCliStreamingMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps confirmed local direct sessions on the socket transport path by default', () => {
+    expect(
+      shouldPreferControlUiBrowserChatTransportForSend({
+        sessionKey: 'agent:main:trusted-local-session',
+        localSessionState: {
+          upstreamConfirmed: true,
+          kind: 'direct',
+        } as any,
+      })
+    ).toBe(false)
+  })
+
+  it('retries confirmed local direct sends through control ui browser when gateway transport cannot safely fall back', async () => {
+    const discoverOpenClaw = createDiscovery('fingerprint-trusted-local-browser-retry')
+    const transportRun = vi.fn(async () => ({
+      ok: false,
+      stdout: '',
+      stderr: 'gateway transport unavailable and CLI fallback cannot safely continue an explicit external session key',
+      code: 1,
+      streamedText: '',
+    }))
+
+    runGatewayChatViaControlUiBrowserMock.mockResolvedValue({
+      runId: 'run-control-ui-retry-1',
+      sessionKey: 'agent:main:history-direct-session',
+      payload: {
+        state: 'final',
+        runId: 'run-control-ui-retry-1',
+        sessionKey: 'agent:main:history-direct-session',
+        message: {
+          text: '通过网页通道恢复发送',
+          model: 'openai/gpt-5.4-pro',
+        },
+      },
+    })
+
+    await appendLocalChatMessages({
+      scopeKey: 'fingerprint-trusted-local-browser-retry',
+      sessionId: 'trusted-local-retry-session',
+      sessionKey: 'agent:main:history-direct-session',
+      upstreamConfirmed: true,
+      agentId: 'main',
+      model: 'openai/gpt-5.4-pro',
+      selectedModel: 'openai/gpt-5.4-pro',
+      transportSessionId: 'transport-trusted-local-retry',
+      transportModel: 'openai/gpt-5.4-pro',
+      messages: [
+        {
+          id: 'local-msg-1',
+          role: 'user',
+          text: '旧消息',
+          createdAt: 5_000,
+          status: 'sent',
+        },
+      ],
+      updatedAt: 5_000,
+    })
+
+    const sendResult = await sendChatMessage(
+      {
+        sessionId: 'trusted-local-retry-session',
+        text: '继续当前会话',
+      },
+      {
+        discoverOpenClaw,
+        readModelStatus: async () => createModelStatus('openai/gpt-5.4-pro'),
+        ensureGateway: async () => ({
+          ok: true,
+          stdout: '',
+          stderr: '',
+          code: 0,
+          running: true,
+        }),
+        runCommand: async () => ({
+          ok: true,
+          stdout: JSON.stringify({
+            sessions: [
+              {
+                sessionId: 'trusted-local-retry-session',
+                key: 'agent:main:history-direct-session',
+                agentId: 'main',
+                model: 'openai/gpt-5.4-pro',
+                updatedAt: 6_000,
+                kind: 'direct',
+              },
+            ],
+          }),
+          stderr: '',
+          code: 0,
+        }),
+        chatTransport: {
+          run: transportRun,
+        },
+      }
+    )
+
+    expect(sendResult.ok).toBe(true)
+    expect(sendResult.message?.text).toBe('通过网页通道恢复发送')
+    expect(transportRun).toHaveBeenCalledTimes(1)
+    expect(runGatewayChatViaControlUiBrowserMock).toHaveBeenCalledTimes(1)
+    expect(runGatewayChatViaControlUiBrowserMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        readConfig: readConfigMock,
+        readEnvFile: readEnvFileMock,
+      }),
+      expect.objectContaining({
+        sessionKey: 'agent:main:history-direct-session',
+        message: '继续当前会话',
+        thinking: 'off',
+      })
+    )
+  })
+
+  it('keeps the control ui browser retry path active when thinking fallback retries the send', async () => {
+    const discoverOpenClaw = createDiscovery('fingerprint-trusted-local-browser-thinking-retry')
+    const transportRun = vi.fn(async () => ({
+      ok: false,
+      stdout: '',
+      stderr: 'gateway transport unavailable and CLI fallback cannot safely continue an explicit external session key',
+      code: 1,
+      streamedText: '',
+    }))
+
+    runGatewayChatViaControlUiBrowserMock
+      .mockRejectedValueOnce(
+        new Error(
+          "400 Unsupported value: 'low' is not supported with the 'gpt-5.4-pro' model. Supported values are: 'medium', 'high', and 'xhigh'."
+        )
+      )
+      .mockResolvedValueOnce({
+        runId: 'run-control-ui-thinking-retry-2',
+        sessionKey: 'agent:main:history-direct-session',
+        payload: {
+          state: 'final',
+          runId: 'run-control-ui-thinking-retry-2',
+          sessionKey: 'agent:main:history-direct-session',
+          message: {
+            text: 'browser thinking fallback 成功',
+            model: 'openai/gpt-5.4-pro',
+          },
+        },
+      })
+
+    await appendLocalChatMessages({
+      scopeKey: 'fingerprint-trusted-local-browser-thinking-retry',
+      sessionId: 'trusted-local-thinking-retry-session',
+      sessionKey: 'agent:main:history-direct-session',
+      upstreamConfirmed: true,
+      agentId: 'main',
+      model: 'openai/gpt-5.4-pro',
+      selectedModel: 'openai/gpt-5.4-pro',
+      transportSessionId: 'transport-trusted-local-thinking-retry',
+      transportModel: 'openai/gpt-5.4-pro',
+      messages: [
+        {
+          id: 'local-msg-1',
+          role: 'user',
+          text: '旧消息',
+          createdAt: 5_000,
+          status: 'sent',
+        },
+      ],
+      updatedAt: 5_000,
+    })
+
+    const sendResult = await sendChatMessage(
+      {
+        sessionId: 'trusted-local-thinking-retry-session',
+        text: '继续当前会话',
+        thinking: 'low',
+      },
+      {
+        discoverOpenClaw,
+        readModelStatus: async () => createModelStatus('openai/gpt-5.4-pro'),
+        ensureGateway: async () => ({
+          ok: true,
+          stdout: '',
+          stderr: '',
+          code: 0,
+          running: true,
+        }),
+        runCommand: async () => ({
+          ok: true,
+          stdout: JSON.stringify({
+            sessions: [
+              {
+                sessionId: 'trusted-local-thinking-retry-session',
+                key: 'agent:main:history-direct-session',
+                agentId: 'main',
+                model: 'openai/gpt-5.4-pro',
+                updatedAt: 6_000,
+                kind: 'direct',
+              },
+            ],
+          }),
+          stderr: '',
+          code: 0,
+        }),
+        chatTransport: {
+          run: transportRun,
+        },
+      }
+    )
+
+    expect(sendResult.ok).toBe(true)
+    expect(sendResult.message?.text).toBe('browser thinking fallback 成功')
+    expect(transportRun).toHaveBeenCalledTimes(1)
+    expect(runGatewayChatViaControlUiBrowserMock).toHaveBeenCalledTimes(2)
+    expect(runGatewayChatViaControlUiBrowserMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        readConfig: readConfigMock,
+        readEnvFile: readEnvFileMock,
+      }),
+      expect.objectContaining({
+        sessionKey: 'agent:main:history-direct-session',
+        message: '继续当前会话',
+        thinking: 'low',
+      })
+    )
+    expect(runGatewayChatViaControlUiBrowserMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        readConfig: readConfigMock,
+        readEnvFile: readEnvFileMock,
+      }),
+      expect.objectContaining({
+        sessionKey: 'agent:main:history-direct-session',
+        message: '继续当前会话',
+        thinking: 'medium',
+      })
+    )
+  })
+
+  it('still prefers the control ui browser path for external trusted sessions', () => {
+    expect(
+      shouldPreferControlUiBrowserChatTransportForSend({
+        sessionKey: 'agent:main:history-direct-session',
+      })
+    ).toBe(true)
+    expect(
+      shouldPreferControlUiBrowserChatTransportForSend({
+        sessionKey: 'agent:channel-default:main',
+        continueWithExternalSessionKey: 'agent:channel-default:main',
+        localSessionState: {
+          upstreamConfirmed: true,
+          kind: 'direct',
+        } as any,
+      })
+    ).toBe(true)
   })
 
   it('does not promote a legacy patch bridge into a trusted session key on the next send', async () => {

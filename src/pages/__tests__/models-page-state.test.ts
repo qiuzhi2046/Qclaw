@@ -153,6 +153,89 @@ describe('models page state helpers', () => {
     expect(providers).toEqual([])
   })
 
+  it('adds a coding companion provider card when a shared-auth primary provider is saved locally and the config references the coding surface', () => {
+    const providers = buildModelsPageConfiguredProviders({
+      envVars: null,
+      config: {
+        auth: {
+          profiles: {
+            'volcengine:default': {
+              provider: 'volcengine',
+            },
+          },
+        },
+        agents: {
+          defaults: {
+            model: {
+              primary: 'volcengine-plan/ark-code-latest',
+            },
+            models: {
+              'volcengine-plan/ark-code-latest': {},
+            },
+          },
+        },
+      },
+      statusData: null,
+    })
+
+    expect(providers).toEqual([
+      expect.objectContaining({ id: 'volcengine' }),
+      expect.objectContaining({ id: 'volcengine-plan' }),
+    ])
+  })
+
+  it('does not add a coding companion provider card when the config does not reference the coding surface', () => {
+    const providers = buildModelsPageConfiguredProviders({
+      envVars: null,
+      config: {
+        auth: {
+          profiles: {
+            'volcengine:default': {
+              provider: 'volcengine',
+            },
+          },
+        },
+      },
+      statusData: null,
+    })
+
+    expect(providers).toEqual([
+      expect.objectContaining({ id: 'volcengine' }),
+    ])
+    expect(providers.find((provider) => provider.id === 'volcengine-plan')).toBeUndefined()
+  })
+
+  it('adds a byteplus coding companion provider card when a shared-auth primary provider is saved locally and the config references the coding surface', () => {
+    const providers = buildModelsPageConfiguredProviders({
+      envVars: null,
+      config: {
+        auth: {
+          profiles: {
+            'byteplus:default': {
+              provider: 'byteplus',
+            },
+          },
+        },
+        agents: {
+          defaults: {
+            model: {
+              primary: 'byteplus-plan/deepseek-v3.1',
+            },
+            models: {
+              'byteplus-plan/deepseek-v3.1': {},
+            },
+          },
+        },
+      },
+      statusData: null,
+    })
+
+    expect(providers).toEqual([
+      expect.objectContaining({ id: 'byteplus' }),
+      expect.objectContaining({ id: 'byteplus-plan' }),
+    ])
+  })
+
   it('keeps only providers that have visible catalog models in the current mode', () => {
     const providers = filterConfiguredProvidersWithVisibleModels(
       [
@@ -639,7 +722,67 @@ describe('models page state helpers', () => {
         verificationState: 'unverified',
         tags: ['configured'],
       },
+      ])
+  })
+
+  it('injects configured default-model references for a shared-auth coding surface without rewriting the provider id', () => {
+    const state = resolveModelsPageCatalogState({
+      catalog: [],
+      envVars: null,
+      config: {
+        auth: {
+          profiles: {
+            'volcengine:default': {
+              provider: 'volcengine',
+            },
+          },
+        },
+        agents: {
+          defaults: {
+            model: {
+              primary: 'volcengine-plan/ark-code-latest',
+            },
+            models: {
+              'volcengine-plan/ark-code-latest': {},
+            },
+          },
+        },
+      },
+      statusData: null,
+      mode: 'all',
+    })
+
+    expect(state.visibleCatalog).toEqual([
+      {
+        key: 'volcengine-plan/ark-code-latest',
+        provider: 'volcengine-plan',
+        name: 'ark-code-latest',
+        available: false,
+        verificationState: 'unverified',
+        tags: ['configured', 'default'],
+      },
     ])
+  })
+
+  it('does not create a shared-auth coding companion provider from runtime status alone', () => {
+    const state = resolveModelsPageCatalogState({
+      catalog: [
+        { key: 'volcengine-plan/ark-code-latest', provider: 'volcengine-plan', available: true },
+      ],
+      envVars: null,
+      config: null,
+      statusData: {
+        auth: {
+          providers: [{ provider: 'volcengine', status: 'ok' }],
+        },
+        allowed: ['volcengine-plan/ark-code-latest'],
+        defaultModel: 'volcengine-plan/ark-code-latest',
+      },
+      mode: 'all',
+    })
+
+    expect(state.configuredProviders).toEqual([])
+    expect(state.visibleCatalog).toEqual([])
   })
 
   it('applies persisted verification records across alias-equivalent minimax models in the merged provider card', () => {

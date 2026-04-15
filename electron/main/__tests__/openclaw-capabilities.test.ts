@@ -502,6 +502,76 @@ describe('discoverOpenClawCapabilities', () => {
     expect(caps.pluginsCommands).toEqual([])
   })
 
+  it('skips onboard help in bootstrap mode when the auth registry already exposes onboard flags', async () => {
+    const invokedCommands: string[] = []
+    const loadAuthRegistry = vi.fn(async () =>
+      createOpenClawAuthRegistry({
+        ok: true,
+        source: 'openclaw-internal-registry',
+        providers: [
+          {
+            id: 'zai',
+            label: '智谱',
+            methods: [
+              {
+                authChoice: 'zai-api-key',
+                label: '智谱 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  providerId: 'zai',
+                  cliFlag: '--zai-api-key',
+                  requiresSecret: true,
+                },
+              },
+            ],
+          },
+        ],
+      })
+    )
+    const runCommand = vi.fn(async (args: string[]) => {
+      invokedCommands.push(args.join(' '))
+
+      if (args[0] === '--version') {
+        return ok('OpenClaw 2026.4.15')
+      }
+      if (args[0] === '--help') {
+        return ok('Usage: openclaw [options] [command]\nCommands:\n  onboard\n  models *\n')
+      }
+      if (args[0] === 'models' && args[1] === '--help') {
+        return ok('Usage: openclaw models [options] [command]\nCommands:\n  auth\n  list\n  status\n')
+      }
+      if (args[0] === 'models' && args[1] === 'auth' && args[2] === '--help') {
+        return ok('Usage: openclaw models auth [options] [command]\nCommands:\n  login\n')
+      }
+      if (args[0] === 'models' && args[1] === 'list' && args[2] === '--help') {
+        return ok('Usage: openclaw models list [options]\nOptions:\n  --all\n  --json\n')
+      }
+      if (args[0] === 'models' && args[1] === 'status' && args[2] === '--help') {
+        return ok('Usage: openclaw models status [options]\nOptions:\n  --json\n')
+      }
+
+      return { ok: false, stdout: '', stderr: `unexpected command: ${args.join(' ')}`, code: 1 }
+    })
+
+    const caps = await discoverOpenClawCapabilities({
+      runCommand,
+      loadAuthRegistry,
+      profile: 'bootstrap',
+    } as any)
+
+    expect(invokedCommands).toEqual([
+      '--version',
+      '--help',
+      'models --help',
+      'models auth --help',
+      'models list --help',
+      'models status --help',
+    ])
+    expect(caps.onboardFlags).toEqual(['--zai-api-key'])
+    expect(caps.supports.onboard).toBe(true)
+  })
+
   it('runs CLI capability probes serially so help probes never fan out concurrently', async () => {
     let inFlight = 0
     let maxInFlight = 0

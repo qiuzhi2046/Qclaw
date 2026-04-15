@@ -25,6 +25,7 @@ interface ModelUiSnapshotDeps {
     query?: {
       bypassCache?: boolean
     }
+    cachePolicy?: 'live-first' | 'prefer-stale'
   }) => Promise<ModelCatalogResult>
   timeouts?: ModelUiSnapshotTimeouts
 }
@@ -32,8 +33,8 @@ interface ModelUiSnapshotDeps {
 const DEFAULT_MODEL_UI_SNAPSHOT_TIMEOUTS = Object.freeze({
   configMs: 6_000,
   envMs: 6_000,
-  statusMs: 6_000,
-  catalogMs: 6_000,
+  statusMs: 22_000,
+  catalogMs: 25_000,
 })
 
 const CONFIG_TIMEOUT_WARNING = '配置快照读取超时，当前先按空配置继续。'
@@ -71,6 +72,7 @@ async function defaultGetAllCatalog(options?: {
   query?: {
     bypassCache?: boolean
   }
+  cachePolicy?: 'live-first' | 'prefer-stale'
 }): Promise<ModelCatalogResult> {
   const modelCatalog = await import('./openclaw-model-catalog')
   return modelCatalog.getAllModelCatalogItems(options || {})
@@ -141,6 +143,7 @@ export async function getModelUiSnapshot(
     includeCatalog
       ? withSnapshotBudget(
           (deps.getAllCatalog ?? defaultGetAllCatalog)({
+            cachePolicy: request.forceCatalogRefresh ? 'live-first' : 'prefer-stale',
             query: request.forceCatalogRefresh ? { bypassCache: true } : {},
           }),
           timeouts.catalogMs
