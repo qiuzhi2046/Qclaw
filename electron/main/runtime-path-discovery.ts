@@ -87,10 +87,24 @@ function splitPathEntries(value: string, platform: NodeJS.Platform): string[] {
   return uniqueNonEmpty(value.split(pathSeparatorFor(platform)), platform)
 }
 
+function isPosixAbsolutePath(value: string): boolean {
+  const trimmed = String(value || '').trim()
+  return trimmed.startsWith('/') && !trimmed.startsWith('//')
+}
+
+function pathModuleForPath(basePath: string, platform: NodeJS.Platform): typeof path.posix {
+  if (platform === 'win32' && isPosixAbsolutePath(basePath)) {
+    return path.posix
+  }
+  return platform === 'win32' ? path.win32 : path.posix
+}
+
 function joinBinPath(baseDir: string, child: string, platform: NodeJS.Platform): string {
-  return platform === 'win32'
-    ? path.win32.join(baseDir, child)
-    : path.posix.join(baseDir, child)
+  return pathModuleForPath(baseDir, platform).join(baseDir, child)
+}
+
+function dirnameForPath(value: string, platform: NodeJS.Platform): string {
+  return pathModuleForPath(value, platform).dirname(value)
 }
 
 function resolveEnvValue(env: NodeJS.ProcessEnv, name: string): string {
@@ -180,8 +194,8 @@ function resolveWindowsActiveRuntimeSnapshotBinDirs(
 ): string[] {
   if (platform !== 'win32' || !snapshot) return []
 
-  const openclawBinDir = snapshot.openclawPath ? path.win32.dirname(snapshot.openclawPath) : ''
-  const nodeBinDir = snapshot.nodePath ? path.win32.dirname(snapshot.nodePath) : ''
+  const openclawBinDir = snapshot.openclawPath ? dirnameForPath(snapshot.openclawPath, platform) : ''
+  const nodeBinDir = snapshot.nodePath ? dirnameForPath(snapshot.nodePath, platform) : ''
 
   return uniqueNonEmpty(
     [openclawBinDir, nodeBinDir, snapshot.npmPrefix],

@@ -178,4 +178,19 @@ describe('listExecutablePathCandidates', () => {
       'C:\\Users\\qiuzh\\AppData\\Roaming\\npm\\openclaw',
     ])
   })
+
+  it('preserves POSIX-style temp paths while simulating Windows candidates', () => {
+    const candidates = listExecutablePathCandidates('openclaw', {
+      platform: 'win32',
+      currentPath: '/tmp/qclaw-openclaw-bin',
+      npmPrefix: '/tmp/qclaw-openclaw-npm',
+      env: buildTestEnv({
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        USERPROFILE: 'C:\\Users\\alice',
+      }),
+    })
+
+    expect(candidates).toContain('/tmp/qclaw-openclaw-bin/openclaw.cmd')
+    expect(candidates).toContain('/tmp/qclaw-openclaw-npm/openclaw.cmd')
+  })
 })

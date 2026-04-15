@@ -309,6 +309,14 @@ function listWindowsExecutableNameCandidates(commandName: string, env: NodeJS.Pr
   return Array.from(uniqueCandidates)
 }
 
+function joinWindowsSearchPath(searchDir: string, candidateName: string): string {
+  const normalizedSearchDir = String(searchDir || '').trim()
+  if (normalizedSearchDir.startsWith('/') && !normalizedSearchDir.startsWith('//')) {
+    return path.posix.join(normalizedSearchDir, candidateName)
+  }
+  return path.win32.join(normalizedSearchDir, candidateName)
+}
+
 function resolveWindowsNamedCommandPath(commandName: string, env: NodeJS.ProcessEnv): string | null {
   const candidateNames = listWindowsExecutableNameCandidates(commandName, env)
   if (candidateNames.length === 0) return null
@@ -318,7 +326,7 @@ function resolveWindowsNamedCommandPath(commandName: string, env: NodeJS.Process
 
   for (const searchDir of searchDirs) {
     for (const candidateName of candidateNames) {
-      const candidatePath = searchDir ? path.win32.join(searchDir, candidateName) : candidateName
+      const candidatePath = searchDir ? joinWindowsSearchPath(searchDir, candidateName) : candidateName
       try {
         if (fs.existsSync(candidatePath)) {
           return candidatePath

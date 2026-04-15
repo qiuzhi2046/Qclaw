@@ -208,6 +208,21 @@ describe('discoverOpenClawInstallations', () => {
     return dir
   }
 
+  async function withStubbedPlatform<T>(
+    platform: NodeJS.Platform,
+    callback: () => Promise<T>
+  ): Promise<T> {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: platform })
+    try {
+      return await callback()
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(process, 'platform', originalDescriptor)
+      }
+    }
+  }
+
   afterEach(() => {
     resolveOpenClawBinaryPathMock.mockReset()
     readOpenClawPackageInfoMock.mockReset()
@@ -909,14 +924,16 @@ describe('discoverOpenClawInstallations', () => {
     }) as typeof process.getBuiltinModule)
 
     try {
-      const discoveryModule = await import('../openclaw-install-discovery')
-      const result = await discoveryModule.discoverOpenClawInstallations()
+      await withStubbedPlatform('win32', async () => {
+        const discoveryModule = await import('../openclaw-install-discovery')
+        const result = await discoveryModule.discoverOpenClawInstallations()
 
-      expect(result.candidates).toHaveLength(1)
-      expect(spawnCalls).toHaveLength(1)
-      expect(spawnCalls[0]?.options).toMatchObject({
-        shell: true,
-        windowsHide: true,
+        expect(result.candidates).toHaveLength(1)
+        expect(spawnCalls).toHaveLength(1)
+        expect(spawnCalls[0]?.options).toMatchObject({
+          shell: true,
+          windowsHide: true,
+        })
       })
     } finally {
       getBuiltinModuleSpy.mockRestore()
