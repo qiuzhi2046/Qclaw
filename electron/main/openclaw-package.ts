@@ -63,6 +63,39 @@ interface OpenClawPackageLocation {
   packageJson: Record<string, unknown>
 }
 
+async function canonicalizeOpenClawPackageLocation(
+  packageLocation: OpenClawPackageLocation,
+  fsPromises: typeof fs.promises
+): Promise<OpenClawPackageLocation> {
+  const [packageRoot, packageJsonPath] = await Promise.all([
+    fsPromises.realpath(packageLocation.packageRoot),
+    fsPromises.realpath(packageLocation.packageJsonPath),
+  ])
+
+  return {
+    packageRoot,
+    packageJsonPath,
+    packageJson: packageLocation.packageJson,
+  }
+}
+
+async function createResolvedPackageLayout(
+  binaryPath: string,
+  resolvedBinaryPath: string,
+  packageLocation: OpenClawPackageLocation,
+  fsPromises: typeof fs.promises
+): Promise<ResolvedOpenClawPackageLayout> {
+  const canonicalPackageLocation = await canonicalizeOpenClawPackageLocation(packageLocation, fsPromises)
+
+  return {
+    binaryPath,
+    resolvedBinaryPath,
+    packageRoot: canonicalPackageLocation.packageRoot,
+    packageJsonPath: canonicalPackageLocation.packageJsonPath,
+    packageJson: canonicalPackageLocation.packageJson,
+  }
+}
+
 function extractFirstNonEmptyLine(text: string): string {
   for (const line of text.split(/\r?\n/g)) {
     const trimmed = line.trim()
@@ -203,13 +236,7 @@ async function resolveWindowsPrivateRuntimePackageLayout(
   )
   if (!packageLocation) return null
 
-  return {
-    binaryPath,
-    resolvedBinaryPath,
-    packageRoot: packageLocation.packageRoot,
-    packageJsonPath: packageLocation.packageJsonPath,
-    packageJson: packageLocation.packageJson,
-  }
+  return createResolvedPackageLayout(binaryPath, resolvedBinaryPath, packageLocation, fsPromises)
 }
 
 function collectDistinctPaths(
@@ -260,13 +287,7 @@ async function resolveWindowsNpmShimPackageLayout(
     const packageLocation = await readOpenClawPackageLocationAt(packageRoot, fsPromises)
     if (!packageLocation) continue
 
-    return {
-      binaryPath,
-      resolvedBinaryPath,
-      packageRoot: packageLocation.packageRoot,
-      packageJsonPath: packageLocation.packageJsonPath,
-      packageJson: packageLocation.packageJson,
-    }
+    return createResolvedPackageLayout(binaryPath, resolvedBinaryPath, packageLocation, fsPromises)
   }
 
   return null
@@ -421,13 +442,12 @@ async function resolvePackageLayout(
       fsPromises
     )
     if (snapshotPackageLocation?.packageRoot === snapshotHostPackageRoot) {
-      return {
+      return createResolvedPackageLayout(
         binaryPath,
         resolvedBinaryPath,
-        packageRoot: snapshotPackageLocation.packageRoot,
-        packageJsonPath: snapshotPackageLocation.packageJsonPath,
-        packageJson: snapshotPackageLocation.packageJson,
-      }
+        snapshotPackageLocation,
+        fsPromises
+      )
     }
   }
 
@@ -460,14 +480,12 @@ async function resolvePackageLayout(
   }
 
   const { packageRoot, packageJsonPath, packageJson } = packageLocation
-
-  return {
+  return createResolvedPackageLayout(
     binaryPath,
     resolvedBinaryPath,
-    packageRoot,
-    packageJsonPath,
-    packageJson,
-  }
+    { packageRoot, packageJsonPath, packageJson },
+    fsPromises
+  )
 }
 
 function resolveOpenClawCliBinRelativePath(packageJson: Record<string, unknown>): string {

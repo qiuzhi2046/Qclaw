@@ -562,6 +562,35 @@ describe('resolveOpenClawPackageRoot', () => {
     await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)
   })
 
+  itOnWindows('canonicalizes the Windows npm global shim package root through realpath', async () => {
+    const install = createWindowsGlobalShimOpenClawInstall()
+    const originalRealpath = fs.promises.realpath.bind(fs.promises)
+    const canonicalPackageRoot = install.packageRoot.replace(
+      `${path.sep}node_modules${path.sep}openclaw`,
+      `${path.sep}NODE_MODULES${path.sep}OPENCLAW`
+    )
+    const canonicalPackageJsonPath = path.join(canonicalPackageRoot, 'package.json')
+    const realpathSpy = vi
+      .spyOn(fs.promises, 'realpath')
+      .mockImplementation(async (candidatePath: Parameters<typeof fs.promises.realpath>[0]) => {
+        const candidate = String(candidatePath)
+        if (candidate === install.packageRoot) return canonicalPackageRoot
+        if (candidate === install.packageJsonPath) return canonicalPackageJsonPath
+        return originalRealpath(candidatePath)
+      })
+
+    try {
+      const packageRoot = await resolveOpenClawPackageRoot({
+        binaryPath: install.shimPath,
+        platform: 'win32',
+      })
+
+      expect(packageRoot).toBe(canonicalPackageRoot)
+    } finally {
+      realpathSpy.mockRestore()
+    }
+  })
+
   it('rejects malformed layouts that do not contain an adjacent openclaw package.json', async () => {
     const tempDir = makeTempDir()
     const fakeBinary = path.join(tempDir, 'openclaw')
