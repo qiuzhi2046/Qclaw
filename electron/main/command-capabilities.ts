@@ -293,7 +293,16 @@ function listWindowsExecutableNameCandidates(commandName: string, env: NodeJS.Pr
   if (!trimmedCommand) return []
 
   const explicitExt = path.win32.extname(trimmedCommand)
-  if (explicitExt) return [trimmedCommand]
+  if (explicitExt) {
+    const withoutExt = trimmedCommand.slice(0, -explicitExt.length)
+    return Array.from(
+      new Set([
+        trimmedCommand,
+        `${withoutExt}${explicitExt.toLowerCase()}`,
+        `${withoutExt}${explicitExt.toUpperCase()}`,
+      ])
+    )
+  }
 
   const rawPathExt = String(env.PATHEXT || '').trim()
   const pathExts = rawPathExt ? rawPathExt.split(';') : ['.COM', '.EXE', '.BAT', '.CMD']
@@ -304,6 +313,8 @@ function listWindowsExecutableNameCandidates(commandName: string, env: NodeJS.Pr
     if (!trimmedExt) continue
     const normalizedExt = trimmedExt.startsWith('.') ? trimmedExt : `.${trimmedExt}`
     uniqueCandidates.add(`${trimmedCommand}${normalizedExt}`)
+    uniqueCandidates.add(`${trimmedCommand}${normalizedExt.toLowerCase()}`)
+    uniqueCandidates.add(`${trimmedCommand}${normalizedExt.toUpperCase()}`)
   }
 
   return Array.from(uniqueCandidates)
