@@ -497,7 +497,7 @@ describe('resolveOpenClawPackageRoot', () => {
       binaryPath: install.commandPath,
     })
 
-    expect(packageRoot).toBe(fs.realpathSync(install.packageRoot))
+    await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)
   })
 
   it('walks parent directories when the resolved binary lives under a package bin subdirectory', async () => {
@@ -507,7 +507,7 @@ describe('resolveOpenClawPackageRoot', () => {
       binaryPath: install.commandPath,
     })
 
-    expect(packageRoot).toBe(fs.realpathSync(install.packageRoot))
+    await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)
   })
 
   it('rejects malformed layouts that do not contain an adjacent openclaw package.json', async () => {
@@ -552,8 +552,8 @@ describe('readOpenClawPackageInfo', () => {
       binaryPath: install.commandPath,
     })
 
-    const resolvedPackageRoot = fs.realpathSync(install.packageRoot)
-    const resolvedPackageJsonPath = fs.realpathSync(install.packageJsonPath)
+    const resolvedPackageRoot = await fs.promises.realpath(install.packageRoot)
+    const resolvedPackageJsonPath = await fs.promises.realpath(install.packageJsonPath)
 
     expect(info).toMatchObject({
       name: 'openclaw',

@@ -22,6 +22,8 @@ import {
   shouldShowOpenClawManualHint,
 } from '../EnvCheck'
 
+const normalizedEnvCheckSource = envCheckSource.replace(/\r\n/g, '\n')
+
 describe('createEnvCheckRestartState', () => {
   it('resets env-check UI state and advances the run token for a real retry', () => {
     const state = createEnvCheckRestartState(2)
@@ -131,7 +133,7 @@ describe('createEnvCheckRestartState', () => {
       })
     ).toBe(false)
 
-    const source = envCheckSource
+    const source = normalizedEnvCheckSource
     const bootstrapIndex = source.indexOf('shouldBootstrapNodeBeforeOpenClawCheck({')
     const openClawCheckIndex = source.indexOf('const openclawResult = await window.api.checkOpenClaw()')
     expect(bootstrapIndex).toBeGreaterThanOrEqual(0)
@@ -140,7 +142,7 @@ describe('createEnvCheckRestartState', () => {
   })
 
   it('uses env-check-specific OpenClaw discovery instead of whole-machine discovery during the Windows check flow', () => {
-    const source = envCheckSource
+    const source = normalizedEnvCheckSource
     expect(source).toContain('const discoverOpenClawDuringEnvCheck = async () => {')
     expect(source).toContain('window.api.discoverOpenClawForEnvCheck().catch(() => null)')
 
@@ -154,7 +156,7 @@ describe('createEnvCheckRestartState', () => {
   })
 
   it('keeps the Windows upgrade check on the env-check discovery instead of rediscovering installs', () => {
-    const source = envCheckSource
+    const source = normalizedEnvCheckSource
     expect(source).toContain("window.api.platform === 'win32'")
     expect(source).toContain('window.api.checkOpenClawUpgradeForEnvCheck(discovery)')
     expect(source).toContain('window.api.checkOpenClawUpgrade()')
@@ -168,7 +170,7 @@ describe('createEnvCheckRestartState', () => {
   })
 
   it('derives shared config readiness from the active candidate config path during env-check', () => {
-    const source = envCheckSource
+    const source = normalizedEnvCheckSource
 
     expect(source).toContain('const readSharedConfigInitialized = async (configPath?: string | null) => {')
     expect(source).toContain('const config = await window.api.readConfig({ configPath: configPath || undefined })')
@@ -178,7 +180,7 @@ describe('createEnvCheckRestartState', () => {
   })
 
   it('marks a freshly installed Windows OpenClaw runtime as managed before takeover inspection reruns', () => {
-    const source = envCheckSource
+    const source = normalizedEnvCheckSource
     expect(source).toContain('const markInstalledOpenClawAsManagedDuringEnvCheck = async (')
     expect(source).toContain("if (window.api.platform !== 'win32') return")
     expect(source).toContain('await window.api.markManagedOpenClawInstall(activeCandidate.installFingerprint)')
