@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Alert, Button, Group, Loader, Modal, Text, Tooltip } from '@mantine/core'
 import logoSrc from '@/assets/logo.png'
@@ -8,6 +8,7 @@ import type { QClawUpdateStatus } from '@/shared/openclaw-phase4'
 import { runQClawAutoUpdate } from '@/lib/qclaw-auto-update'
 
 const UPDATE_STATUS_REFRESH_MS = 30_000
+const QCLAW_UPDATE_INSTALL_HANDOFF_TIMEOUT_MS = 30_000
 
 const NAV_ITEMS = [
   {
@@ -68,6 +69,7 @@ export default function MainLayout() {
   const [qclawUpdateConfirmOpen, setQclawUpdateConfirmOpen] = useState(false)
   const [qclawUpdateRunning, setQclawUpdateRunning] = useState(false)
   const [qclawUpdateError, setQclawUpdateError] = useState('')
+  const qclawInstallTimerRef = useRef<number | null>(null)
 
   const isActive = (to: string) => {
     if (to === '/') return location.pathname === '/'
@@ -87,6 +89,12 @@ export default function MainLayout() {
     setQclawUpdateStatus(status)
     return status
   }, [readQClawUpdateStatus])
+
+  const clearQClawInstallTimer = useCallback(() => {
+    if (!qclawInstallTimerRef.current) return
+    window.clearTimeout(qclawInstallTimerRef.current)
+    qclawInstallTimerRef.current = null
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -120,26 +128,75 @@ export default function MainLayout() {
     }
   }, [readQClawUpdateStatus])
 
+  useEffect(() => clearQClawInstallTimer, [clearQClawInstallTimer])
+
   const qclawAvailableVersion = String(qclawUpdateStatus?.availableVersion || '').trim()
+  const openManualQClawUpdateFallback = useCallback(
+    async (fallbackMessage: string, sourceStatus?: QClawUpdateStatus | null): Promise<boolean> => {
+      const canTryManualDownload = Boolean(
+        sourceStatus?.availableVersion ||
+        sourceStatus?.manualDownloadUrl ||
+        qclawUpdateStatus?.availableVersion ||
+        qclawUpdateStatus?.manualDownloadUrl
+      )
+      if (!canTryManualDownload) return false
+
+      try {
+        const result = await window.api.openQClawUpdateDownloadUrl()
+        setQclawUpdateStatus(result.status)
+        if (!result.ok) return false
+        setQclawUpdateError(fallbackMessage)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [qclawUpdateStatus]
+  )
   const handleOpenQClawUpdateConfirm = () => {
     setQclawUpdateError('')
     setQclawUpdateConfirmOpen(true)
   }
 
   const handleRunQClawAutoUpdate = async () => {
+    clearQClawInstallTimer()
     setQclawUpdateRunning(true)
     setQclawUpdateError('')
+    let waitingForInstallerHandoff = false
     try {
       const result = await runQClawAutoUpdate(window.api)
       setQclawUpdateStatus(result.status)
       if (!result.ok) {
         setQclawUpdateError(result.message)
+        if (result.phase === 'install') {
+          await openManualQClawUpdateFallback(
+            '自动安装不可用，已为你打开最新安装包下载链接，请改为手动安装。',
+            result.status
+          )
+        }
+        return
       }
+
+      waitingForInstallerHandoff = true
+      qclawInstallTimerRef.current = window.setTimeout(() => {
+        qclawInstallTimerRef.current = null
+        setQclawUpdateRunning(false)
+        void openManualQClawUpdateFallback(
+          '安装器启动超时，已为你打开最新安装包下载链接，请改为手动安装。',
+          result.status
+        ).then((opened) => {
+          if (!opened) {
+            setQclawUpdateError('安装器启动超时，请尝试手动安装。')
+          }
+        })
+      }, QCLAW_UPDATE_INSTALL_HANDOFF_TIMEOUT_MS)
     } catch (error: any) {
       setQclawUpdateError(error?.message || 'Qclaw 更新失败，请稍后重试。')
     } finally {
-      setQclawUpdateRunning(false)
-      await syncQClawUpdateStatus()
+      if (!waitingForInstallerHandoff) {
+        setQclawUpdateRunning(false)
+        await syncQClawUpdateStatus()
+      }
     }
   }
 

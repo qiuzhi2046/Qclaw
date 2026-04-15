@@ -62,6 +62,36 @@ describe('probeWindowsPortOwner', () => {
 })
 
 describe('buildWindowsGatewayPreflight', () => {
+  it('attaches to a healthy managed gateway owner without recycling the port', () => {
+    expect(
+      buildWindowsGatewayPreflight({
+        gatewayOwner: {
+          ownerKind: 'scheduled-task',
+          ownerLauncherPath: 'C:\\Users\\demo\\.openclaw\\gateway.cmd',
+          ownerTaskName: '\\OpenClaw Gateway',
+        },
+        launcherIntegrity: {
+          launcherPath: 'C:\\Users\\demo\\.openclaw\\gateway.cmd',
+          shouldReinstallService: false,
+          status: 'healthy',
+          taskName: '\\OpenClaw Gateway',
+        },
+        portOwner: {
+          kind: 'openclaw',
+          port: 18789,
+          pid: 4242,
+          processName: 'node.exe',
+          command: 'node.exe C:\\Users\\demo\\.openclaw\\gateway.cmd',
+          source: 'powershell',
+        },
+      })
+    ).toEqual({
+      shouldAttachToExistingOwner: true,
+      shouldReinstallService: false,
+      shouldAttemptPortRecovery: false,
+    })
+  })
+
   it('requests early port recovery when a foreign process already owns the managed port', () => {
     expect(
       buildWindowsGatewayPreflight({

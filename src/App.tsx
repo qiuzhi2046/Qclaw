@@ -63,6 +63,7 @@ const SETUP_STEPS: { key: SetupStep; label: string }[] = [
   { key: 'pairing-code', label: '配对' },
 ]
 const MODELS_ROUTE_HASH = '#/models'
+const STARTUP_QCLAW_UPDATE_CHECK_TIMEOUT_MS = 5_000
 const OPENCLAW_322_NOTICE_ID = 'openclaw-3-22-main-control'
 const PLUGIN_REPAIR_NOTICE_MESSAGE = '修复损坏插件并清理相关配置，不会清空其他用户数据。'
 type OpenClawCapabilitiesSnapshot = Awaited<ReturnType<typeof window.api.getModelCapabilities>>
@@ -751,10 +752,24 @@ function App() {
     if (appState !== 'startup-update' || startupUpdateStatus) return
 
     let cancelled = false
+    let completed = false
+
+    const continueToWelcome = () => {
+      if (!cancelled) {
+        setAppState('welcome')
+      }
+    }
+
+    const timeout = window.setTimeout(() => {
+      completed = true
+      continueToWelcome()
+    }, STARTUP_QCLAW_UPDATE_CHECK_TIMEOUT_MS)
 
     void window.api.checkQClawUpdate()
       .then((status) => {
-        if (cancelled) return
+        if (cancelled || completed) return
+        completed = true
+        window.clearTimeout(timeout)
 
         const nextStatus = {
           status: status.status,
@@ -766,16 +781,18 @@ function App() {
           return
         }
 
-        setAppState('welcome')
+        continueToWelcome()
       })
       .catch(() => {
-        if (!cancelled) {
-          setAppState('welcome')
-        }
+        if (cancelled || completed) return
+        completed = true
+        window.clearTimeout(timeout)
+        continueToWelcome()
       })
 
     return () => {
       cancelled = true
+      window.clearTimeout(timeout)
     }
   }, [appState, startupUpdateStatus])
 

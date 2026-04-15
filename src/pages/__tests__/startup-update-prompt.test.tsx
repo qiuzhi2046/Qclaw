@@ -9,6 +9,8 @@ describe('StartupUpdatePrompt', () => {
   it('renders the startup update gate before the welcome safety notice', () => {
     expect(appSource).toContain("const [appState, setAppState] = useState<AppState>('startup-update')")
     expect(appSource).toContain("void window.api.checkQClawUpdate()")
+    expect(appSource).toContain('STARTUP_QCLAW_UPDATE_CHECK_TIMEOUT_MS')
+    expect(appSource).toContain("setAppState('welcome')")
     expect(appSource).toContain("if (appState === 'startup-update') {")
     expect(appSource).toContain("onLater={() => setAppState('welcome')}")
   })

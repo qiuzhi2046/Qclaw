@@ -685,16 +685,18 @@ export function buildWindowsGatewayPreflight(
   const launcherHealthy = input.launcherIntegrity?.status === 'healthy'
   const hasManagedGatewayOwner =
     gatewayOwner?.ownerKind === 'scheduled-task' || gatewayOwner?.ownerKind === 'startup-folder'
+  const shouldAttachToExistingOwner = Boolean(
+    launcherHealthy &&
+    hasManagedGatewayOwner &&
+    (!owner || owner.kind === 'none' || owner.kind === 'gateway' || owner.kind === 'openclaw')
+  )
 
   return {
-    shouldAttachToExistingOwner: Boolean(
-      launcherHealthy &&
-      hasManagedGatewayOwner &&
-      (!owner || owner.kind === 'none' || owner.kind === 'gateway' || owner.kind === 'openclaw')
-    ),
+    shouldAttachToExistingOwner,
     shouldReinstallService: Boolean(input.launcherIntegrity?.shouldReinstallService),
     shouldAttemptPortRecovery:
-      owner?.kind === 'foreign' || owner?.kind === 'gateway' || owner?.kind === 'openclaw',
+      !shouldAttachToExistingOwner &&
+      (owner?.kind === 'foreign' || owner?.kind === 'gateway' || owner?.kind === 'openclaw'),
   }
 }
 

@@ -40,6 +40,7 @@ dev-notes/
 /.npm/
 /.npm-cache/
 /Library/
+/.tmp/
 /.tmp-qclaw-user-data/
 /.codex-skill-build/
 /AGENTS.md
