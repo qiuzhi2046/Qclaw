@@ -556,14 +556,6 @@ describe('shouldAllowFeishuLinkPairingAfterGatewayFailure', () => {
         },
       })
     ).toBe(true)
-
-    expect(
-      shouldAllowFeishuLinkPairingAfterGatewayFailure({
-        setupMode: 'link',
-        pairingTarget: { accountId: 'default' },
-        gatewayFailure: {},
-      })
-    ).toBe(true)
   })
 
   it('keeps create mode and missing pairing targets on the original hard-failure path', () => {
@@ -591,6 +583,14 @@ describe('shouldAllowFeishuLinkPairingAfterGatewayFailure', () => {
   })
 
   it('keeps hard runtime failures on the manual binding failure path', () => {
+    expect(
+      shouldAllowFeishuLinkPairingAfterGatewayFailure({
+        setupMode: 'link',
+        pairingTarget: { accountId: 'default' },
+        gatewayFailure: {},
+      })
+    ).toBe(false)
+
     for (const stateCode of ['config_invalid', 'plugin_load_failure', 'auth_missing']) {
       expect(
         shouldAllowFeishuLinkPairingAfterGatewayFailure({

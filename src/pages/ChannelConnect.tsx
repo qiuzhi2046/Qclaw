@@ -1262,7 +1262,7 @@ export function shouldAllowFeishuLinkPairingAfterGatewayFailure(params: {
   }
 
   const stateCode = String(params.gatewayFailure.stateCode || '').trim()
-  if (!stateCode) return true
+  if (!stateCode) return false
 
   return (
     stateCode === 'websocket_1006' ||
