@@ -24,6 +24,8 @@ describe('electron-builder mac dmg config', () => {
 })
 
 describe('electron-builder windows update config', () => {
+  const expectedPublishUrl = 'https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com/beta/current/'
+
   it('keeps Windows packaging on NSIS x64 so electron-updater can consume latest.yml metadata', () => {
     const config = readElectronBuilderConfig()
     const win = (config.win ?? {}) as Record<string, unknown>
@@ -44,7 +46,6 @@ describe('electron-builder windows update config', () => {
     const publish = (config.publish ?? {}) as Record<string, unknown>
 
     expect(publish.provider).toBe('generic')
-    expect(typeof publish.url).toBe('string')
-    expect(String(publish.url).trim().length).toBeGreaterThan(0)
+    expect(String(publish.url).trim()).toBe(expectedPublishUrl)
   })
 })

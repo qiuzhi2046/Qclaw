@@ -2,7 +2,7 @@
 
 ## 目的
 
-- 将当前 Windows 自动更新源从占位地址切换到真实发布地址。
+- 将当前 Windows 自动更新源切换到真实对象存储发布地址。
 - 复用现有 `generic + latest.yml` 目录结构，不另起一套发布约定。
 - 为真实双版本升级验证提供固定操作步骤。
 
@@ -12,6 +12,8 @@
   - `electron-builder.json` 的 `publish.url`
   - 或 `QCLAW_UPDATE_PUBLISH_URL`
   - 或 `electron-builder.local.json`
+- 当前默认更新源：
+  - `https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com/beta/current/`
 - 现有发布辅助脚本：
   - [prepare-cos-update-release.mjs](/D:/Qclaw_Dev/Qclaw/scripts/prepare-cos-update-release.mjs:1)
 - 现有本地配置读取逻辑：
@@ -26,7 +28,7 @@
 2. CI / 临时发布：
    - 使用环境变量 `QCLAW_UPDATE_PUBLISH_URL`
 3. 正式默认值：
-   - 再考虑更新 [electron-builder.json](/D:/Qclaw_Dev/Qclaw/electron-builder.json:1) 里的占位 URL
+   - [electron-builder.json](/D:/Qclaw_Dev/Qclaw/electron-builder.json:1) 已指向 `beta/current/`
 
 这样做的好处是：
 
@@ -38,10 +40,10 @@
 ```json
 {
   "publish": {
-    "url": "https://your-real-host.example.com/qclaw/latest/current"
+    "url": "https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com/beta/current/"
   },
   "cos": {
-    "baseUrl": "https://your-real-host.example.com/qclaw"
+    "baseUrl": "https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com"
   }
 }
 ```
@@ -58,7 +60,7 @@
 
 ```text
 <baseUrl>/
-  latest/
+  beta/
     current/
       latest.yml
       Qclaw-Lite_<displayVersion>.exe
@@ -82,7 +84,7 @@
 3. 运行 Windows 打包命令：
    - `npm run package:win:unsigned`
 4. 运行发布清单脚本：
-   - `node scripts/prepare-cos-update-release.mjs --release-dir release/<displayVersion> --channel latest --base-url <baseUrl>`
+   - `node scripts/prepare-cos-update-release.mjs --release-dir release/<displayVersion> --channel beta --base-url https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com`
 5. 按脚本生成的 `cos-upload-manifest.json` 上传文件。
 6. 先上传安装包与 `.blockmap`。
 7. 最后上传 `latest.yml`。
@@ -119,9 +121,4 @@
 
 ## 当前阻塞项
 
-真正完成这一阶段，还需要你提供最终的 Windows 发布链接。
-
-收到真实链接后，需要补做两件事：
-
-1. 把占位更新源切换到真实地址
-2. 做一次真实双版本升级验证并记录结果
+真正完成这一阶段，还需要在 OSS 中上传至少一个包含 `latest.yml` 的新版本，并做一次真实双版本升级验证。

@@ -1,10 +1,12 @@
-import { Button, Group, Loader, Text, Title } from '@mantine/core'
+import { Alert, Button, Group, Loader, Text, Title } from '@mantine/core'
 
 interface StartupUpdatePromptProps {
   availableVersion?: string | null
   checking?: boolean
+  error?: string
   onLater: () => void
   onUpdateNow: () => void
+  updating?: boolean
 }
 
 export function resolveStartupUpdateVersionLabel(availableVersion?: string | null): string {
@@ -14,8 +16,10 @@ export function resolveStartupUpdateVersionLabel(availableVersion?: string | nul
 export default function StartupUpdatePrompt({
   availableVersion,
   checking = false,
+  error = '',
   onLater,
   onUpdateNow,
+  updating = false,
 }: StartupUpdatePromptProps) {
   const versionLabel = resolveStartupUpdateVersionLabel(availableVersion)
 
@@ -45,6 +49,7 @@ export default function StartupUpdatePrompt({
           radius="md"
           className="min-w-[120px]"
           onClick={onLater}
+          disabled={updating}
         >
           稍后再说
         </Button>
@@ -53,10 +58,16 @@ export default function StartupUpdatePrompt({
           radius="md"
           className="min-w-[120px]"
           onClick={onUpdateNow}
+          loading={updating}
         >
           立即更新
         </Button>
       </Group>
+      {error && (
+        <Alert color="red" variant="light" mt="xl" className="w-full text-left">
+          <Text size="sm">{error}</Text>
+        </Alert>
+      )}
     </div>
   )
 }

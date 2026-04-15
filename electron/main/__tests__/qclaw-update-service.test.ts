@@ -40,6 +40,7 @@ describe('qclaw update service configuration detection', () => {
 
   it('treats non-placeholder publish urls as potentially configured', () => {
     expect(looksPlaceholderPublishUrl('https://updates.qclaw.test/releases/latest')).toBe(false)
+    expect(looksPlaceholderPublishUrl('https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com/beta/current/')).toBe(false)
   })
 
   it('extracts publish urls from builder config objects and strings', () => {

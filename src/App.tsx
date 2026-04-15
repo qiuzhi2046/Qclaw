@@ -53,6 +53,7 @@ import {
 } from './shared/openclaw-version-display'
 import type { QClawUpdateStatus } from './shared/openclaw-phase4'
 import { shouldShowQClawNewVersionButton } from './shared/qclaw-update-visibility'
+import { runQClawAutoUpdate } from './lib/qclaw-auto-update'
 
 type SetupStep = 'api-keys' | 'channel-connect' | 'pairing-code'
 
@@ -286,6 +287,8 @@ function App() {
   const [startupUpdateStatus, setStartupUpdateStatus] = useState<
     Pick<QClawUpdateStatus, 'status' | 'availableVersion'> | null
   >(null)
+  const [startupUpdateRunning, setStartupUpdateRunning] = useState(false)
+  const [startupUpdateError, setStartupUpdateError] = useState('')
   const [setupStep, setSetupStep] = useState<SetupStep>('api-keys')
   const [selectedChannel, setSelectedChannel] = useState<string>('feishu')
   const [selectedPairingAccountId, setSelectedPairingAccountId] = useState<string | undefined>(undefined)
@@ -666,6 +669,21 @@ function App() {
     writeChatComposerEnterSendMode(nextMode)
   }, [])
 
+  const handleStartupUpdateNow = useCallback(async () => {
+    setStartupUpdateRunning(true)
+    setStartupUpdateError('')
+    try {
+      const result = await runQClawAutoUpdate(window.api)
+      if (!result.ok) {
+        setStartupUpdateError(result.message)
+      }
+    } catch (error: any) {
+      setStartupUpdateError(error?.message || 'Qclaw 更新失败，请稍后重试。')
+    } finally {
+      setStartupUpdateRunning(false)
+    }
+  }, [])
+
   const tooltipThemeOverride = useMemo(() => ({
     components: {
       Tooltip: {
@@ -905,9 +923,11 @@ function App() {
     return renderWithContactModal(renderFrame(
       <StartupUpdatePrompt
         checking={!startupUpdateStatus}
+        error={startupUpdateError}
         availableVersion={startupUpdateStatus?.availableVersion}
         onLater={() => setAppState('welcome')}
-        onUpdateNow={() => undefined}
+        onUpdateNow={() => void handleStartupUpdateNow()}
+        updating={startupUpdateRunning}
       />
     , false))
   }

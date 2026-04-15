@@ -3,7 +3,6 @@ import { ActionIcon, Alert, Button, Group, Loader, Modal, Text, Tooltip } from '
 import { IconRefresh } from '@tabler/icons-react'
 import type { CombinedUpdateCheckResult } from '../shared/openclaw-phase4'
 import { PINNED_OPENCLAW_VERSION } from '../shared/openclaw-version-policy'
-import CombinedUpdateDialog from './CombinedUpdateDialog'
 import OpenClawUpgradeDialog from './OpenClawUpgradeDialog'
 import QClawUpdateDialog from './QClawUpdateDialog'
 
@@ -35,7 +34,6 @@ export default function UpdateCenter({
   const [error, setError] = useState('')
   const [showOpenClawDialog, setShowOpenClawDialog] = useState(false)
   const [showQClawDialog, setShowQClawDialog] = useState(false)
-  const [showCombinedDialog, setShowCombinedDialog] = useState(false)
 
   const loadCheck = async () => {
     setLoading(true)
@@ -71,13 +69,6 @@ export default function UpdateCenter({
       status: summarizeQClaw(check),
       action: () => setShowQClawDialog(true),
       btnText: '查看更新',
-    },
-    {
-      label: '组合更新',
-      desc: '先下载面板更新，再升级 OpenClaw',
-      status: '升级失败时面板不会自动更新',
-      action: () => setShowCombinedDialog(true),
-      btnText: '查看组合更新',
     },
   ]
 
@@ -158,11 +149,6 @@ export default function UpdateCenter({
         onUpdated={() => void loadCheck()}
       />
       <QClawUpdateDialog open={showQClawDialog} onClose={() => setShowQClawDialog(false)} />
-      <CombinedUpdateDialog
-        open={showCombinedDialog}
-        onClose={() => setShowCombinedDialog(false)}
-        onUpdated={() => void loadCheck()}
-      />
     </>
   )
 }

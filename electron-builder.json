@@ -66,6 +66,6 @@
   "publish": {
     "provider": "generic",
     "channel": "latest",
-    "url": "https://example.invalid/qclaw-lite/updates/latest"
+    "url": "https://qclaw-lite.oss-cn-shenzhen.aliyuncs.com/beta/current/"
   }
 }
