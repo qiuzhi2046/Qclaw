@@ -7,7 +7,7 @@ import { atomicWriteJson } from './atomic-write'
 import { parseJsonFromOutput } from './openclaw-command-output'
 
 const { readdir, readFile } = process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
-const { join } = process.getBuiltinModule('node:path') as typeof import('node:path')
+const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
 export type LocalProviderType = 'ollama' | 'vllm' | 'custom-openai'
 
@@ -281,6 +281,22 @@ const LOCAL_PROVIDER_AUTH_MARKERS: Record<LocalProviderType, string> = {
   'custom-openai': 'custom-local',
 }
 
+type NodePathModule = typeof path.posix
+
+function inferPathModuleFromPath(value: unknown): NodePathModule {
+  const rawValue = String(value || '')
+  if (/^[A-Za-z]:[\\/]/.test(rawValue) || rawValue.includes('\\')) return path.win32
+  return path.posix
+}
+
+function joinPathUsing(stylePath: unknown, basePath: string, ...parts: string[]): string {
+  return inferPathModuleFromPath(stylePath).join(basePath, ...parts)
+}
+
+function joinPathLike(basePath: string, ...parts: string[]): string {
+  return joinPathUsing(basePath, basePath, ...parts)
+}
+
 const PROVIDER_ALIAS_TO_CANONICAL: Record<string, string> = {
   'openai-codex': 'openai',
   gemini: 'google',
@@ -363,8 +379,11 @@ function lastGoodEntryMatchesExactProvider(providerSet: Set<string>, key: string
   return Boolean(profileProvider && providerSet.has(profileProvider))
 }
 
-function buildFallbackAuthStorePath(homeDir: string): string {
-  return join(homeDir, 'agents', DEFAULT_LOCAL_AGENT_ID, 'agent', 'auth-profiles.json')
+function buildFallbackAuthStorePath(homeDir: string, pathStyleHint?: unknown): string {
+  if (pathStyleHint) {
+    return joinPathUsing(pathStyleHint, homeDir, 'agents', DEFAULT_LOCAL_AGENT_ID, 'agent', 'auth-profiles.json')
+  }
+  return path.join(homeDir, 'agents', DEFAULT_LOCAL_AGENT_ID, 'agent', 'auth-profiles.json')
 }
 
 function normalizeSafeAgentId(agentId: unknown): string {
@@ -375,10 +394,10 @@ function normalizeSafeAgentId(agentId: unknown): string {
   return normalizedAgentId
 }
 
-function buildAgentAuthStorePath(homeDir: string, agentId: unknown): string {
+function buildAgentAuthStorePath(homeDir: string, agentId: unknown, pathStyleHint?: unknown): string {
   const normalizedAgentId = normalizeSafeAgentId(agentId)
   if (!normalizedAgentId) return ''
-  return join(homeDir, 'agents', normalizedAgentId, 'agent', 'auth-profiles.json')
+  return joinPathUsing(pathStyleHint || homeDir, homeDir, 'agents', normalizedAgentId, 'agent', 'auth-profiles.json')
 }
 
 function createEmptyAuthProfilesData(): AuthProfilesData {
@@ -423,13 +442,13 @@ async function listDiscoveredAgentAuthStorePaths(
   resolveRuntimePaths: () => Promise<LocalAuthStorePathRuntimePaths>
 ): Promise<string[]> {
   const runtimePaths = await resolveRuntimePaths()
-  const agentsRoot = join(runtimePaths.homeDir, 'agents')
+  const agentsRoot = joinPathLike(runtimePaths.homeDir, 'agents')
 
   try {
     const entries = await readdir(agentsRoot, { withFileTypes: true })
     return entries
       .filter((entry) => entry.isDirectory())
-      .map((entry) => join(agentsRoot, entry.name, 'agent', 'auth-profiles.json'))
+      .map((entry) => joinPathLike(agentsRoot, entry.name, 'agent', 'auth-profiles.json'))
   } catch {
     return []
   }
@@ -460,7 +479,7 @@ export function extractAuthStorePathFromModelStatus(stdout: string): string {
     if (authStorePath) return authStorePath
 
     const agentDir = String(payload?.agentDir || '').trim()
-    if (agentDir) return join(agentDir, 'auth-profiles.json')
+    if (agentDir) return path.join(agentDir, 'auth-profiles.json')
   } catch {
     // Fall through to empty string so callers can use a runtime-path fallback.
   }
@@ -639,11 +658,11 @@ export async function repairMainAuthProfilesFromOtherAgentStores(
             ? input.sourceAuthStorePaths
             : await (async () => {
                 const runtimePaths = await (options.resolveRuntimePaths ?? defaultResolveRuntimePaths)()
-                const agentsRoot = join(runtimePaths.homeDir, 'agents')
+                const agentsRoot = joinPathLike(runtimePaths.homeDir, 'agents')
                 const entries = await readdir(agentsRoot, { withFileTypes: true })
                 return entries
                   .filter((entry) => entry.isDirectory())
-                  .map((entry) => join(agentsRoot, entry.name, 'agent', 'auth-profiles.json'))
+                  .map((entry) => joinPathLike(agentsRoot, entry.name, 'agent', 'auth-profiles.json'))
               })()
         )
           .map((value) => String(value || '').trim())
@@ -776,11 +795,15 @@ export async function repairAgentAuthProfilesFromOtherAgentStores(
   try {
     const runtimePaths = await resolveRuntimePaths()
     const discoveredAuthStorePaths = await listDiscoveredAgentAuthStorePaths(async () => runtimePaths)
+    const pathStyleHint =
+      input.sourceAuthStorePaths?.find((value) => String(value || '').trim()) ||
+      discoveredAuthStorePaths.find((value) => String(value || '').trim()) ||
+      runtimePaths.homeDir
     const targetAuthStorePaths = Array.from(
       new Set(
         (
           input.targetAgentIds && input.targetAgentIds.length > 0
-            ? input.targetAgentIds.map((agentId) => buildAgentAuthStorePath(runtimePaths.homeDir, agentId))
+            ? input.targetAgentIds.map((agentId) => buildAgentAuthStorePath(runtimePaths.homeDir, agentId, pathStyleHint))
             : discoveredAuthStorePaths
         )
           .map((value) => String(value || '').trim())
@@ -792,7 +815,7 @@ export async function repairAgentAuthProfilesFromOtherAgentStores(
         (
           input.sourceAuthStorePaths && input.sourceAuthStorePaths.length > 0
             ? input.sourceAuthStorePaths
-            : [...discoveredAuthStorePaths, buildFallbackAuthStorePath(runtimePaths.homeDir)]
+            : [...discoveredAuthStorePaths, buildFallbackAuthStorePath(runtimePaths.homeDir, pathStyleHint)]
         )
           .map((value) => String(value || '').trim())
           .filter(Boolean)

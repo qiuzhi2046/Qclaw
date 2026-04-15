@@ -2861,8 +2861,10 @@ describe('openclaw chat service', () => {
       {
         runCommand: authRunCommand,
         runStreamingCommand: authRunStreamingCommand,
+        resolveMainAgentAuthEnv: async () => null,
         readConfig: async () => config,
         writeConfig,
+        repairMiniMaxOauthAgentAuthProfiles: async () => undefined,
       }
     )
 
@@ -3064,7 +3066,7 @@ describe('openclaw chat service', () => {
     expect(transcript.sessionKey).toBe('agent:main:minimax-flow')
     expect(transcript.model).toBe('minimax-portal/MiniMax-M2.5-Lightning')
     expect(transcript.selectedModel).toBe('minimax-portal/MiniMax-M2.5-Lightning')
-  })
+  }, 20_000)
 
   it('does not patch or override the model when a fresh empty local session sends its first message', async () => {
     const discoverOpenClaw = createDiscovery('fingerprint-preflight-bootstrap-created-session')

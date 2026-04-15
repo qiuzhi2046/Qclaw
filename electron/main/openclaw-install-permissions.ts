@@ -40,7 +40,8 @@ export function resolveOpenClawGlobalInstallProbePath(
   if (!normalizedPrefix) return normalizedPrefix
   const segments =
     platform === 'win32' ? ['node_modules', 'openclaw'] : ['lib', 'node_modules', 'openclaw']
-  return join(normalizedPrefix, ...segments)
+  const pathModule = platform === 'win32' ? path.win32 : path.posix
+  return pathModule.join(normalizedPrefix, ...segments)
 }
 
 export async function probeOpenClawInstallPath(pathname: string): Promise<OpenClawInstallPathProbe> {

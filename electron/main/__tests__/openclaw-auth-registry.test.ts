@@ -46,11 +46,11 @@ function addUnsupportedAuthChoiceVariant(
   const optionsText = fs.readFileSync(optionsPath, 'utf8')
   const nextOptionsText = optionsText
     .replace(
-      '];\n\nconst PROVIDER_AUTH_CHOICE_OPTION_HINTS = {',
+      /\];\r?\n\r?\nconst PROVIDER_AUTH_CHOICE_OPTION_HINTS = \{/,
       `,\n  {\n    value: "${input.providerId}",\n    label: "${input.providerLabel}",\n    hint: "${input.providerHint}",\n    choices: ["${input.authChoice}"]\n  }\n];\n\nconst PROVIDER_AUTH_CHOICE_OPTION_HINTS = {`
     )
     .replace(
-      '];\n\nfunction formatAuthChoiceChoicesForCli(params) {',
+      /\];\r?\n\r?\nfunction formatAuthChoiceChoicesForCli\(params\) \{/,
       `,\n  {\n    value: "${input.authChoice}",\n    label: "${input.optionLabel}"\n  }\n];\n\nfunction formatAuthChoiceChoicesForCli(params) {`
     )
 
@@ -69,7 +69,7 @@ function addUnsupportedAuthChoiceVariant(
   const authChoicePath = findDistFile(root, 'auth-choice')
   const authChoiceText = fs.readFileSync(authChoicePath, 'utf8')
   const nextAuthChoiceText = authChoiceText.replace(
-    '};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {',
+    /\};\r?\n\r?\nfunction resolvePreferredProviderForAuthChoice\(choice\) \{/,
     `,\n  "${input.authChoice}": "${input.providerId}"\n};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {`
   )
 
@@ -99,7 +99,7 @@ function addProviderScopedOnboardApiKeyFlag(
   const flagsText = fs.readFileSync(flagsPath, 'utf8')
   const optionKey = `${input.providerId}ApiKey`
   const nextFlagsText = flagsText.replace(
-    '];\nexport { AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI as n, ONBOARD_PROVIDER_AUTH_FLAGS as t };',
+    /\];\r?\nexport \{ AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI as n, ONBOARD_PROVIDER_AUTH_FLAGS as t \};/,
     `,\n  {\n    optionKey: "${optionKey}",\n    authChoice: "${input.authChoice}",\n    cliFlag: "${input.cliFlag}",\n    cliOption: "${input.cliFlag} <key>",\n    description: "${input.description}"\n  }\n];\nexport { AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI as n, ONBOARD_PROVIDER_AUTH_FLAGS as t };`
   )
   if (nextFlagsText === flagsText) {
@@ -112,7 +112,7 @@ function addProviderScopedOnboardApiKeyFlag(
   if (authChoiceText.includes(`"${input.authChoice}":`)) return
 
   const nextAuthChoiceText = authChoiceText.replace(
-    '};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {',
+    /\};\r?\n\r?\nfunction resolvePreferredProviderForAuthChoice\(choice\) \{/,
     `,\n  "${input.authChoice}": "${input.providerId}"\n};\n\nfunction resolvePreferredProviderForAuthChoice(choice) {`
   )
   if (nextAuthChoiceText === authChoiceText) {

@@ -1,4 +1,4 @@
-import type { CliResult, RunCliStreamOptions } from './cli'
+import type { CliResult, GatewayStatusCheckResult, RunCliStreamOptions } from './cli'
 import type { ReconcileActionSummary } from '../../src/shared/gateway-runtime-reconcile-state'
 import type { OpenClawCapabilities } from './openclaw-capabilities'
 import { createOAuthChallengeScanner } from './oauth-browser'
@@ -117,6 +117,7 @@ interface ExecuteAuthRouteOptions {
     env: Partial<NodeJS.ProcessEnv>
   ) => Promise<CliResult>
   runStreamingCommand?: (args: string[], options?: RunCliStreamOptions) => Promise<CliResult>
+  resolveMainAgentAuthEnv?: () => Promise<Partial<NodeJS.ProcessEnv> | null>
   readConfig?: () => Promise<Record<string, any> | null>
   writeConfig?: (config: Record<string, any>) => Promise<void>
   pruneStalePluginEntries?: (
@@ -125,6 +126,8 @@ interface ExecuteAuthRouteOptions {
   capabilities?: OpenClawCapabilities
   loadCapabilities?: () => Promise<OpenClawCapabilities>
   ensureGatewayRunning?: () => Promise<GatewayEnsureRunningResult>
+  readGatewayStatus?: () => Promise<GatewayStatusCheckResult>
+  repairMiniMaxOauthAgentAuthProfiles?: () => Promise<void>
 }
 
 async function defaultRunCommand(args: string[], timeout?: number): Promise<CliResult> {
@@ -920,6 +923,7 @@ async function reconcileSuccessfulOnboardRuntime(params: {
   gatewayTokenAfterAuth: string | null
   runCommand: (args: string[], timeout?: number) => Promise<CliResult>
   ensureGatewayRunning: () => Promise<GatewayEnsureRunningResult>
+  readGatewayStatus?: () => Promise<GatewayStatusCheckResult>
   successResult: CliResult
   recoveredGatewayDuringOnboard: boolean
   extras: Partial<ExecuteAuthRouteResult>
@@ -970,6 +974,7 @@ async function reconcileSuccessfulOnboardRuntime(params: {
     },
     {
       ensureGatewayRunning: params.ensureGatewayRunning,
+      readGatewayStatus: params.readGatewayStatus,
       runCommand: params.runCommand,
     }
   )
@@ -1160,6 +1165,9 @@ export async function executeAuthRoute(
   const runCommand = options.runCommand || defaultRunCommand
   const runCommandWithEnv =
     options.runCommandWithEnv || (options.runCommand ? undefined : defaultRunCommandWithEnv)
+  const resolveCommandAuthEnv = options.resolveMainAgentAuthEnv || resolveMainAgentAuthEnv
+  const repairMiniMaxOauthProfiles =
+    options.repairMiniMaxOauthAgentAuthProfiles || repairMiniMaxOauthAgentAuthProfiles
   const readConfig = options.readConfig || defaultReadConfig
   const writeConfig = options.writeConfig
   const ensureGatewayRunning = options.ensureGatewayRunning || defaultEnsureGatewayRunning
@@ -1250,7 +1258,7 @@ export async function executeAuthRoute(
     }
 
     const configBeforeAuth = await readConfig().catch(() => null)
-    const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
+    const mainAgentAuthEnv = await resolveCommandAuthEnv().catch(() => null)
     const mainAgentScope = await prepareTemporaryMainAgentDefaultScope({
       configBeforeAuth,
       readConfig,
@@ -1489,7 +1497,7 @@ export async function executeAuthRoute(
     }
 
     if (result.ok && loginProviderId === 'minimax-portal') {
-      await repairMiniMaxOauthAgentAuthProfiles().catch(() => null)
+      void repairMiniMaxOauthProfiles().catch(() => null)
     }
 
     return fromCommand(route.kind, attemptedCommands, result, {
@@ -1515,7 +1523,7 @@ export async function executeAuthRoute(
     }
 
     const configBeforeAuth = await readConfig().catch(() => null)
-    const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
+    const mainAgentAuthEnv = await resolveCommandAuthEnv().catch(() => null)
     const mainAgentScope = await prepareTemporaryMainAgentDefaultScope({
       configBeforeAuth,
       readConfig,
@@ -1621,7 +1629,7 @@ export async function executeAuthRoute(
   if (route.kind === 'onboard') {
     const configBeforeAuth = await readConfig().catch(() => null)
     gatewayTokenBeforeAuth = readGatewayAuthToken(configBeforeAuth)
-    const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
+    const mainAgentAuthEnv = await resolveCommandAuthEnv().catch(() => null)
     const onboardCommand = buildOnboardRouteCommand(method, input.secret, capabilities)
     if (!onboardCommand.ok) {
       return fromBuildFailure(onboardCommand, attemptedCommands, route.kind, {
@@ -1730,6 +1738,7 @@ export async function executeAuthRoute(
         gatewayTokenAfterAuth,
         runCommand,
         ensureGatewayRunning,
+        readGatewayStatus: options.readGatewayStatus,
         successResult: result,
         recoveredGatewayDuringOnboard: onboardResult.recoveredGateway,
         extras: {
@@ -1752,7 +1761,7 @@ export async function executeAuthRoute(
   if (route.kind === 'onboard-custom') {
     const configBeforeAuth = await readConfig().catch(() => null)
     gatewayTokenBeforeAuth = readGatewayAuthToken(configBeforeAuth)
-    const mainAgentAuthEnv = await resolveMainAgentAuthEnv().catch(() => null)
+    const mainAgentAuthEnv = await resolveCommandAuthEnv().catch(() => null)
     const onboardCommand = buildCustomProviderOnboardRouteCommand(method, input.customConfig || ({} as any), input.secret, capabilities)
     if (!onboardCommand.ok) {
       return fromBuildFailure(onboardCommand, attemptedCommands, route.kind, {
@@ -1881,6 +1890,7 @@ export async function executeAuthRoute(
         gatewayTokenAfterAuth,
         runCommand,
         ensureGatewayRunning,
+        readGatewayStatus: options.readGatewayStatus,
         successResult: result,
         recoveredGatewayDuringOnboard: onboardResult.recoveredGateway,
         extras: {

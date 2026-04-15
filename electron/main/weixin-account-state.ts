@@ -29,6 +29,18 @@ function hasOwnRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+type NodePathModule = typeof path.posix
+
+function inferPathModuleFromPath(value: unknown): NodePathModule {
+  const rawValue = String(value || '').trim()
+  if (/^[A-Za-z]:[\\/]/.test(rawValue) || rawValue.includes('\\')) return path.win32
+  return path.posix
+}
+
+function joinPathLike(basePath: string, ...parts: string[]): string {
+  return inferPathModuleFromPath(basePath).join(basePath, ...parts)
+}
+
 async function resolveOpenClawStateDir(): Promise<string> {
   const envStateDir = resolveOpenClawEnvValue(process.env, 'OPENCLAW_STATE_DIR').value
   if (envStateDir) return envStateDir
@@ -48,13 +60,13 @@ async function resolveWeixinStatePaths(): Promise<{
   credentialsDir: string
 }> {
   const stateDir = await resolveOpenClawStateDir()
-  const weixinStateDir = path.join(stateDir, 'openclaw-weixin')
+  const weixinStateDir = joinPathLike(stateDir, 'openclaw-weixin')
   return {
     stateDir,
     weixinStateDir,
-    accountsDir: path.join(weixinStateDir, 'accounts'),
-    accountIndexPath: path.join(weixinStateDir, 'accounts.json'),
-    credentialsDir: path.join(stateDir, 'credentials'),
+    accountsDir: joinPathLike(weixinStateDir, 'accounts'),
+    accountIndexPath: joinPathLike(weixinStateDir, 'accounts.json'),
+    credentialsDir: joinPathLike(stateDir, 'credentials'),
   }
 }
 
@@ -100,12 +112,12 @@ function listIndexedAccountIds(accountIndexPath: string): string[] {
 }
 
 function readStoredWeixinAccount(accountsDir: string, accountId: string): WeixinStoredAccountData | null {
-  const primary = readJsonFile<WeixinStoredAccountData>(path.join(accountsDir, `${accountId}.json`))
+  const primary = readJsonFile<WeixinStoredAccountData>(joinPathLike(accountsDir, `${accountId}.json`))
   if (primary) return primary
 
   const rawAccountId = deriveRawAccountId(accountId)
   if (!rawAccountId) return null
-  return readJsonFile<WeixinStoredAccountData>(path.join(accountsDir, `${rawAccountId}.json`))
+  return readJsonFile<WeixinStoredAccountData>(joinPathLike(accountsDir, `${rawAccountId}.json`))
 }
 
 export async function listWeixinAccountState(): Promise<WeixinAccountState[]> {
@@ -123,17 +135,21 @@ export async function listWeixinAccountState(): Promise<WeixinAccountState[]> {
   for (const accountId of mergedAccountIds) {
     const stored = readStoredWeixinAccount(paths.accountsDir, accountId)
     const configEntry = hasOwnRecord(configAccounts[accountId]) ? configAccounts[accountId] : {}
-    accounts.push({
+    const account: WeixinAccountState = {
       accountId,
       configured: Boolean(String(stored?.token || '').trim()),
-      baseUrl: String(stored?.baseUrl || '').trim() || undefined,
-      userId: String(stored?.userId || '').trim() || undefined,
       enabled:
         typeof configEntry.enabled === 'boolean'
           ? configEntry.enabled
           : true,
-      name: String(configEntry.name || '').trim() || undefined,
-    })
+    }
+    const baseUrl = String(stored?.baseUrl || '').trim()
+    const userId = String(stored?.userId || '').trim()
+    const name = String(configEntry.name || '').trim()
+    if (baseUrl) account.baseUrl = baseUrl
+    if (userId) account.userId = userId
+    if (name) account.name = name
+    accounts.push(account)
   }
 
   accounts.sort((left, right) => left.accountId.localeCompare(right.accountId, 'zh-CN'))
@@ -181,7 +197,7 @@ export function syncWeixinAccountsIntoConfig(
 
 function removeFromAccountIndex(accountIndexPath: string, accountId: string): void {
   const nextIndex = listIndexedAccountIds(accountIndexPath).filter((item) => item !== accountId)
-  const directory = path.dirname(accountIndexPath)
+  const directory = inferPathModuleFromPath(accountIndexPath).dirname(accountIndexPath)
   fs.mkdirSync(directory, { recursive: true })
   fs.writeFileSync(accountIndexPath, JSON.stringify(nextIndex, null, 2), 'utf-8')
 }
@@ -212,10 +228,10 @@ export async function removeWeixinAccountState(accountIdInput: string): Promise<
 
   await Promise.all(
     candidateIds.flatMap((candidateId) => [
-      removeIfExists(path.join(paths.accountsDir, `${candidateId}.json`)),
-      removeIfExists(path.join(paths.accountsDir, `${candidateId}.sync.json`)),
+      removeIfExists(joinPathLike(paths.accountsDir, `${candidateId}.json`)),
+      removeIfExists(joinPathLike(paths.accountsDir, `${candidateId}.sync.json`)),
       removeIfExists(
-        path.join(paths.credentialsDir, `${safeFrameworkKey('openclaw-weixin')}-${safeFrameworkKey(candidateId)}-allowFrom.json`)
+        joinPathLike(paths.credentialsDir, `${safeFrameworkKey('openclaw-weixin')}-${safeFrameworkKey(candidateId)}-allowFrom.json`)
       ),
     ])
   )

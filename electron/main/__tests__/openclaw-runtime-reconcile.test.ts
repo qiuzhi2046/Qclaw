@@ -53,7 +53,7 @@ describe('openclaw runtime reconcile store', () => {
     })
 
     expect(store.lastSeenOpenClawVersion).toBe('2026.4.12')
-    expect(store.lastSeenVersionBand).toBe('openclaw_2026_4_11')
+    expect(store.lastSeenVersionBand).toBe('openclaw_2026_4_12')
     expect(store.lastCompatibility.status).toBe('upgrade_detected')
     expect(store.lastCompatibility.previousVersion).toBe('2026.3.11')
   })

@@ -78,9 +78,11 @@ export function formatDisplayPath(
   )
   if (!normalizedPath || !normalizedHomeDir) return normalizedPath
 
+  const remainder = normalizedPath.slice(normalizedHomeDir.length)
   const isMatch =
     normalizedPath === normalizedHomeDir ||
-    normalizedPath.startsWith(`${normalizedHomeDir}${platform === 'win32' ? '\\' : '/'}`)
+    remainder.startsWith('/') ||
+    remainder.startsWith('\\')
 
   if (!isMatch) return normalizedPath
   return `~${normalizedPath.slice(normalizedHomeDir.length)}`

@@ -1,7 +1,7 @@
 import type { OpenClawDiscoveryResult, OpenClawInstallCandidate } from '../../src/shared/openclaw-phase1'
 import type { OpenClawUpgradeCheckResult, OpenClawUpgradeRunResult } from '../../src/shared/openclaw-phase4'
 import type { OpenClawBackupEntry } from '../../src/shared/openclaw-phase3'
-import { compareLooseVersions } from '../../src/shared/openclaw-phase1'
+import { compareLooseVersions, normalizeVersionCore } from '../../src/shared/openclaw-phase1'
 import {
   PINNED_OPENCLAW_VERSION,
   isStrictOpenClawPolicyVersion,
@@ -982,7 +982,7 @@ export async function runOpenClawUpgrade(): Promise<OpenClawUpgradeRunResult> {
         ? ['OpenClaw 已写入 Qclaw 托管运行时，但当前会话未能自动切换到新的托管运行时。']
         : []
     const versionCheck = await checkOpenClaw()
-    const upgradedVersion = versionCheck.installed ? versionCheck.version : ''
+    const upgradedVersion = versionCheck.installed ? normalizeVersionCore(versionCheck.version) : ''
     const upgradeSucceeded =
       versionCheck.installed && compareLooseVersions(upgradedVersion, check.targetVersion) === 0
     const officialRepairResult = upgradeSucceeded

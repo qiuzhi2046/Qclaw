@@ -7,6 +7,10 @@ const { mkdtemp, readFile } = process.getBuiltinModule('node:fs/promises') as ty
 const { tmpdir } = process.getBuiltinModule('node:os') as typeof import('node:os')
 const { join } = process.getBuiltinModule('node:path') as typeof import('node:path')
 
+function slashPath(value: string): string {
+  return value.replace(/\\/g, '/')
+}
+
 describe('openclaw-npm-runtime', () => {
   it('creates managed npm runtime files and returns stable command options', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'qclaw-openclaw-runtime-'))
@@ -19,7 +23,7 @@ describe('openclaw-npm-runtime', () => {
     expect(runtime.userConfigPath).toContain('openclaw-installer')
     expect(runtime.globalConfigPath).toContain('openclaw-installer')
     expect(runtime.cachePath).toContain('openclaw-installer')
-    expect(runtime.cachePath).toContain('/cache/run-')
+    expect(slashPath(runtime.cachePath)).toContain('/cache/run-')
     expect(runtime.commandOptions.fetchTimeoutMs).toBe(20000)
     expect(runtime.commandOptions.fetchRetries).toBe(1)
     expect(runtime.commandOptions.noAudit).toBe(true)
@@ -45,8 +49,8 @@ describe('openclaw-npm-runtime', () => {
     expect(first.userConfigPath).toBe(second.userConfigPath)
     expect(first.globalConfigPath).toBe(second.globalConfigPath)
     expect(first.cachePath).not.toBe(second.cachePath)
-    expect(first.cachePath).toContain('/cache/run-')
-    expect(second.cachePath).toContain('/cache/run-')
+    expect(slashPath(first.cachePath)).toContain('/cache/run-')
+    expect(slashPath(second.cachePath)).toContain('/cache/run-')
   })
 
   it('creates isolated admin cache options outside the managed runtime root', () => {
@@ -62,6 +66,7 @@ describe('openclaw-npm-runtime', () => {
         noFund: true,
       },
       {
+        platform: 'darwin',
         tempDir: '/private/tmp',
         uuidFactory: () => 'admin-run',
       }

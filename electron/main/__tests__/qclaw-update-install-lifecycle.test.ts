@@ -13,7 +13,7 @@ describe('qclaw update install lifecycle', () => {
     vi.useRealTimers()
   })
 
-  it('only bypasses app exit cleanup for Windows installer handoff', () => {
+  it('bypasses app exit cleanup for installer handoff platforms', () => {
     expect(shouldBypassAppExitCleanupOnQuit()).toBe(false)
 
     markQClawUpdateInstallInProgress('win32')
@@ -25,6 +25,12 @@ describe('qclaw update install lifecycle', () => {
     expect(shouldBypassAppExitCleanupOnQuit()).toBe(false)
 
     markQClawUpdateInstallInProgress('darwin')
+
+    expect(shouldBypassAppExitCleanupOnQuit()).toBe(true)
+
+    clearQClawUpdateInstallInProgress()
+
+    markQClawUpdateInstallInProgress('linux')
 
     expect(shouldBypassAppExitCleanupOnQuit()).toBe(false)
   })
@@ -64,7 +70,7 @@ describe('qclaw update install lifecycle', () => {
 
     expect(updater.autoRunAppAfterInstall).toBe(false)
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, false)
-    expect(shouldBypassAppExitCleanupOnQuit()).toBe(false)
+    expect(shouldBypassAppExitCleanupOnQuit()).toBe(true)
   })
 
   it('clears bypass state if installer handoff throws synchronously', () => {

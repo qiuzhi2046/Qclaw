@@ -14,6 +14,7 @@ import {
 import { pluginEnableLooksSuccessful } from './openclaw-auth-plugins'
 import { getCliFailureMessage, parseJsonFromOutput } from './openclaw-command-output'
 import type { RepairStalePluginConfigFromCommandResult } from './openclaw-config-warnings'
+import { rerunReadOnlyCommandAfterStalePluginRepair } from './openclaw-readonly-stale-plugin-repair'
 import { buildOpenClawLegacyEnvPatch } from './openclaw-legacy-env-migration'
 import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import {
@@ -130,6 +131,14 @@ async function defaultRunCommandWithEnv(
     controlDomain: 'models',
     env,
   })
+}
+
+async function noopRepairStalePluginConfigFromCommandResult(): Promise<RepairStalePluginConfigFromCommandResult> {
+  return {
+    stalePluginIds: [],
+    changed: false,
+    removedPluginIds: [],
+  }
 }
 
 async function defaultEnablePluginCommand(pluginId: string, timeout?: number): Promise<CliCommandResult> {
@@ -734,9 +743,19 @@ export async function getModelStatus<T = unknown>(
     ...buildOpenClawLegacyEnvPatch(process.env),
     OPENCLAW_AUTH_STORE_READONLY: '1',
   }
-  const result = options.runCommand
-    ? await runCommand(command, DEFAULT_STATUS_TIMEOUT_MS)
-    : await runCommandWithEnv(command, DEFAULT_STATUS_TIMEOUT_MS, statusEnv)
+  const repairStalePluginConfigFromCommandResult =
+    options.runCommand || options.runCommandWithEnv
+      ? noopRepairStalePluginConfigFromCommandResult
+      : undefined
+  const result = await rerunReadOnlyCommandAfterStalePluginRepair(
+    () =>
+      options.runCommand
+        ? runCommand(command, DEFAULT_STATUS_TIMEOUT_MS)
+        : runCommandWithEnv(command, DEFAULT_STATUS_TIMEOUT_MS, statusEnv),
+    {
+      repairStalePluginConfigFromCommandResult,
+    }
+  )
   if (!result.ok) {
     return {
       ok: false,

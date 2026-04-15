@@ -325,8 +325,10 @@ describe('executeAuthRoute', () => {
     )
 
     expect(result.ok).toBe(true)
-    expect(repairAgentAuthProfilesFromOtherAgentStoresMock).toHaveBeenCalledWith({
-      providerIds: ['minimax-portal'],
+    await vi.waitFor(() => {
+      expect(repairAgentAuthProfilesFromOtherAgentStoresMock).toHaveBeenCalledWith({
+        providerIds: ['minimax-portal'],
+      })
     })
   })
 

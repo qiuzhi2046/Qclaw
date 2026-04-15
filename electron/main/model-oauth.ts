@@ -1,4 +1,5 @@
 import type { CliResult, RunCliStreamOptions } from './cli'
+import type { GatewayEnsureRunningResult } from './openclaw-gateway-service'
 import type { OpenClawCapabilities } from './openclaw-capabilities'
 import {
   executeAuthRoute,
@@ -60,6 +61,7 @@ interface StartModelOAuthOptions {
   emit?: (channel: OAuthEventChannel, payload: Record<string, any>) => void
   runCommand?: (args: string[], timeout?: number) => Promise<CliResult>
   runStreamingCommand?: (args: string[], options?: RunCliStreamOptions) => Promise<CliResult>
+  resolveMainAgentAuthEnv?: () => Promise<Partial<NodeJS.ProcessEnv> | null>
   loadAuthRegistry?: () => Promise<OpenClawAuthRegistry>
   capabilities?: OpenClawCapabilities
   loadCapabilities?: () => Promise<OpenClawCapabilities>
@@ -203,6 +205,42 @@ export async function startModelOAuthFlow(
   const providerId = request.providerId.trim()
   const methodId = normalizeAuthChoice(request.methodId)
   const loadAuthRegistry = options.loadAuthRegistry ?? (() => loadOpenClawAuthRegistry())
+  const useInjectedCommands = Boolean(options.runCommand || options.runStreamingCommand)
+  const resolveMainAgentAuthEnv =
+    options.resolveMainAgentAuthEnv ??
+    (useInjectedCommands ? async () => null : undefined)
+  const readGatewayStatus = useInjectedCommands
+    ? async () => ({
+        running: false,
+        raw: '',
+        stderr: '',
+        code: 0,
+        stateCode: 'gateway_not_running' as const,
+        summary: '网关当前未运行',
+      })
+    : undefined
+  const ensureGatewayRunning = useInjectedCommands
+    ? async (): Promise<GatewayEnsureRunningResult> => ({
+        ok: true,
+        running: false,
+        autoInstalledNode: false,
+        autoInstalledOpenClaw: false,
+        autoInstalledGatewayService: false,
+        autoPortMigrated: false,
+        effectivePort: 0,
+        stateCode: 'gateway_not_running',
+        attemptedCommands: [],
+        evidence: [],
+        repairActionsTried: [],
+        repairOutcome: 'not-needed',
+        safeToRetry: true,
+        reasonDetail: null,
+        stdout: '',
+        stderr: '',
+        code: 0,
+        summary: '网关当前未运行',
+      })
+    : undefined
   const loadCapabilities =
     options.loadCapabilities ??
     (!options.runCommand && !options.runStreamingCommand
@@ -332,6 +370,9 @@ export async function startModelOAuthFlow(
     {
       runCommand: options.runCommand,
       runStreamingCommand: options.runStreamingCommand ?? defaultRunStreamingCommand,
+      resolveMainAgentAuthEnv,
+      readGatewayStatus,
+      ensureGatewayRunning,
       capabilities,
       loadCapabilities,
     }

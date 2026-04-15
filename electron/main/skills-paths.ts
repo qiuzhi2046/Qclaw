@@ -20,12 +20,29 @@ function normalizePathLikeValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function inferPathModule(...values: unknown[]): PathModule {
+  const normalizedValues = values
+    .map((value) => normalizePathLikeValue(value))
+    .filter(Boolean)
+  if (normalizedValues.some((value) => /^[A-Za-z]:[\\/]/.test(value) || value.includes('\\'))) {
+    return path.win32
+  }
+  if (normalizedValues.some((value) => value.startsWith('/') || value.includes('/'))) {
+    return path.posix
+  }
+  return path
+}
+
 export function resolveOpenClawSkillLocations(
   payload?: Record<string, unknown> | null,
   options: ResolveOpenClawSkillLocationsOptions = {}
 ): OpenClawSkillLocations {
-  const pathModule = options.pathModule || path
   const homeDir = normalizePathLikeValue(options.homeDir || os.homedir())
+  const pathModule = options.pathModule || inferPathModule(
+    payload?.workspaceDir,
+    payload?.managedSkillsDir,
+    options.homeDir
+  )
   const fallbackStateRoot = homeDir
     ? pathModule.join(homeDir, '.openclaw')
     : pathModule.resolve('.openclaw')
@@ -89,6 +106,10 @@ export function resolveClawHubLockFilePath(
   locations: OpenClawSkillLocations,
   options: ResolveOpenClawSkillLocationsOptions = {}
 ): string {
-  const pathModule = options.pathModule || path
+  const pathModule = options.pathModule || inferPathModule(
+    locations.clawhubWorkdir,
+    locations.managedSkillsDir,
+    locations.workspaceDir
+  )
   return pathModule.join(locations.clawhubWorkdir, '.clawhub', 'lock.json')
 }

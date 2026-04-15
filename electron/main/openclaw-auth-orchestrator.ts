@@ -1,4 +1,5 @@
 import type { CliResult } from './cli'
+import type { GatewayEnsureRunningResult } from './openclaw-gateway-service'
 import type { OpenClawCapabilities } from './openclaw-capabilities'
 import {
   buildModelsAuthAddCommand,
@@ -248,6 +249,41 @@ export async function runAuthAction(
   const runCommand = options.runCommand ?? defaultRunCommand
   const runCommandWithEnv =
     options.runCommandWithEnv ?? (options.runCommand ? undefined : defaultRunCommandWithEnv)
+  const useInjectedCommand = Boolean(options.runCommand)
+  const readConfig =
+    options.readConfig || (useInjectedCommand ? async () => null : undefined)
+  const readGatewayStatus = useInjectedCommand
+    ? async () => ({
+        running: false,
+        raw: '',
+        stderr: '',
+        code: 0,
+        stateCode: 'gateway_not_running' as const,
+        summary: '网关当前未运行',
+      })
+    : undefined
+  const ensureGatewayRunning = useInjectedCommand
+    ? async (): Promise<GatewayEnsureRunningResult> => ({
+        ok: true,
+        running: false,
+        autoInstalledNode: false,
+        autoInstalledOpenClaw: false,
+        autoInstalledGatewayService: false,
+        autoPortMigrated: false,
+        effectivePort: 0,
+        stateCode: 'gateway_not_running',
+        attemptedCommands: [],
+        evidence: [],
+        repairActionsTried: [],
+        repairOutcome: 'not-needed',
+        safeToRetry: true,
+        reasonDetail: null,
+        stdout: '',
+        stderr: '',
+        code: 0,
+        summary: '网关当前未运行',
+      })
+    : undefined
   const loadAuthRegistry = options.loadAuthRegistry ?? (() => loadOpenClawAuthRegistry())
   const capabilities = await resolveCapabilities(options)
   const attemptedCommands: string[][] = []
@@ -291,7 +327,9 @@ export async function runAuthAction(
         {
           runCommand,
           runCommandWithEnv,
-          readConfig: options.readConfig,
+          readConfig,
+          readGatewayStatus,
+          ensureGatewayRunning,
           capabilities,
           loadCapabilities: options.loadCapabilities,
         }

@@ -56,11 +56,6 @@ export const OPENCLAW_NPM_REGISTRY_MIRRORS: OpenClawNpmRegistryMirror[] = [
     registryUrl: 'https://registry.npmmirror.com',
   },
   {
-    id: 'npmjs',
-    label: 'npm 官方源',
-    registryUrl: null,
-  },
-  {
     id: 'tencent',
     label: '腾讯云镜像',
     registryUrl: 'https://mirrors.cloud.tencent.com/npm/',
@@ -69,6 +64,11 @@ export const OPENCLAW_NPM_REGISTRY_MIRRORS: OpenClawNpmRegistryMirror[] = [
     id: 'huawei',
     label: '华为云镜像',
     registryUrl: 'https://repo.huaweicloud.com/repository/npm/',
+  },
+  {
+    id: 'npmjs',
+    label: 'npm 官方源',
+    registryUrl: null,
   },
 ]
 

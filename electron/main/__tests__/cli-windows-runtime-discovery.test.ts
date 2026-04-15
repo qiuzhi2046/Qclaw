@@ -1,20 +1,26 @@
 // @vitest-environment node
 
+import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { buildWindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-runtime-policy'
 import type { WindowsActiveRuntimeSnapshot } from '../platforms/windows/windows-runtime-policy'
 
-const { existsSync } = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { fileURLToPath, pathToFileURL } = process.getBuiltinModule('node:url') as typeof import('node:url')
 const vm = process.getBuiltinModule('node:vm') as typeof import('node:vm')
 const { registerHooks } = process.getBuiltinModule('node:module') as typeof import('node:module') & {
   registerHooks: (hooks: {
-    resolve: (
+    resolve?: (
       specifier: string,
       context: { parentURL?: string },
       nextResolve: (specifier: string, context: { parentURL?: string }) => unknown
+    ) => unknown
+    load?: (
+      url: string,
+      context: Record<string, unknown>,
+      nextLoad: (url: string, context: Record<string, unknown>) => unknown
     ) => unknown
   }) => { deregister: () => void }
 }
@@ -72,6 +78,49 @@ function buildGatewayOwnerSnapshotFromLauncherIntegrity(input: {
 
 let cliModulePromise: Promise<CliModule> | null = null
 
+function resolveTypeScriptModuleUrl(
+  specifier: string,
+  parentURL?: string
+): string | null {
+  const hasKnownExtension = /\.[a-z0-9]+$/i.test(specifier)
+  if (hasKnownExtension) return null
+
+  const candidates: string[] = []
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    if (!parentURL?.startsWith('file:')) return null
+    const parentPath = fileURLToPath(parentURL)
+    const parentDir = path.dirname(parentPath)
+    candidates.push(path.resolve(parentDir, `${specifier}.ts`))
+    candidates.push(path.resolve(parentDir, specifier, 'index.ts'))
+  } else if (path.isAbsolute(specifier)) {
+    candidates.push(`${specifier}.ts`)
+    candidates.push(path.join(specifier, 'index.ts'))
+  }
+
+  const match = candidates.find((candidate) => fs.existsSync(candidate))
+  return match ? pathToFileURL(match).href : null
+}
+
+function isProjectTypeScriptUrl(url: string): boolean {
+  if (!url.startsWith('file:') || !/\.(?:ts|tsx)$/.test(url)) return false
+  const filePath = fileURLToPath(url)
+  const relative = path.relative(process.cwd(), filePath)
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative)
+}
+
+function transpileTypeScriptSource(url: string): string {
+  const filePath = fileURLToPath(url)
+  const source = fs.readFileSync(filePath, 'utf8')
+  return ts.transpileModule(source, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: filePath,
+  }).outputText
+}
+
 async function withStubbedWindowsPlatform<T>(callback: () => Promise<T>): Promise<T> {
   const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
   Object.defineProperty(process, 'platform', {
@@ -99,25 +148,26 @@ async function loadCliModule(): Promise<CliModule> {
   cliModulePromise = (async () => {
     const hooks = registerHooks({
       resolve(specifier, context, nextResolve) {
-        let candidateUrl: URL | null = null
-        const hasKnownExtension = /\.[a-z0-9]+$/i.test(specifier)
-        if (!hasKnownExtension && (specifier.startsWith('./') || specifier.startsWith('../'))) {
-          const parentUrl = context.parentURL
-          if (parentUrl?.startsWith('file:')) {
-            candidateUrl = new URL(`${specifier}.ts`, parentUrl)
-          }
-        } else if (!hasKnownExtension && path.isAbsolute(specifier)) {
-          candidateUrl = pathToFileURL(`${specifier}.ts`)
-        }
-
-        if (candidateUrl && existsSync(fileURLToPath(candidateUrl))) {
+        const candidateUrl = resolveTypeScriptModuleUrl(specifier, context.parentURL)
+        if (candidateUrl) {
           return {
             shortCircuit: true,
-            url: candidateUrl.href,
+            url: candidateUrl,
           }
         }
 
         return nextResolve(specifier, context)
+      },
+      load(url, context, nextLoad) {
+        if (isProjectTypeScriptUrl(url)) {
+          return {
+            format: 'module',
+            shortCircuit: true,
+            source: transpileTypeScriptSource(url),
+          }
+        }
+
+        return nextLoad(url, context)
       },
     })
 

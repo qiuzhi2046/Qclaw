@@ -1,6 +1,8 @@
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 
+type PathModule = typeof import('node:path')
+
 const SKILL_SLUG_REGEX = /^[a-z0-9][a-z0-9._-]*$/i
 
 interface ResolveSkillPathOptions {
@@ -12,21 +14,35 @@ function normalizePathValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function inferPathModule(...values: unknown[]): PathModule {
+  const normalizedValues = values
+    .map((value) => normalizePathValue(value))
+    .filter(Boolean)
+  if (normalizedValues.some((value) => /^[A-Za-z]:[\\/]/.test(value) || value.includes('\\'))) {
+    return path.win32
+  }
+  if (normalizedValues.some((value) => value.startsWith('/') || value.includes('/'))) {
+    return path.posix
+  }
+  return path
+}
+
 export function isAllowedOpenClawSkillsRoot(
   skillsRootDir: string,
   options: ResolveSkillPathOptions = {}
 ): boolean {
+  const pathModule = inferPathModule(skillsRootDir, options.homeDir)
   const homeDir = normalizePathValue(options.homeDir || os.homedir())
   if (!homeDir) return false
 
-  const stateRoot = path.resolve(homeDir, '.openclaw')
-  const skillsRoot = path.resolve(skillsRootDir)
-  const relative = path.relative(stateRoot, skillsRoot)
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+  const stateRoot = pathModule.resolve(homeDir, '.openclaw')
+  const skillsRoot = pathModule.resolve(skillsRootDir)
+  const relative = pathModule.relative(stateRoot, skillsRoot)
+  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
     return false
   }
 
-  const segments = relative.split(path.sep).filter(Boolean)
+  const segments = relative.split(pathModule.sep).filter(Boolean)
   if (options.rootKind === 'managed') {
     return segments.length === 1 && segments[0] === 'skills'
   }
@@ -86,14 +102,15 @@ export function resolveSkillPathUnderRoot(
     return { ok: false, error: 'invalid-managed-skills-dir' }
   }
 
-  const skillsRoot = path.resolve(normalizedSkillsRootDir)
+  const pathModule = inferPathModule(normalizedSkillsRootDir, options.homeDir)
+  const skillsRoot = pathModule.resolve(normalizedSkillsRootDir)
   if (!isAllowedOpenClawSkillsRoot(skillsRoot, options)) {
     return { ok: false, error: 'unsafe-skills-root' }
   }
 
-  const targetPath = path.resolve(skillsRoot, safeSlug)
-  const relative = path.relative(skillsRoot, targetPath)
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+  const targetPath = pathModule.resolve(skillsRoot, safeSlug)
+  const relative = pathModule.relative(skillsRoot, targetPath)
+  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
     return { ok: false, error: 'unsafe-fallback-path' }
   }
 

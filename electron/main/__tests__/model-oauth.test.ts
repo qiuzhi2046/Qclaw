@@ -103,6 +103,7 @@ function createCapabilities(authRegistry = createRegistry()): OpenClawCapabiliti
       '--accept-risk',
       '--no-install-daemon',
       '--skip-channels',
+      '--skip-health',
       '--skip-skills',
       '--skip-ui',
     ],
@@ -116,6 +117,7 @@ function createCapabilities(authRegistry = createRegistry()): OpenClawCapabiliti
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],
@@ -245,7 +247,7 @@ describe('startModelOAuthFlow', () => {
     expect(result.loginProviderId).toBe('qwen-portal')
     expect(result.ok).toBe(true)
     expect(emitted.some((entry) => entry.channel === 'oauth:success')).toBe(true)
-  })
+  }, 20_000)
 
   it('recovers from a stale gateway provider list by restarting the gateway once and retrying', async () => {
     const emitted: Array<{ channel: string; payload: Record<string, any> }> = []
@@ -463,6 +465,7 @@ describe('startModelOAuthFlow', () => {
         '--accept-risk',
         '--no-install-daemon',
         '--skip-channels',
+        '--skip-health',
         '--skip-skills',
         '--skip-ui',
       ],

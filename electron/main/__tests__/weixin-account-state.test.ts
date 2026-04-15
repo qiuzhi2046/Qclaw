@@ -5,8 +5,8 @@ import {
   resolveOpenClawEnvValue,
 } from '../openclaw-legacy-env-migration'
 
-const { getOpenClawPathsMock, readConfigMock } = vi.hoisted(() => ({
-  getOpenClawPathsMock: vi.fn(),
+const { resolveOpenClawPathsForReadMock, readConfigMock } = vi.hoisted(() => ({
+  resolveOpenClawPathsForReadMock: vi.fn(),
   readConfigMock: vi.fn(),
 }))
 
@@ -15,8 +15,11 @@ const { mkdtemp, mkdir, readFile, rm, writeFile } =
   process.getBuiltinModule('node:fs/promises') as typeof import('node:fs/promises')
 
 vi.mock('../cli', () => ({
-  getOpenClawPaths: getOpenClawPathsMock,
   readConfig: readConfigMock,
+}))
+
+vi.mock('../openclaw-runtime-readonly', () => ({
+  resolveOpenClawPathsForRead: resolveOpenClawPathsForReadMock,
 }))
 
 import { listWeixinAccountState, removeWeixinAccountState } from '../weixin-account-state'
@@ -30,10 +33,10 @@ describe('weixin-account-state', () => {
 
   beforeEach(async () => {
     homeDir = await mkdtemp('/tmp/qclaw-weixin-state-')
-    getOpenClawPathsMock.mockReset()
+    resolveOpenClawPathsForReadMock.mockReset()
     readConfigMock.mockReset()
     resetOpenClawLegacyEnvWarningsForTests()
-    getOpenClawPathsMock.mockResolvedValue({ homeDir })
+    resolveOpenClawPathsForReadMock.mockResolvedValue({ homeDir })
     readConfigMock.mockResolvedValue(null)
   })
 

@@ -1026,6 +1026,40 @@ async function defaultRepairMainAuthProfiles(providerIds: string[]): Promise<{
   return repairMainAuthProfilesFromOtherAgentStores({ providerIds })
 }
 
+async function noopRepairAgentAuthProfiles(): Promise<{
+  ok: boolean
+  repaired: boolean
+  importedProfileIds: string[]
+  importedProviders: string[]
+  sourceAuthStorePaths: string[]
+  updatedAuthStorePaths: string[]
+}> {
+  return {
+    ok: true,
+    repaired: false,
+    importedProfileIds: [],
+    importedProviders: [],
+    sourceAuthStorePaths: [],
+    updatedAuthStorePaths: [],
+  }
+}
+
+async function noopRepairMainAuthProfiles(): Promise<{
+  ok: boolean
+  repaired: boolean
+  importedProfileIds: string[]
+  importedProviders: string[]
+  sourceAuthStorePaths: string[]
+}> {
+  return {
+    ok: true,
+    repaired: false,
+    importedProfileIds: [],
+    importedProviders: [],
+    sourceAuthStorePaths: [],
+  }
+}
+
 function extractProviderIdFromModelRef(modelRef: string | undefined): string {
   const normalized = String(modelRef || '').trim()
   if (!normalized) return ''
@@ -1050,24 +1084,18 @@ function isMiniMaxAuthRepairProvider(providerId: unknown): boolean {
   return normalized === 'minimax' || normalized === 'minimax-portal'
 }
 
-function resolveAuthRepairProviderIds(params: {
+function resolveAuthRepairProviderIds(
   modelStatus?: ModelConfigCommandResult<Record<string, any>> | null
-  targetModel?: string
-}): string[] {
+): string[] {
   const unique = new Set<string>()
-  const missingProvidersInUse = Array.isArray(params.modelStatus?.data?.auth?.missingProvidersInUse)
-    ? params.modelStatus?.data?.auth?.missingProvidersInUse
+  const missingProvidersInUse = Array.isArray(modelStatus?.data?.auth?.missingProvidersInUse)
+    ? modelStatus?.data?.auth?.missingProvidersInUse
     : []
 
   for (const providerId of missingProvidersInUse) {
     for (const candidate of resolveScopedAuthRepairProviderCandidates(providerId)) {
       unique.add(candidate)
     }
-  }
-
-  const targetProviderId = extractProviderIdFromModelRef(params.targetModel)
-  for (const candidate of resolveScopedAuthRepairProviderCandidates(targetProviderId)) {
-    unique.add(candidate)
   }
 
   return Array.from(unique)
@@ -3299,8 +3327,13 @@ export async function sendChatMessage(
   const discoverOpenClawFn = options.discoverOpenClaw ?? discoverOpenClawInstallations
   const ensureGatewayFn = options.ensureGateway ?? ensureGatewayRunning
   const readModelStatusFn = options.readModelStatus ?? defaultReadModelStatus
-  const repairAgentAuthProfiles = options.repairAgentAuthProfiles ?? defaultRepairAgentAuthProfiles
-  const repairMainAuthProfiles = options.repairMainAuthProfiles ?? defaultRepairMainAuthProfiles
+  const useDefaultAuthRepair = readModelStatusFn === defaultReadModelStatus
+  const repairAgentAuthProfiles =
+    options.repairAgentAuthProfiles ??
+    (useDefaultAuthRepair ? defaultRepairAgentAuthProfiles : noopRepairAgentAuthProfiles)
+  const repairMainAuthProfiles =
+    options.repairMainAuthProfiles ??
+    (useDefaultAuthRepair ? defaultRepairMainAuthProfiles : noopRepairMainAuthProfiles)
   const runStreamingCommand = options.runStreamingCommand ?? defaultRunStreamingCommand
   const now = options.now ?? Date.now
   const emit = options.emit ?? (() => {})
@@ -3336,10 +3369,7 @@ export async function sendChatMessage(
     })
   }
 
-  const authRepairProviderIds = resolveAuthRepairProviderIds({
-    modelStatus,
-    targetModel,
-  })
+  const authRepairProviderIds = resolveAuthRepairProviderIds(modelStatus)
   const agentScopedAuthRepairProviderIds = authRepairProviderIds.filter((providerId) =>
     isMiniMaxAuthRepairProvider(providerId)
   )

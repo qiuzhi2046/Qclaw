@@ -9,7 +9,7 @@ const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 
 const { access, lstat, realpath, stat } = fs.promises
 const { homedir, userInfo } = os
-const { join, relative, isAbsolute } = path
+const { relative, isAbsolute } = path
 
 const LIFECYCLE_STATUS_MARKER = '__QCLAW_TXN_LIFECYCLE_STATUS__='
 const REPAIR_STATUS_MARKER = '__QCLAW_TXN_REPAIR_STATUS__='
@@ -74,6 +74,18 @@ export interface OpenClawElevatedLifecycleTransactionResult extends OpenClawComm
 
 function normalizePathValue(value: string | null | undefined): string {
   return String(value || '').trim()
+}
+
+type NodePathModule = typeof path.posix
+
+function inferPathModuleFromPath(value: unknown): NodePathModule {
+  const rawValue = normalizePathValue(value as string | null | undefined)
+  if (/^[A-Za-z]:[\\/]/.test(rawValue) || rawValue.includes('\\')) return path.win32
+  return path.posix
+}
+
+function joinPathLike(basePath: string, ...parts: string[]): string {
+  return inferPathModuleFromPath(basePath).join(basePath, ...parts)
 }
 
 function quotePosixShellArg(arg: string): string {
@@ -331,7 +343,7 @@ export async function buildOpenClawRepairSnapshot(options: {
   const qclawSafeWorkDir = normalizePathValue(
     options.qclawSafeWorkDir || process.env.QCLAW_SAFE_WORK_DIR || resolveSafeWorkingDirectory()
   )
-  const fallbackStateRoot = homeDir ? join(homeDir, '.openclaw') : '.openclaw'
+  const fallbackStateRoot = homeDir ? joinPathLike(homeDir, '.openclaw') : '.openclaw'
   const preferredStateRootPath = normalizePathValue(options.preferredStateRootPath)
   const createIfMissing = options.operation !== 'uninstall'
 
@@ -380,14 +392,14 @@ export async function buildOpenClawRepairSnapshot(options: {
         },
         {
           role: 'npmCache' as const,
-          path: join(homeDir, '.npm'),
+          path: joinPathLike(homeDir, '.npm'),
           createIfMissing,
         },
         ...(options.includeManagedInstallerRoot
           ? [
               {
                 role: 'managedInstallerRoot' as const,
-                path: join(qclawSafeWorkDir, 'openclaw-installer'),
+                path: joinPathLike(qclawSafeWorkDir, 'openclaw-installer'),
                 createIfMissing,
               },
             ]
@@ -396,7 +408,7 @@ export async function buildOpenClawRepairSnapshot(options: {
           ? [
               {
                 role: 'userDataNpmCache' as const,
-                path: join(userDataDir, 'npm-cache'),
+                path: joinPathLike(userDataDir, 'npm-cache'),
                 createIfMissing,
               },
             ]

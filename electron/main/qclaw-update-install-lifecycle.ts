@@ -18,8 +18,12 @@ function scheduleQClawUpdateInstallBypassReset(): void {
   qclawUpdateInstallBypassResetTimer.unref?.()
 }
 
+function shouldBypassAppExitCleanupForUpdateInstall(platform: NodeJS.Platform): boolean {
+  return platform === 'win32' || platform === 'darwin'
+}
+
 export function markQClawUpdateInstallInProgress(platform: NodeJS.Platform = process.platform): void {
-  qclawUpdateInstallBypassAppExitCleanup = platform === 'win32'
+  qclawUpdateInstallBypassAppExitCleanup = shouldBypassAppExitCleanupForUpdateInstall(platform)
   if (qclawUpdateInstallBypassAppExitCleanup) {
     scheduleQClawUpdateInstallBypassReset()
     return

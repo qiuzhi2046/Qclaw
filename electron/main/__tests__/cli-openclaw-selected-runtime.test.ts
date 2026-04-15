@@ -197,7 +197,9 @@ describe('checkOpenClaw selected runtime completeness gate', () => {
     expect(discoverSource).toContain('env: commandProbeEnv')
     expect(discoverSource).toContain('discoverOpenClawInstallationsFromKnownPaths({')
     expect(discoverSource).toContain('activeBinaryPath: resolvedOpenClawPath || null')
-    expect(discoverSource).toContain('knownPaths: [selectedOpenClawPath, resolvedOpenClawPath]')
+    expect(discoverSource).toContain(
+      'knownPaths: [selectedOpenClawPath, resolvedOpenClawPath, ...fullDiscoveryPaths]'
+    )
     expect(discoverSource).toContain("if (process.platform !== 'win32')")
     expect(discoverSource).toContain('return discoverOpenClawInstallations()')
   })
