@@ -53,8 +53,11 @@ export interface ModelCatalogResult {
   stale: boolean
 }
 
+type ModelCatalogCachePolicy = 'live-first' | 'prefer-stale'
+
 interface GetModelCatalogOptions {
   query?: ModelCatalogQuery
+  cachePolicy?: ModelCatalogCachePolicy
   ttlMs?: number
   runCommand?: (args: string[], timeout?: number) => Promise<CliCommandResult>
   capabilities?: OpenClawCapabilities
@@ -201,19 +204,29 @@ async function defaultWriteCache(cache: ModelCatalogCache): Promise<void> {
 
 async function loadResolvedCatalogData(options: GetModelCatalogOptions = {}): Promise<ResolvedCatalogData> {
   const runCommand = options.runCommand ?? defaultRunCommand
-  const capabilities = await resolveCapabilities(options)
   const readCache = options.readCache ?? defaultReadCache
   const writeCache = options.writeCache ?? defaultWriteCache
   const now = options.now ?? (() => new Date())
   const ttlMs = Math.max(1_000, options.ttlMs || DEFAULT_TTL_MS)
 
   const query = options.query || {}
+  const cachePolicy = options.cachePolicy ?? 'live-first'
   const bypassCache = query.bypassCache === true
   const cached = await readCache()
   const hasCachedModels = Boolean(cached && Array.isArray(cached.models) && cached.models.length > 0)
 
   if (hasCachedModels && !bypassCache) {
     const ageMs = resolveCacheAgeMs(cached!.fetchedAt, now)
+    if (cachePolicy === 'prefer-stale') {
+      return {
+        models: cached!.models,
+        providers: uniqueSorted(cached!.models.map((item) => item.provider)),
+        updatedAt: cached!.fetchedAt,
+        source: 'cache',
+        stale: ageMs > ttlMs,
+      }
+    }
+
     if (ageMs <= ttlMs) {
       return {
         models: cached!.models,
@@ -226,6 +239,7 @@ async function loadResolvedCatalogData(options: GetModelCatalogOptions = {}): Pr
   }
 
   try {
+    const capabilities = await resolveCapabilities(options)
     const buildResult = buildModelsListAllCommand(capabilities)
     if (!buildResult.ok) {
       throw new Error(buildResult.message)

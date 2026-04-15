@@ -84,7 +84,7 @@ describe('getModelCenterCapabilities', () => {
     expect(loadCapabilities).not.toHaveBeenCalled()
   })
 
-  it('times out and clears the shared capabilities cache when a load never settles', async () => {
+  it('times out without clearing the shared capabilities cache when a load never settles', async () => {
     vi.useFakeTimers()
 
     const loadCapabilities = vi.fn(
@@ -107,6 +107,28 @@ describe('getModelCenterCapabilities', () => {
     await vi.advanceTimersByTimeAsync(50)
 
     await rejection
+    expect(loadCapabilities).toHaveBeenCalledTimes(1)
+    expect(resetCapabilitiesCache).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('clears the shared capabilities cache when loading fails before the timeout', async () => {
+    const loadCapabilities = vi.fn(async () => {
+      throw new Error('registry unavailable')
+    })
+    const resetCapabilitiesCache = vi.fn()
+
+    await expect(
+      getModelCenterCapabilities(
+        { timeoutMs: 50 } as any,
+        {
+          loadCapabilities,
+          resetCapabilitiesCache,
+        } as any
+      )
+    ).rejects.toThrow('registry unavailable')
+
     expect(loadCapabilities).toHaveBeenCalledTimes(1)
     expect(resetCapabilitiesCache).toHaveBeenCalledTimes(1)
 

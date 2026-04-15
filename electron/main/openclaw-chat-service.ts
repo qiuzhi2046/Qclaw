@@ -3192,6 +3192,46 @@ function shouldBootstrapTrustedUpstreamSessionForSend(params: {
   return rawDefaultModel !== preferredModel
 }
 
+export function shouldPreferControlUiBrowserChatTransportForSend(params: {
+  sessionKey?: string
+  continueWithExternalSessionKey?: string
+  localSessionState?: LocalChatSessionState | null
+}): boolean {
+  const sessionKey = String(params.sessionKey || '').trim()
+  if (!sessionKey) return false
+  if (String(params.continueWithExternalSessionKey || '').trim()) return true
+
+  if (
+    params.localSessionState?.upstreamConfirmed === true &&
+    (params.localSessionState.kind || 'direct') === 'direct'
+  ) {
+    return false
+  }
+
+  return true
+}
+
+function shouldRetryConfirmedLocalDirectViaControlUiBrowser(params: {
+  result: CliLikeResult | null | undefined
+  sessionKey?: string
+  continueWithExternalSessionKey?: string
+  localSessionState?: LocalChatSessionState | null
+}): boolean {
+  if (!params.result || params.result.ok || params.result.canceled) return false
+  if (!String(params.sessionKey || '').trim()) return false
+  if (String(params.continueWithExternalSessionKey || '').trim()) return false
+
+  if (
+    params.localSessionState?.upstreamConfirmed !== true ||
+    (params.localSessionState.kind || 'direct') !== 'direct'
+  ) {
+    return false
+  }
+
+  const merged = `${params.result.stderr || ''}\n${params.result.stdout || ''}`
+  return /cannot safely continue an explicit external session key/i.test(merged)
+}
+
 function resolvePatchableSessionKey(params: {
   matchedSession?: ChatSessionSummary | null
   localSessionState?: LocalChatSessionState | null
@@ -3476,8 +3516,16 @@ export async function sendChatMessage(
   const browserGatewayTransport = createControlUiBrowserChatTransport({
     fallbackTransport: defaultGatewayTransport,
   })
+  const resolvePreferredGatewayTransport = () =>
+    shouldPreferControlUiBrowserChatTransportForSend({
+      sessionKey: persistedSessionKey,
+      continueWithExternalSessionKey,
+      localSessionState,
+    })
+      ? browserGatewayTransport
+      : defaultGatewayTransport
   let chatTransport =
-    options.chatTransport ?? (persistedSessionKey ? browserGatewayTransport : defaultGatewayTransport)
+    options.chatTransport ?? resolvePreferredGatewayTransport()
   const traceHistorySource = resolveOperationHistorySource({
     localSessionState,
     matchedSession,
@@ -3611,7 +3659,7 @@ export async function sendChatMessage(
   }
 
   if (!options.chatTransport && ensuredGateway.ok && ensuredGateway.running) {
-    chatTransport = persistedSessionKey ? browserGatewayTransport : defaultGatewayTransport
+    chatTransport = resolvePreferredGatewayTransport()
   }
 
   const legacyMiniMaxRepairTarget =
@@ -3687,6 +3735,7 @@ export async function sendChatMessage(
   let streamedModel: string | undefined
   let streamedUsage: ChatUsage | undefined
   const abortController = new AbortController()
+  let attemptedControlUiBrowserRetry = false
 
   emit({
     type: 'assistant-start',
@@ -3698,26 +3747,56 @@ export async function sendChatMessage(
   try {
     for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
       const effectiveThinking = thinkingResolution.effectiveThinking
-      result = await chatTransport.run({
-        transportSessionId,
-        sessionKey: persistedSessionKey,
-        messageText: effectiveMessageText,
-        thinking: effectiveThinking,
-        signal: abortController.signal,
-        onAssistantDelta: ({ text, delta, model, usage }) => {
-          streamedText = text
-          streamedModel = model || streamedModel
-          streamedUsage = usage || streamedUsage
-          emit({
-            type: 'assistant-delta',
-            sessionId,
-            textDelta: delta,
-            text,
-            model,
-            usage,
-          })
-        },
-      })
+      const runTransport = async (transport: ChatTransport) =>
+        transport.run({
+          transportSessionId,
+          sessionKey: persistedSessionKey,
+          messageText: effectiveMessageText,
+          thinking: effectiveThinking,
+          signal: abortController.signal,
+          onAssistantDelta: ({ text, delta, model, usage }) => {
+            streamedText = text
+            streamedModel = model || streamedModel
+            streamedUsage = usage || streamedUsage
+            emit({
+              type: 'assistant-delta',
+              sessionId,
+              textDelta: delta,
+              text,
+              model,
+              usage,
+            })
+          },
+        })
+
+      result = await runTransport(chatTransport)
+      if (
+        !attemptedControlUiBrowserRetry &&
+        shouldRetryConfirmedLocalDirectViaControlUiBrowser({
+          result,
+          sessionKey: persistedSessionKey,
+          continueWithExternalSessionKey,
+          localSessionState,
+        })
+      ) {
+        attemptedControlUiBrowserRetry = true
+        chatTransport = browserGatewayTransport
+        appendChatTrace({
+          operation: 'send',
+          stage: 'transport-browser-retry',
+          sessionId,
+          sessionKey: persistedSessionKey || undefined,
+          historySource: traceHistorySource,
+          confirmedModel: String(streamedModel || targetModel || matchedSession?.model || '').trim() || undefined,
+          intentSelectedModel: String(localSessionState?.selectedModel || targetModel || '').trim() || undefined,
+          failureClass: classifyChatFailureClass(result.stderr || result.stdout || ''),
+          message: 'Gateway transport could not safely reuse the trusted session; retrying through Control UI browser.',
+        })
+        streamedText = ''
+        streamedModel = undefined
+        streamedUsage = undefined
+        result = await runTransport(browserGatewayTransport)
+      }
 
       if (result.ok) {
         break

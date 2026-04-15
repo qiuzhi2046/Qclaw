@@ -4,6 +4,7 @@ import {
   collectRuntimeConnectedModelKeys,
   extractRuntimeDefaultModelKey,
   findEquivalentCatalogModelKey,
+  findEquivalentRuntimeModelKey,
   resolvePreferredRuntimeDefaultModelKey,
   resolveRuntimeActiveModelKey,
   resolveRuntimeWritableModelKey,
@@ -80,5 +81,30 @@ describe('model runtime resolution', () => {
     }
 
     expect(resolvePreferredRuntimeDefaultModelKey(statusData)).toBe('openai/gpt-5.4-mini')
+  })
+
+  it('prefers exact connected provider matches before alias-equivalent ones', () => {
+    const statusData = {
+      allowed: ['openai/gpt-5.4-pro', 'openai-codex/gpt-5.4-pro'],
+      auth: {
+        providers: [{ provider: 'openai-codex', status: 'ok' }],
+      },
+    }
+
+    expect(collectRuntimeConnectedModelKeys(statusData)).toEqual(['openai-codex/gpt-5.4-pro'])
+  })
+
+  it('prefers an exact active runtime model before an alias-equivalent fallback', () => {
+    const statusData = {
+      defaultModel: 'openai/gpt-5.4-pro',
+      model: 'openai-codex/gpt-5.4-pro',
+      allowed: ['openai/gpt-5.4-pro', 'openai-codex/gpt-5.4-pro'],
+    }
+
+    expect(findEquivalentRuntimeModelKey('openai-codex/gpt-5.4-pro', statusData.allowed)).toBe(
+      'openai-codex/gpt-5.4-pro'
+    )
+    expect(resolveRuntimeActiveModelKey('openai-codex/gpt-5.4-pro', statusData)).toBe('openai-codex/gpt-5.4-pro')
+    expect(resolveRuntimeWritableModelKey('openai-codex/gpt-5.4-pro', statusData)).toBe('openai-codex/gpt-5.4-pro')
   })
 })

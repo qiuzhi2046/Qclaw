@@ -249,6 +249,74 @@ describe('startModelOAuthFlow', () => {
     expect(emitted.some((entry) => entry.channel === 'oauth:success')).toBe(true)
   }, 20_000)
 
+  it('prefers an exact upstream qwen auth route over the legacy qwen-portal fallback', async () => {
+    const emitted: Array<{ channel: string; payload: Record<string, any> }> = []
+    const runCommand = vi.fn(async (args: string[]) => {
+      if (args[0] === 'plugins') {
+        return {
+          ok: true,
+          stdout: 'Enabled plugin "qwen-official-auth".',
+          stderr: '',
+          code: 0,
+        }
+      }
+      return { ok: true, stdout: '', stderr: '', code: 0 }
+    })
+    const runStreamingCommand = vi.fn(async (_args: string[], options?: Record<string, any>) => {
+      options?.onStdout?.('Open: https://chat.qwen.ai/oauth/authorize?flow=official')
+      return { ok: true, stdout: 'OAuth complete', stderr: '', code: 0 }
+    })
+
+    const exactRegistry = createOpenClawAuthRegistry({
+      source: 'openclaw-internal-registry',
+      providers: [
+        {
+          id: 'qwen',
+          label: 'Qwen',
+          methods: [
+            {
+              authChoice: 'qwen-official-oauth',
+              label: 'OAuth · qwen-official-oauth',
+              kind: 'oauth',
+              route: {
+                kind: 'models-auth-login',
+                providerId: 'qwen',
+                methodId: 'oauth',
+                pluginId: 'qwen-official-auth',
+                requiresBrowser: true,
+              },
+            },
+          ],
+        },
+      ],
+    })
+
+    const result = await startModelOAuthFlow(
+      { providerId: 'qwen', methodId: 'qwen-official-oauth', setDefault: true },
+      {
+        loadAuthRegistry: async () => exactRegistry,
+        emit: (channel, payload) => emitted.push({ channel, payload }),
+        runCommand,
+        runStreamingCommand,
+        inspectOAuthDependency: async () => ({ ready: true }),
+      }
+    )
+
+    expect(runCommand).toHaveBeenNthCalledWith(
+      1,
+      ['plugins', 'enable', 'qwen-official-auth'],
+      expect.any(Number)
+    )
+    expect(runStreamingCommand).toHaveBeenNthCalledWith(
+      1,
+      ['models', 'auth', 'login', '--provider', 'qwen', '--method', 'oauth', '--set-default'],
+      expect.objectContaining({ autoOpenOAuth: false, onStdout: expect.any(Function) })
+    )
+    expect(result.loginProviderId).toBe('qwen')
+    expect(result.ok).toBe(true)
+    expect(emitted.some((entry) => entry.channel === 'oauth:success')).toBe(true)
+  })
+
   it('recovers from a stale gateway provider list by restarting the gateway once and retrying', async () => {
     const emitted: Array<{ channel: string; payload: Record<string, any> }> = []
     const runCommand = vi.fn(async (args: string[]) => {

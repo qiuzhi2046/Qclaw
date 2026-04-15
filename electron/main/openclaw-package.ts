@@ -57,6 +57,45 @@ interface CommandLookupRuntime {
   env: NodeJS.ProcessEnv
 }
 
+interface OpenClawPackageLocation {
+  packageRoot: string
+  packageJsonPath: string
+  packageJson: Record<string, unknown>
+}
+
+async function canonicalizeOpenClawPackageLocation(
+  packageLocation: OpenClawPackageLocation,
+  fsPromises: typeof fs.promises
+): Promise<OpenClawPackageLocation> {
+  const [packageRoot, packageJsonPath] = await Promise.all([
+    fsPromises.realpath(packageLocation.packageRoot),
+    fsPromises.realpath(packageLocation.packageJsonPath),
+  ])
+
+  return {
+    packageRoot,
+    packageJsonPath,
+    packageJson: packageLocation.packageJson,
+  }
+}
+
+async function createResolvedPackageLayout(
+  binaryPath: string,
+  resolvedBinaryPath: string,
+  packageLocation: OpenClawPackageLocation,
+  fsPromises: typeof fs.promises
+): Promise<ResolvedOpenClawPackageLayout> {
+  const canonicalPackageLocation = await canonicalizeOpenClawPackageLocation(packageLocation, fsPromises)
+
+  return {
+    binaryPath,
+    resolvedBinaryPath,
+    packageRoot: canonicalPackageLocation.packageRoot,
+    packageJsonPath: canonicalPackageLocation.packageJsonPath,
+    packageJson: canonicalPackageLocation.packageJson,
+  }
+}
+
 function extractFirstNonEmptyLine(text: string): string {
   for (const line of text.split(/\r?\n/g)) {
     const trimmed = line.trim()
@@ -191,19 +230,67 @@ async function resolveWindowsPrivateRuntimePackageLayout(
     return null
   }
 
-  const packageLocation = await findNearestOpenClawPackageLocation(
+  const packageLocation = await readOpenClawPackageLocationAt(
     privateRuntimePaths.hostPackageRoot,
     fsPromises
   )
   if (!packageLocation) return null
 
-  return {
-    binaryPath,
-    resolvedBinaryPath,
-    packageRoot: packageLocation.packageRoot,
-    packageJsonPath: packageLocation.packageJsonPath,
-    packageJson: packageLocation.packageJson,
+  return createResolvedPackageLayout(binaryPath, resolvedBinaryPath, packageLocation, fsPromises)
+}
+
+function collectDistinctPaths(
+  platform: NodeJS.Platform,
+  values: Array<string | null | undefined>
+): string[] {
+  const seen = new Set<string>()
+  const candidates: string[] = []
+  for (const value of values) {
+    const trimmed = String(value || '').trim()
+    const normalized = normalizeComparablePath(platform, trimmed)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    candidates.push(trimmed)
   }
+  return candidates
+}
+
+async function resolveWindowsNpmShimPackageLayout(
+  runtime: CommandLookupRuntime,
+  binaryPath: string,
+  resolvedBinaryPath: string,
+  fsPromises: typeof fs.promises
+): Promise<ResolvedOpenClawPackageLayout | null> {
+  if (runtime.platform !== 'win32') return null
+
+  const candidateBinaryPaths = new Set(
+    collectDistinctPaths(runtime.platform, [binaryPath, resolvedBinaryPath]).map((candidate) =>
+      normalizeComparablePath(runtime.platform, candidate)
+    )
+  )
+  const candidatePrefixes = collectDistinctPaths(runtime.platform, [
+    runtime.activeRuntimeSnapshot?.npmPrefix,
+    path.win32.dirname(binaryPath),
+    path.win32.dirname(resolvedBinaryPath),
+  ])
+
+  for (const candidatePrefix of candidatePrefixes) {
+    const shimCandidates = [
+      normalizeComparablePath(runtime.platform, path.win32.join(candidatePrefix, 'openclaw')),
+      normalizeComparablePath(runtime.platform, path.win32.join(candidatePrefix, 'openclaw.cmd')),
+    ]
+    if (!shimCandidates.some((candidate) => candidateBinaryPaths.has(candidate))) {
+      continue
+    }
+
+    const packageRoot = path.win32.join(candidatePrefix, 'node_modules', 'openclaw')
+    const packageLocation = await readOpenClawPackageLocationAt(packageRoot, fsPromises)
+    if (!packageLocation) continue
+
+    return createResolvedPackageLayout(binaryPath, resolvedBinaryPath, packageLocation, fsPromises)
+  }
+
+  return null
 }
 
 export function resolveOpenClawBinaryPathFromNpmPrefix(
@@ -350,18 +437,17 @@ async function resolvePackageLayout(
   const resolvedBinaryPath = await fsPromises.realpath(binaryPath)
   const snapshotHostPackageRoot = resolveWindowsSnapshotHostPackageRoot(runtime)
   if (snapshotHostPackageRoot) {
-    const snapshotPackageLocation = await findNearestOpenClawPackageLocation(
+    const snapshotPackageLocation = await readOpenClawPackageLocationAt(
       snapshotHostPackageRoot,
       fsPromises
     )
     if (snapshotPackageLocation?.packageRoot === snapshotHostPackageRoot) {
-      return {
+      return createResolvedPackageLayout(
         binaryPath,
         resolvedBinaryPath,
-        packageRoot: snapshotPackageLocation.packageRoot,
-        packageJsonPath: snapshotPackageLocation.packageJsonPath,
-        packageJson: snapshotPackageLocation.packageJson,
-      }
+        snapshotPackageLocation,
+        fsPromises
+      )
     }
   }
 
@@ -375,7 +461,17 @@ async function resolvePackageLayout(
     return privateRuntimeLayout
   }
 
-  let startDir = path.dirname(resolvedBinaryPath)
+  const npmShimLayout = await resolveWindowsNpmShimPackageLayout(
+    runtime,
+    binaryPath,
+    resolvedBinaryPath,
+    fsPromises
+  )
+  if (npmShimLayout) {
+    return npmShimLayout
+  }
+
+  const startDir = path.dirname(resolvedBinaryPath)
   const packageLocation = await findNearestOpenClawPackageLocation(startDir, fsPromises)
   if (!packageLocation) {
     throw new Error(
@@ -384,14 +480,12 @@ async function resolvePackageLayout(
   }
 
   const { packageRoot, packageJsonPath, packageJson } = packageLocation
-
-  return {
+  return createResolvedPackageLayout(
     binaryPath,
     resolvedBinaryPath,
-    packageRoot,
-    packageJsonPath,
-    packageJson,
-  }
+    { packageRoot, packageJsonPath, packageJson },
+    fsPromises
+  )
 }
 
 function resolveOpenClawCliBinRelativePath(packageJson: Record<string, unknown>): string {
@@ -411,41 +505,49 @@ function resolveOpenClawCliBinRelativePath(packageJson: Record<string, unknown>)
 async function findNearestOpenClawPackageLocation(
   startDir: string,
   fsPromises: typeof fs.promises
-): Promise<{
-  packageRoot: string
-  packageJsonPath: string
-  packageJson: Record<string, unknown>
-} | null> {
+): Promise<OpenClawPackageLocation | null> {
   let currentDir = startDir
 
   while (true) {
-    const packageJsonPath = path.join(currentDir, 'package.json')
-    try {
-      const rawPackageJson = await fsPromises.readFile(packageJsonPath, 'utf8')
-      let packageJson: Record<string, unknown>
-      try {
-        packageJson = JSON.parse(rawPackageJson) as Record<string, unknown>
-      } catch {
-        throw new Error(`Failed to parse OpenClaw package.json: ${packageJsonPath}`)
-      }
-
-      if (packageJson.name === 'openclaw') {
-        return {
-          packageRoot: currentDir,
-          packageJsonPath,
-          packageJson,
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || '')
-      if (message.startsWith('Failed to parse OpenClaw package.json:')) {
-        throw error
-      }
-    }
+    const packageLocation = await readOpenClawPackageLocationAt(currentDir, fsPromises)
+    if (packageLocation) return packageLocation
 
     const parentDir = path.dirname(currentDir)
     if (parentDir === currentDir) return null
     currentDir = parentDir
+  }
+}
+
+async function readOpenClawPackageLocationAt(
+  packageRoot: string,
+  fsPromises: typeof fs.promises
+): Promise<OpenClawPackageLocation | null> {
+  const normalizedPackageRoot = String(packageRoot || '').trim()
+  if (!normalizedPackageRoot) return null
+
+  const packageJsonPath = path.join(normalizedPackageRoot, 'package.json')
+  try {
+    const rawPackageJson = await fsPromises.readFile(packageJsonPath, 'utf8')
+    let packageJson: Record<string, unknown>
+    try {
+      packageJson = JSON.parse(rawPackageJson) as Record<string, unknown>
+    } catch {
+      throw new Error(`Failed to parse OpenClaw package.json: ${packageJsonPath}`)
+    }
+
+    if (packageJson.name !== 'openclaw') return null
+
+    return {
+      packageRoot: normalizedPackageRoot,
+      packageJsonPath,
+      packageJson,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '')
+    if (message.startsWith('Failed to parse OpenClaw package.json:')) {
+      throw error
+    }
+    return null
   }
 }
 

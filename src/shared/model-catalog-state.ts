@@ -41,10 +41,29 @@ export interface ConfiguredProviderRuntimeState {
 
 const OPENCLAW_TO_REGISTRY_PROVIDER: Record<string, string> = {
   google: 'gemini',
+  'volcengine-plan': 'volcengine',
+  'byteplus-plan': 'byteplus',
 }
+
+const MODELS_PAGE_SHARED_AUTH_PROVIDER_SURFACES = {
+  'volcengine-plan': {
+    primaryProviderId: 'volcengine',
+    registryProviderId: 'volcengine',
+    label: '火山引擎 (Coding)',
+  },
+  'byteplus-plan': {
+    primaryProviderId: 'byteplus',
+    registryProviderId: 'byteplus',
+    label: 'BytePlus (Coding)',
+  },
+} as const
 
 function toRegistryId(openclawId: string): string {
   return OPENCLAW_TO_REGISTRY_PROVIDER[openclawId] || openclawId
+}
+
+function getSharedAuthCompanionProviderConfig(providerId: string) {
+  return MODELS_PAGE_SHARED_AUTH_PROVIDER_SURFACES[providerId as keyof typeof MODELS_PAGE_SHARED_AUTH_PROVIDER_SURFACES]
 }
 
 function extractProviderFromModelKey(modelKey: string): string {
@@ -281,12 +300,92 @@ function normalizeConfiguredProviderModelEntries(
   return items
 }
 
+function createConfiguredCatalogItemFromModelKey(
+  modelKey: string,
+  tags: string[] = ['configured']
+): ModelsPageCatalogItem | null {
+  const normalizedModelKey = String(modelKey || '').trim()
+  if (!normalizedModelKey.includes('/')) return null
+
+  const providerId = extractRawProviderFromModelKey(normalizedModelKey)
+  if (!providerId) return null
+
+  const name = String(normalizedModelKey.split('/').slice(1).join('/') || '').trim()
+  if (!name) return null
+
+  return {
+    key: normalizedModelKey,
+    provider: providerId,
+    name,
+    available: false,
+    verificationState: 'unverified',
+    tags: Array.from(new Set(tags.map((tag) => String(tag || '').trim()).filter(Boolean))),
+  }
+}
+
+function collectConfiguredModelReferenceEntries(
+  configData: Record<string, any> | null
+): ModelsPageCatalogItem[] {
+  if (!configData || typeof configData !== 'object') return []
+
+  const referencedEntries = new Map<string, ModelsPageCatalogItem>()
+  const addEntry = (modelKey: unknown, tags: string[]) => {
+    const item = createConfiguredCatalogItemFromModelKey(String(modelKey || '').trim(), tags)
+    if (!item) return
+
+    const normalizedKey = item.key.toLowerCase()
+    const current = referencedEntries.get(normalizedKey)
+    if (!current) {
+      referencedEntries.set(normalizedKey, item)
+      return
+    }
+
+    referencedEntries.set(normalizedKey, {
+      ...current,
+      tags: Array.from(new Set([
+        ...(Array.isArray(current.tags) ? current.tags : []),
+        ...(Array.isArray(item.tags) ? item.tags : []),
+      ])),
+    })
+  }
+
+  addEntry(configData?.defaultModel, ['configured', 'default'])
+  addEntry(configData?.models?.default, ['configured', 'default'])
+  addEntry(configData?.models?.main, ['configured', 'default'])
+  addEntry(configData?.agents?.defaults?.model?.primary, ['configured', 'default'])
+
+  const configuredModels =
+    configData?.agents?.defaults?.models
+      && typeof configData.agents.defaults.models === 'object'
+      && !Array.isArray(configData.agents.defaults.models)
+      ? configData.agents.defaults.models
+      : {}
+  for (const modelKey of Object.keys(configuredModels)) {
+    addEntry(modelKey, ['configured'])
+  }
+
+  return Array.from(referencedEntries.values())
+}
+
+function collectConfiguredModelReferenceProviderIds(
+  configData: Record<string, any> | null
+): Set<string> {
+  return new Set(
+    collectConfiguredModelReferenceEntries(configData)
+      .map((item) => extractRawProviderFromModelKey(item.key))
+      .filter(Boolean)
+  )
+}
+
 export function mergeConfiguredProviderModelsIntoCatalog<T extends ModelsPageCatalogItem>(
   catalog: T[],
   configData: Record<string, any> | null
 ): T[] {
   const merged = Array.isArray(catalog) ? [...catalog] : []
-  const configuredItems = normalizeConfiguredProviderModelEntries(configData)
+  const configuredItems = [
+    ...normalizeConfiguredProviderModelEntries(configData),
+    ...collectConfiguredModelReferenceEntries(configData),
+  ]
   if (configuredItems.length === 0) return merged
 
   const keyToIndex = new Map<string, number>()
@@ -357,14 +456,22 @@ export function buildModelsPageConfiguredProviders(params: {
     ...collectConfiguredProviderIdsFromEnv(params.envVars, savedProviderIds),
     ...Array.from(savedProviderIds),
   ]
-  const configuredIds = configuredIdsFromSnapshots
+  const configuredIds = new Set(configuredIdsFromSnapshots.filter(Boolean))
+  const configuredModelReferenceProviderIds = collectConfiguredModelReferenceProviderIds(params.config)
 
-  return Array.from(new Set(configuredIds.filter(Boolean))).map((providerId) => {
-    const registryId = toRegistryId(providerId)
+  for (const [companionProviderId, companionConfig] of Object.entries(MODELS_PAGE_SHARED_AUTH_PROVIDER_SURFACES)) {
+    if (!configuredIds.has(companionConfig.primaryProviderId)) continue
+    if (!configuredModelReferenceProviderIds.has(companionProviderId)) continue
+    configuredIds.add(companionProviderId)
+  }
+
+  return Array.from(configuredIds).map((providerId) => {
+    const companionConfig = getSharedAuthCompanionProviderConfig(providerId)
+    const registryId = toRegistryId(companionConfig?.registryProviderId || providerId)
     const metadata = getProviderMetadata(registryId)
     return {
       id: providerId,
-      name: resolveProviderDisplayName(registryId),
+      name: companionConfig?.label || resolveProviderDisplayName(registryId),
       logo: resolveProviderLogo(registryId),
       description: metadata?.description,
     }

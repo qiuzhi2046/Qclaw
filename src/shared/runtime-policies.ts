@@ -49,6 +49,7 @@ export const MAIN_RUNTIME_DEFAULTS = Object.freeze({
   capabilities: {
     versionProbeTimeoutMs: 10_000,
     helpProbeTimeoutMs: 20_000,
+    discoveryTimeoutMs: 60_000,
   },
   auth: {
     pluginEnableTimeoutMs: 30_000,

@@ -19,6 +19,7 @@ import {
   getProviderMetadata,
   getKnownProviderCatalog,
   resolveProviderDisplayName,
+  resolveProviderMethodEnvKey,
 } from '../lib/openclaw-provider-registry'
 import { toUserFacingCliFailureMessage, toUserFacingUnknownErrorMessage } from '../lib/user-facing-cli-feedback'
 
@@ -380,6 +381,54 @@ const DEPRECATED_METHOD_ALIASES: Record<string, string> = {
 function normalizeMethodId(methodId: string): string {
   const normalized = String(methodId || '').trim().toLowerCase()
   return DEPRECATED_METHOD_ALIASES[normalized] || normalized
+}
+
+function normalizeMethodLabelForDedupe(label?: string): string {
+  return String(label || '').trim().toLowerCase()
+}
+
+function buildMethodExtraOptionsFingerprint(extraOptions?: OpenClawAuthExtraOptionDescriptor[]): string {
+  if (!extraOptions?.length) return ''
+
+  return extraOptions
+    .map((option) =>
+      [
+        normalizeMethodId(option.id),
+        normalizeMethodLabelForDedupe(option.label),
+        normalizeMethodLabelForDedupe(option.hint),
+      ].join(':')
+    )
+    .join('|')
+}
+
+function buildProviderMethodDedupeKey(
+  providerId: string,
+  method: OpenClawAuthMethodDescriptor,
+  methodDisplay: ModelCenterMethodDisplayCopy
+): string {
+  const normalizedProviderId = normalizeProviderCandidate(providerId)
+  const methodId = normalizeMethodId(method.authChoice)
+  const envKey = String(resolveProviderMethodEnvKey(normalizedProviderId, methodId) || '')
+    .trim()
+    .toUpperCase()
+
+  if (!envKey) {
+    return `method-id::${methodId}`
+  }
+
+  return [
+    normalizedProviderId,
+    normalizeMethodLabelForDedupe(methodDisplay.label || method.label || methodId),
+    envKey,
+    method.kind,
+    String(method.route.kind || '').trim(),
+    String(method.route.providerId || '').trim().toLowerCase(),
+    String(method.route.cliFlag || '').trim().toLowerCase(),
+    String(method.route.pluginId || '').trim().toLowerCase(),
+    method.route.requiresSecret === true ? 'secret' : 'no-secret',
+    method.route.requiresBrowser === true ? 'browser' : 'no-browser',
+    buildMethodExtraOptionsFingerprint(method.route.extraOptions),
+  ].join('::')
 }
 
 function toDisplayName(providerId: string, providerNames?: Record<string, string>): string {
@@ -984,11 +1033,10 @@ export function buildProviderOptions(
 
   const result = capabilities.authRegistry.providers
     .map((provider) => {
-      const methodsById = new Map<string, MethodOption>()
+      const methodsByKey = new Map<string, MethodOption>()
       for (const method of provider.methods || []) {
         const methodId = normalizeMethodId(method.authChoice)
         if (!methodId || methodId === 'skip') continue
-        if (methodsById.has(methodId)) continue
         const disabledReason = buildMethodDisabledReason(method, capabilities)
         const methodDisplay = resolveModelCenterMethodDisplayCopy({
           providerId: provider.id,
@@ -996,7 +1044,9 @@ export function buildProviderOptions(
           fallbackLabel: String(method.label || methodId).trim(),
           fallbackHint: method.hint,
         })
-        methodsById.set(methodId, {
+        const dedupeKey = buildProviderMethodDedupeKey(provider.id, method, methodDisplay)
+        if (methodsByKey.has(dedupeKey)) continue
+        methodsByKey.set(dedupeKey, {
           id: methodId,
           kind: method.kind,
           label: methodDisplay.label,
@@ -1016,7 +1066,7 @@ export function buildProviderOptions(
         id: provider.id,
         name: providerDisplay.name,
         ...(providerDisplay.hint ? { hint: providerDisplay.hint } : {}),
-        methods: Array.from(methodsById.values()),
+        methods: Array.from(methodsByKey.values()),
       }
     })
     .filter((provider) => provider.methods.length > 0)

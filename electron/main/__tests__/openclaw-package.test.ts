@@ -101,6 +101,45 @@ function createNestedBinaryOpenClawInstall(): {
   return { tempDir, commandPath, packageRoot, packageJsonPath }
 }
 
+function createWindowsGlobalShimOpenClawInstall(): {
+  npmPrefix: string
+  packageRoot: string
+  packageJsonPath: string
+  shimPath: string
+  tempDir: string
+} {
+  const tempDir = makeTempDir()
+  const npmPrefix = path.join(tempDir, 'npm')
+  const packageRoot = path.join(npmPrefix, 'node_modules', 'openclaw')
+  const packageJsonPath = path.join(packageRoot, 'package.json')
+  const shimPath = path.join(npmPrefix, 'openclaw.cmd')
+
+  fs.mkdirSync(packageRoot, { recursive: true })
+  fs.writeFileSync(
+    packageJsonPath,
+    JSON.stringify(
+      {
+        name: 'openclaw',
+        version: '2026.4.15',
+        bin: { openclaw: 'dist/index.mjs' },
+      },
+      null,
+      2
+    )
+  )
+  fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true })
+  fs.writeFileSync(path.join(packageRoot, 'dist', 'index.mjs'), '#!/usr/bin/env node\n')
+  fs.writeFileSync(shimPath, '@echo off\r\nnode "%~dp0node_modules\\openclaw\\dist\\index.mjs" %*\r\n')
+
+  return {
+    tempDir,
+    npmPrefix,
+    packageRoot,
+    packageJsonPath,
+    shimPath,
+  }
+}
+
 function createPluginPollutionLayout(): {
   pollutedPackageRoot: string
   pluginEntryPath: string
@@ -227,7 +266,9 @@ describe('resolveOpenClawBinaryPath', () => {
       options: Record<string, unknown>
     }> = []
     const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
-    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id: string) => {
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((
+      id: Parameters<typeof process.getBuiltinModule>[0],
+    ) => {
       if (id === 'node:child_process' || id === 'child_process') {
         const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
         return {
@@ -508,6 +549,46 @@ describe('resolveOpenClawPackageRoot', () => {
     })
 
     await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)
+  })
+
+  itOnWindows('resolves the package root from a Windows npm global openclaw.cmd shim', async () => {
+    const install = createWindowsGlobalShimOpenClawInstall()
+
+    const packageRoot = await resolveOpenClawPackageRoot({
+      binaryPath: install.shimPath,
+      platform: 'win32',
+    })
+
+    await expect(fs.promises.realpath(install.packageRoot)).resolves.toBe(packageRoot)
+  })
+
+  itOnWindows('canonicalizes the Windows npm global shim package root through realpath', async () => {
+    const install = createWindowsGlobalShimOpenClawInstall()
+    const originalRealpath = fs.promises.realpath.bind(fs.promises)
+    const canonicalPackageRoot = install.packageRoot.replace(
+      `${path.sep}node_modules${path.sep}openclaw`,
+      `${path.sep}NODE_MODULES${path.sep}OPENCLAW`
+    )
+    const canonicalPackageJsonPath = path.join(canonicalPackageRoot, 'package.json')
+    const realpathSpy = vi
+      .spyOn(fs.promises, 'realpath')
+      .mockImplementation(async (candidatePath: Parameters<typeof fs.promises.realpath>[0]) => {
+        const candidate = String(candidatePath)
+        if (candidate === install.packageRoot) return canonicalPackageRoot
+        if (candidate === install.packageJsonPath) return canonicalPackageJsonPath
+        return originalRealpath(candidatePath)
+      })
+
+    try {
+      const packageRoot = await resolveOpenClawPackageRoot({
+        binaryPath: install.shimPath,
+        platform: 'win32',
+      })
+
+      expect(packageRoot).toBe(canonicalPackageRoot)
+    } finally {
+      realpathSpy.mockRestore()
+    }
   })
 
   it('rejects malformed layouts that do not contain an adjacent openclaw package.json', async () => {

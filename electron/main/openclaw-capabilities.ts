@@ -364,6 +364,20 @@ function recoverAuthRegistryFromOnboardHelp(
   })
 }
 
+function deriveOnboardFlagsFromAuthRegistry(authRegistry: OpenClawAuthRegistry): string[] {
+  const flags: string[] = []
+
+  for (const provider of authRegistry.providers || []) {
+    for (const method of provider.methods || []) {
+      if (method.route.kind !== 'onboard') continue
+      const cliFlag = String(method.route.cliFlag || '').trim()
+      if (cliFlag) flags.push(cliFlag)
+    }
+  }
+
+  return uniqueKeepOrder(flags)
+}
+
 async function discoverFlags(
   runCommand: (args: string[], timeout?: number) => Promise<CliCommandResult>,
   args: string[]
@@ -430,16 +444,27 @@ export async function discoverOpenClawCapabilities(
   const rootHelpResult = await trackCapabilitiesProbe('root-help', () =>
     runCommand(['--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
   )
-  const onboardHelpResult = await trackCapabilitiesProbe('onboard-help', () =>
-    runCommand(['onboard', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
-  )
+  const authRegistry = await authRegistryPromise
+  const shouldSkipBootstrapOnboardHelp =
+    profile === 'bootstrap' && authRegistry.ok && authRegistry.providers.length > 0
+  if (shouldSkipBootstrapOnboardHelp) {
+    void appendEnvCheckDiagnostic('main-openclaw-capabilities-probe-skipped', {
+      probe: 'onboard-help',
+      reason: 'auth-registry-complete',
+      profile,
+    })
+  }
+  const onboardHelpResult = shouldSkipBootstrapOnboardHelp
+    ? null
+    : await trackCapabilitiesProbe('onboard-help', () =>
+        runCommand(['onboard', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
+      )
   const modelsHelpResult = await trackCapabilitiesProbe('models-help', () =>
     runCommand(['models', '--help'], MAIN_RUNTIME_POLICY.capabilities.helpProbeTimeoutMs)
   )
-  const authRegistry = await authRegistryPromise
   void appendEnvCheckDiagnostic('main-openclaw-capabilities-discover-phase1-complete', {})
 
-  const onboardHelpText = mergeOutput(onboardHelpResult)
+  const onboardHelpText = onboardHelpResult ? mergeOutput(onboardHelpResult) : ''
   const recoveredAuthRegistry = recoverAuthRegistryFromOnboardHelp(authRegistry, onboardHelpText)
   const hasPluginBackedAuthMethod = recoveredAuthRegistry.providers.some((provider) =>
     provider.methods.some((method) => Boolean(method.route.pluginId))
@@ -447,7 +472,9 @@ export async function discoverOpenClawCapabilities(
   const authChoices = deriveCompatAuthChoices(recoveredAuthRegistry)
 
   const rootCommands = parseModelsCommands(mergeOutput(rootHelpResult))
-  const onboardFlags = parseLongFlags(onboardHelpText)
+  const onboardFlags = onboardHelpText
+    ? parseLongFlags(onboardHelpText)
+    : deriveOnboardFlagsFromAuthRegistry(recoveredAuthRegistry)
   const modelsCommands = parseModelsCommands(mergeOutput(modelsHelpResult))
   const commandFlags: Record<string, string[]> = {
     onboard: onboardFlags,

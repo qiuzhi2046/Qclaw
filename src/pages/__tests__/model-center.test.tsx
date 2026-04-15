@@ -253,6 +253,105 @@ describe('buildProviderOptions', () => {
     expect(apiKeyMethod?.supported).toBe(false)
     expect(apiKeyMethod?.disabledReason).toContain('命令行参数')
   })
+
+  it('collapses provider methods that resolve to the same auth surface', () => {
+    const providers = buildProviderOptions({
+      ...CAPABILITIES,
+      authRegistry: {
+        ...CAPABILITIES.authRegistry,
+        providers: [
+          ...CAPABILITIES.authRegistry.providers,
+          {
+            id: 'zai',
+            label: '智谱',
+            methods: [
+              {
+                authChoice: 'zai-global',
+                label: '智谱 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--zai-api-key',
+                  requiresSecret: true,
+                },
+              },
+              {
+                authChoice: 'zai-cn',
+                label: '智谱 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--zai-api-key',
+                  requiresSecret: true,
+                },
+              },
+              {
+                authChoice: 'zai-coding-global',
+                label: '智谱 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--zai-api-key',
+                  requiresSecret: true,
+                  extraOptions: [{ id: 'coding', label: 'Coding' }],
+                },
+              },
+            ],
+          } as any,
+        ],
+      },
+    })
+    const zaiProvider = providers.find((provider) => provider.id === 'zai')
+
+    expect(zaiProvider?.methods.map((method) => method.id)).toEqual([
+      'zai-global',
+      'zai-coding-global',
+    ])
+  })
+
+  it('does not collapse label-only duplicates when env-key metadata is missing', () => {
+    const providers = buildProviderOptions({
+      ...CAPABILITIES,
+      authRegistry: {
+        ...CAPABILITIES.authRegistry,
+        providers: [
+          ...CAPABILITIES.authRegistry.providers,
+          {
+            id: 'qwen',
+            label: '千问',
+            methods: [
+              {
+                authChoice: 'qwen-api-key-global',
+                label: '千问 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--qwen-api-key',
+                  requiresSecret: true,
+                },
+              },
+              {
+                authChoice: 'qwen-api-key-cn',
+                label: '千问 API Key',
+                kind: 'apiKey',
+                route: {
+                  kind: 'onboard',
+                  cliFlag: '--qwen-api-key-cn',
+                  requiresSecret: true,
+                },
+              },
+            ],
+          } as any,
+        ],
+      },
+    })
+    const qwenProvider = providers.find((provider) => provider.id === 'qwen')
+
+    expect(qwenProvider?.methods.map((method) => method.id)).toEqual([
+      'qwen-api-key-global',
+      'qwen-api-key-cn',
+    ])
+  })
 })
 
 describe('ModelCenter source copy cleanup', () => {

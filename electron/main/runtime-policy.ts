@@ -216,6 +216,12 @@ export const MAIN_RUNTIME_POLICY = Object.freeze({
       MAIN_RUNTIME_DEFAULTS.capabilities.helpProbeTimeoutMs,
       500
     ),
+    discoveryTimeoutMs: readEnvNumber(
+      process.env,
+      'QCLAW_RUNTIME_CAPABILITY_DISCOVERY_TIMEOUT_MS',
+      MAIN_RUNTIME_DEFAULTS.capabilities.discoveryTimeoutMs,
+      1_000
+    ),
   },
   auth: {
     pluginEnableTimeoutMs: readEnvNumber(

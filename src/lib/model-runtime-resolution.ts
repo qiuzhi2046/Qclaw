@@ -17,6 +17,10 @@ function normalizeProviderId(value: unknown): string {
   return canonicalizeModelProviderId(value).trim().toLowerCase()
 }
 
+function normalizeExactProviderId(value: unknown): string {
+  return String(value || '').trim().toLowerCase()
+}
+
 function normalizeModelList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
@@ -90,25 +94,34 @@ export function collectRuntimeConnectedModelKeys(
   const allowedModels = Array.from(new Set(normalizeModelList(statusData?.allowed))).sort()
   const authProviders = Array.isArray(statusData?.auth?.providers) ? statusData.auth.providers : []
   const oauthProviders = Array.isArray(statusData?.auth?.oauth?.providers) ? statusData.auth.oauth.providers : []
-  const configuredProviderIds = new Set<string>()
+  const exactConfiguredProviderIds = new Set<string>()
+  const aliasConfiguredProviderIds = new Set<string>()
   const hasAuthSignals = authProviders.length > 0 || oauthProviders.length > 0
 
   for (const entry of [...authProviders, ...oauthProviders]) {
-    const providerId = normalizeProviderId(entry?.provider ?? entry?.providerId)
-    if (!providerId || !isConfiguredRuntimeProviderEntry(entry)) continue
-    for (const alias of getModelProviderAliasCandidates(providerId)) {
-      configuredProviderIds.add(alias)
+    const exactProviderId = normalizeExactProviderId(entry?.provider ?? entry?.providerId)
+    if (!exactProviderId || !isConfiguredRuntimeProviderEntry(entry)) continue
+
+    exactConfiguredProviderIds.add(exactProviderId)
+    for (const alias of getModelProviderAliasCandidates(exactProviderId)) {
+      aliasConfiguredProviderIds.add(alias)
     }
   }
 
-  if (!hasAuthSignals || configuredProviderIds.size === 0) {
+  if (!hasAuthSignals || (exactConfiguredProviderIds.size === 0 && aliasConfiguredProviderIds.size === 0)) {
     return allowedModels
   }
+
+  const exactMatches = allowedModels.filter((modelKey) => {
+    const providerId = normalizeExactProviderId(String(modelKey || '').split('/')[0])
+    return Boolean(providerId && exactConfiguredProviderIds.has(providerId))
+  })
+  if (exactMatches.length > 0) return exactMatches
 
   return allowedModels.filter((modelKey) => {
     const providerId = normalizeProviderId(String(modelKey || '').split('/')[0])
     if (!providerId) return false
-    return getModelProviderAliasCandidates(providerId).some((candidate) => configuredProviderIds.has(candidate))
+    return getModelProviderAliasCandidates(providerId).some((candidate) => aliasConfiguredProviderIds.has(candidate))
   })
 }
 
