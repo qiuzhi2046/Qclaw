@@ -13,4 +13,9 @@ describe('feishu installer session source', () => {
     expect(source).toContain('applyGatewayPolicy: false')
     expect(source).toContain('ensureFeishuOfficialPluginReady()')
   })
+
+  it('does not attach a fixed timeout to the interactive installer process', () => {
+    expect(source).toContain('spawn(commandResolution.command[0]')
+    expect(source).not.toContain('timeout: MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs')
+  })
 })

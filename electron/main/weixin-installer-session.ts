@@ -208,7 +208,6 @@ export async function startWeixinInstallerSession(
     },
     detached: process.platform !== 'win32',
     shell: process.platform === 'win32',
-    timeout: MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 

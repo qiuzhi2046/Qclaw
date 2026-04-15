@@ -26,7 +26,6 @@ import {
 } from './feishu-installer-config'
 import { stopGatewayIfOwned } from './gateway-lifecycle-controller'
 import { resolveOpenClawPathsForRead } from './openclaw-runtime-readonly'
-import { MAIN_RUNTIME_POLICY } from './runtime-policy'
 import { resolveSafeWorkingDirectory } from './runtime-working-directory'
 import { cleanupIsolatedNpmCacheEnv, createIsolatedNpmCacheEnv } from './npm-cache-env'
 
@@ -524,7 +523,6 @@ export async function startFeishuInstallerSession(
         ...isolatedNpmCache.env,
       },
       shell: process.platform === 'win32',
-      timeout: MAIN_RUNTIME_POLICY.cli.pluginInstallNpxTimeoutMs,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 

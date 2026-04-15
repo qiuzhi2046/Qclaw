@@ -1278,6 +1278,22 @@ export function canFinalizeWeixinSetup(params: {
   return params.configuredAccounts.some((account) => account.configured)
 }
 
+export function buildDetectedWeixinBindingLogLine(params: {
+  accountIds: string[]
+  source: 'start' | 'installer-exit'
+}): string {
+  const accountIds = params.accountIds
+    .map((accountId) => String(accountId || '').trim())
+    .filter(Boolean)
+  const accountCopy = accountIds.length > 0
+    ? `账号：${accountIds.join(', ')}`
+    : '个人微信账号'
+  const sourceCopy = params.source === 'installer-exit'
+    ? '安装器未正常退出，但已检测到个人微信绑定成功'
+    : '已检测到个人微信已绑定'
+  return `[Qclaw] ${sourceCopy}，正在同步配置。${accountCopy}`
+}
+
 export default function ChannelConnect({
   onNext,
   onBack,
@@ -1339,6 +1355,7 @@ export default function ChannelConnect({
   const qrResolveRef = useRef<((result: { botId: string; secret: string } | null) => void) | null>(null)
   const feishuInstallerHandledPromptIdRef = useRef('')
   const feishuFinishInFlightRef = useRef(false)
+  const weixinFinishInFlightRef = useRef(false)
   const feishuAutoFinishTriggerKeyRef = useRef('')
   const feishuCreateStartConfigSnapshotRef = useRef<Record<string, any> | null>(null)
   const feishuManualBindingRequestVersionRef = useRef(0)
@@ -1842,6 +1859,7 @@ export default function ChannelConnect({
     setWeixinInstallerBusy(false)
     setFinishingWeixinSetup(false)
     setWeixinInstallerNewAccountIds([])
+    weixinFinishInFlightRef.current = false
     pluginInstalledRef.current = false
   }
 
@@ -1926,6 +1944,10 @@ export default function ChannelConnect({
         return
       }
 
+      if (await tryFinishDetectedWeixinBinding('start')) {
+        return
+      }
+
       await resolveManagedPluginInstallPreflight(window.api, {
         channel: getChannelDefinition('openclaw-weixin'),
         pluginConfigured: false,
@@ -1962,7 +1984,12 @@ export default function ChannelConnect({
     }
   }
 
-  const finishWeixinChannelConnect = useCallback(async (newAccountIdsInput?: string[]) => {
+  const finishWeixinChannelConnect = useCallback(async (
+    newAccountIdsInput?: string[],
+    options?: { detectedExistingBinding?: boolean }
+  ) => {
+    if (weixinFinishInFlightRef.current) return
+    weixinFinishInFlightRef.current = true
     setFinishingWeixinSetup(true)
     setError('')
 
@@ -2012,10 +2039,18 @@ export default function ChannelConnect({
         )
       notifications.show({
         color: 'teal',
-        title: '个人微信接入成功',
-        message: successAccountId
-          ? `扫码登录已完成，账号「${successAccountId}」已同步到控制面板。`
-          : '扫码登录已完成，账号已同步到控制面板。',
+        title: options?.detectedExistingBinding ? '已检测到个人微信已绑定' : '个人微信接入成功',
+        message: options?.detectedExistingBinding
+          ? (
+              successAccountId
+                ? `账号「${successAccountId}」已绑定并同步到控制面板。`
+                : '个人微信已绑定并同步到控制面板。'
+            )
+          : (
+              successAccountId
+                ? `扫码登录已完成，账号「${successAccountId}」已同步到控制面板。`
+                : '扫码登录已完成，账号已同步到控制面板。'
+            ),
       })
 
       onNext({
@@ -2025,9 +2060,32 @@ export default function ChannelConnect({
     } catch (e: any) {
       setError(toUserFacingUnknownErrorMessage(e, '个人微信配置完成收尾失败'))
     } finally {
+      weixinFinishInFlightRef.current = false
       setFinishingWeixinSetup(false)
     }
   }, [onNext])
+
+  const tryFinishDetectedWeixinBinding = useCallback(async (
+    source: 'start' | 'installer-exit'
+  ): Promise<boolean> => {
+    const weixinAccounts = await window.api.listWeixinAccounts().catch(() => [])
+    const configuredAccounts = weixinAccounts.filter((account) => account.configured)
+    if (!canFinalizeWeixinSetup({ configuredAccounts })) return false
+
+    const accountIds = configuredAccounts
+      .map((account) => String(account.accountId || '').trim())
+      .filter(Boolean)
+
+    const detectedLogLine = buildDetectedWeixinBindingLogLine({ accountIds, source })
+    setWeixinInstallerOutput((current) =>
+      current.trim()
+        ? `${current.replace(/\s*$/, '')}\n\n${detectedLogLine}\n`
+        : `${detectedLogLine}\n`
+    )
+
+    await finishWeixinChannelConnect(accountIds, { detectedExistingBinding: true })
+    return true
+  }, [finishWeixinChannelConnect])
 
   const prepareFeishuManualBinding = async () => {
     const requestVersion = feishuManualBindingRequestVersionRef.current + 1
@@ -2349,13 +2407,21 @@ export default function ChannelConnect({
         }
 
         if (!payload.canceled) {
-          setError('个人微信连接未完成，请重试。')
+          void tryFinishDetectedWeixinBinding('installer-exit')
+            .then((handled) => {
+              if (!handled) {
+                setError('个人微信连接未完成，请重试。')
+              }
+            })
+            .catch(() => {
+              setError('个人微信连接未完成，请重试。')
+            })
         }
       }
     })
 
     return unsubscribe
-  }, [finishWeixinChannelConnect])
+  }, [finishWeixinChannelConnect, tryFinishDetectedWeixinBinding])
 
   useEffect(() => {
     if (selectedChannel?.id !== 'openclaw-weixin') return

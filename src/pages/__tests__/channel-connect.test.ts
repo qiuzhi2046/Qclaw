@@ -5,6 +5,7 @@ import {
   buildManagedPluginScopedRepairOptions,
   buildDingtalkOfficialSetupLog,
   buildChannelConnectCompletionCopy,
+  buildDetectedWeixinBindingLogLine,
   canFinalizeWeixinSetup,
   canPrepareFeishuManualBindingWithoutInstall,
   canFinishFeishuCreateMode,
@@ -52,6 +53,11 @@ describe('ChannelConnect source copy cleanup', () => {
   it('does not keep the redundant weixin helper paragraphs', () => {
     expect(channelConnectSource).not.toContain('点击“开始连接”后，Qclaw 会安装个人微信插件')
     expect(channelConnectSource).not.toContain('如果二维码过期，安装器会自动刷新；连接成功后')
+  })
+
+  it('recovers personal weixin setup when local account state already shows a binding', () => {
+    expect(channelConnectSource).toContain("tryFinishDetectedWeixinBinding('start')")
+    expect(channelConnectSource).toContain("tryFinishDetectedWeixinBinding('installer-exit')")
   })
 })
 describe('shouldShowChannelConnectSkipButton', () => {
@@ -994,6 +1000,26 @@ describe('hasFeishuManualCredentialInput', () => {
     expect(hasFeishuManualCredentialInput({ appId: '   ', appSecret: '' })).toBe(false)
     expect(hasFeishuManualCredentialInput({ appId: 'cli_test', appSecret: '' })).toBe(true)
     expect(hasFeishuManualCredentialInput({ appId: '', appSecret: 'secret' })).toBe(true)
+  })
+})
+
+describe('buildDetectedWeixinBindingLogLine', () => {
+  it('prompts that an existing local binding is being synchronized', () => {
+    expect(
+      buildDetectedWeixinBindingLogLine({
+        accountIds: ['wx-account-1'],
+        source: 'start',
+      })
+    ).toBe('[Qclaw] 已检测到个人微信已绑定，正在同步配置。账号：wx-account-1')
+  })
+
+  it('makes installer abnormal exits recoverable when local binding exists', () => {
+    expect(
+      buildDetectedWeixinBindingLogLine({
+        accountIds: [],
+        source: 'installer-exit',
+      })
+    ).toBe('[Qclaw] 安装器未正常退出，但已检测到个人微信绑定成功，正在同步配置。个人微信账号')
   })
 })
 
