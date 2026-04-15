@@ -6,6 +6,7 @@ const { EventEmitter } = process.getBuiltinModule('node:events') as typeof impor
 const os = process.getBuiltinModule('node:os') as typeof import('node:os')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { createHash } = process.getBuiltinModule('node:crypto') as typeof import('node:crypto')
+type EventEmitterInstance = InstanceType<typeof EventEmitter>
 
 const {
   resolveOpenClawBinaryPathMock,
@@ -81,10 +82,10 @@ function createMockSpawnedProcess(result: {
   stderr?: string
   stdout?: string
 } = {}) {
-  const proc = new EventEmitter() as EventEmitter & {
+  const proc = new EventEmitter() as EventEmitterInstance & {
     kill: () => void
-    stderr: EventEmitter
-    stdout: EventEmitter
+    stderr: EventEmitterInstance
+    stdout: EventEmitterInstance
   }
   proc.stdout = new EventEmitter()
   proc.stderr = new EventEmitter()
@@ -177,7 +178,7 @@ describe('inferOpenClawInstallSource', () => {
         platform: 'win32',
         env: {
           LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
-        } as NodeJS.ProcessEnv,
+        } as unknown as NodeJS.ProcessEnv,
       })
     ).toBe('qclaw-managed')
   })
@@ -889,7 +890,7 @@ describe('discoverOpenClawInstallations', () => {
       options: Record<string, unknown>
     }> = []
     const originalGetBuiltinModule = process.getBuiltinModule.bind(process)
-    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id) => {
+    const getBuiltinModuleSpy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id: string) => {
       if (id === 'node:child_process' || id === 'child_process') {
         const actual = originalGetBuiltinModule(id) as typeof import('node:child_process')
         return {

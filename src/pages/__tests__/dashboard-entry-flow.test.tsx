@@ -335,8 +335,8 @@ describe('dashboard entry bootstrap flow', () => {
 
   it('lets dashboard entry continue when the lightweight gateway ensure exceeds the bootstrap wait budget', async () => {
     const ensureGatewayRunning = vi.fn(
-      () =>
-        new Promise(() => {
+      (_options?: Parameters<DashboardEntryBootstrapApi['ensureGatewayRunning']>[0]) =>
+        new Promise<Awaited<ReturnType<DashboardEntryBootstrapApi['ensureGatewayRunning']>>>(() => {
           // Keep the ensure request pending to simulate a long-running gateway recovery.
         })
     )
