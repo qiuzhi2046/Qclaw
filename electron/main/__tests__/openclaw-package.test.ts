@@ -620,8 +620,11 @@ describe('resolveOpenClawPackageRoot', () => {
       binaryPath: install.pluginEntryPath,
     })
 
-    expect(packageRoot).toBe(fs.realpathSync(install.selectedHostPackageRoot))
-    expect(packageRoot).not.toBe(fs.realpathSync(install.pollutedPackageRoot))
+    const selectedHostPackageRoot = await fs.promises.realpath(install.selectedHostPackageRoot)
+    const pollutedPackageRoot = await fs.promises.realpath(install.pollutedPackageRoot)
+
+    expect(packageRoot).toBe(selectedHostPackageRoot)
+    expect(packageRoot).not.toBe(pollutedPackageRoot)
   })
 })
 
