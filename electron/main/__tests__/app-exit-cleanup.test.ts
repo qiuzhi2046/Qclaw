@@ -30,7 +30,14 @@ describe('app exit cleanup', () => {
       failedDomains: [],
       untouchedDomains: [],
     })
-    stopFeishuInstallerSessionMock.mockResolvedValue({ ok: true })
+    stopFeishuInstallerSessionMock.mockResolvedValue({
+      ok: true,
+      gatewayRecovery: {
+        ok: true,
+        recovered: true,
+        skipped: false,
+      },
+    })
     stopWeixinInstallerSessionMock.mockResolvedValue({ ok: true })
   })
 
@@ -60,10 +67,19 @@ describe('app exit cleanup', () => {
       'global',
     ])
     expect(stopFeishuInstallerSessionMock).toHaveBeenCalledTimes(1)
+    expect(stopFeishuInstallerSessionMock).toHaveBeenCalledWith({
+      recoverGateway: true,
+      recoveryTimeoutMs: 5000,
+    })
     expect(stopWeixinInstallerSessionMock).toHaveBeenCalledTimes(1)
 
     expect(result.canceledDomains).toEqual(['chat', 'global'])
     expect(result.failedDomains).toEqual([])
+    expect(result.gatewayRecovery).toEqual({
+      ok: true,
+      recovered: true,
+      skipped: false,
+    })
     expect(result.installerStopped).toBe(true)
   })
 

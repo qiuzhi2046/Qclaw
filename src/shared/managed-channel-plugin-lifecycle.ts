@@ -15,6 +15,7 @@ export type ManagedChannelInstallStrategy =
 
 export type ManagedChannelPluginScope = 'channel'
 export type ManagedChannelEntityScope = 'channel' | 'account' | 'bot'
+export type ManagedChannelConfigReconcileScope = 'plugins-only' | 'plugins-and-channels'
 
 export type ManagedChannelSetupEvidenceSource =
   | 'doctor'
@@ -66,10 +67,29 @@ export interface ManagedChannelCapabilitySnapshot {
 export interface ManagedChannelRuntimeSnapshot {
   installedOnDisk: boolean
   installPath?: string
+  homeDir?: string
+  configReadFailed?: boolean
   registeredState: 'ready' | 'missing' | 'unknown'
   loadedState: 'ready' | 'missing' | 'unknown'
   readyState: 'ready' | 'missing' | 'unknown'
   evidence: string[]
+}
+
+export interface ManagedChannelConfigReconcileResult {
+  config: Record<string, any>
+  changed: boolean
+  scope: ManagedChannelConfigReconcileScope
+  configReadFailed: boolean
+  removedFrom: {
+    allow: string[]
+    entries: string[]
+    installs: string[]
+    channels: string[]
+  }
+}
+
+export interface ManagedChannelConfigReconcileOptions {
+  scope?: ManagedChannelConfigReconcileScope
 }
 
 export interface ManagedChannelLifecycleContext {
@@ -84,8 +104,11 @@ export interface ManagedChannelPluginLifecycleSpec {
   pluginScope: ManagedChannelPluginScope
   entityScope: ManagedChannelEntityScope
   canonicalPluginId: string
+  legacyCleanupPluginIds: string[]
+  orphanPruneCandidateIds: string[]
   cleanupPluginIds: string[]
   cleanupChannelIds: string[]
+  defaultReconcileScope: ManagedChannelConfigReconcileScope
   installStrategy: ManagedChannelInstallStrategy
   packageName?: string
   npxSpecifier?: string
@@ -96,6 +119,11 @@ export interface ManagedChannelPluginLifecycleSpec {
     config: Record<string, any> | null | undefined,
     runtime: ManagedChannelRuntimeSnapshot
   ): { config: Record<string, any>; changed: boolean }
+  reconcileConfig(
+    config: Record<string, any> | null | undefined,
+    runtime: ManagedChannelRuntimeSnapshot,
+    options?: ManagedChannelConfigReconcileOptions
+  ): ManagedChannelConfigReconcileResult
 }
 
 export type ManagedChannelPluginInspectResult =
@@ -273,6 +301,44 @@ function cloneConfig(config: Record<string, any> | null | undefined): Record<str
   return JSON.parse(JSON.stringify(config)) as Record<string, any>
 }
 
+function createEmptyRemovedFrom(): ManagedChannelConfigReconcileResult['removedFrom'] {
+  return {
+    allow: [],
+    entries: [],
+    installs: [],
+    channels: [],
+  }
+}
+
+function cloneReconcileResult(result: ManagedChannelConfigReconcileResult): ManagedChannelConfigReconcileResult {
+  return {
+    config: cloneConfig(result.config),
+    changed: result.changed,
+    scope: result.scope,
+    configReadFailed: result.configReadFailed,
+    removedFrom: {
+      allow: [...result.removedFrom.allow],
+      entries: [...result.removedFrom.entries],
+      installs: [...result.removedFrom.installs],
+      channels: [...result.removedFrom.channels],
+    },
+  }
+}
+
+function createNoopReconcileResult(
+  config: Record<string, any> | null | undefined,
+  runtime: ManagedChannelRuntimeSnapshot,
+  scope: ManagedChannelConfigReconcileScope
+): ManagedChannelConfigReconcileResult {
+  return {
+    config: cloneConfig(config),
+    changed: false,
+    scope,
+    configReadFailed: runtime.configReadFailed === true,
+    removedFrom: createEmptyRemovedFrom(),
+  }
+}
+
 function getLastPathSegment(value: string): string {
   const segments = String(value || '').split(/[\\/]+/).filter(Boolean)
   return segments[segments.length - 1] || ''
@@ -356,8 +422,34 @@ function normalizeGenericManagedPluginConfig(
   canonicalPluginId: string,
   cleanupPluginIds: string[]
 ): { config: Record<string, any>; changed: boolean } {
+  const result = reconcileGenericManagedPluginConfig(
+    config,
+    createManagedChannelRuntimeSnapshot(),
+    canonicalPluginId,
+    cleanupPluginIds,
+    { scope: 'plugins-only' }
+  )
+  return {
+    config: result.config,
+    changed: result.changed,
+  }
+}
+
+function reconcileGenericManagedPluginConfig(
+  config: Record<string, any> | null | undefined,
+  runtime: ManagedChannelRuntimeSnapshot,
+  canonicalPluginId: string,
+  cleanupPluginIds: string[],
+  options: ManagedChannelConfigReconcileOptions = {}
+): ManagedChannelConfigReconcileResult {
+  const scope = options.scope || 'plugins-only'
+  if (runtime.configReadFailed) {
+    return createNoopReconcileResult(config, runtime, scope)
+  }
+
   const next = cloneConfig(config)
   next.plugins = hasOwnRecord(next.plugins) ? next.plugins : {}
+  const removedFrom = createEmptyRemovedFrom()
 
   const blockedPluginIds = new Set(
     cleanupPluginIds
@@ -370,6 +462,7 @@ function normalizeGenericManagedPluginConfig(
     ? next.plugins.allow.map((item: unknown) => normalizeText(item)).filter(Boolean)
     : []
   const normalizedAllow = allow.filter((item: string) => !blockedPluginIds.has(item))
+  removedFrom.allow.push(...allow.filter((item: string) => blockedPluginIds.has(item)))
   if (!normalizedAllow.includes(canonicalPluginId)) {
     normalizedAllow.push(canonicalPluginId)
   }
@@ -386,12 +479,14 @@ function normalizeGenericManagedPluginConfig(
 
     if (hasNonCanonicalManagedInstallPath(next.plugins[key][canonicalPluginId], canonicalPluginId)) {
       delete next.plugins[key][canonicalPluginId]
+      removedFrom[key].push(canonicalPluginId)
       changed = true
     }
 
     for (const blockedPluginId of blockedPluginIds) {
       if (!(blockedPluginId in next.plugins[key])) continue
       delete next.plugins[key][blockedPluginId]
+      removedFrom[key].push(blockedPluginId)
       changed = true
     }
   }
@@ -399,6 +494,9 @@ function normalizeGenericManagedPluginConfig(
   return {
     config: next,
     changed,
+    scope,
+    configReadFailed: false,
+    removedFrom,
   }
 }
 
@@ -406,6 +504,8 @@ function createRuntimeSnapshot(runtime?: Partial<ManagedChannelRuntimeSnapshot>)
   return {
     installedOnDisk: runtime?.installedOnDisk === true,
     installPath: normalizeText(runtime?.installPath) || undefined,
+    homeDir: normalizeText(runtime?.homeDir) || undefined,
+    configReadFailed: runtime?.configReadFailed === true,
     registeredState: runtime?.registeredState || 'unknown',
     loadedState: runtime?.loadedState || 'unknown',
     readyState: runtime?.readyState || 'unknown',
@@ -418,6 +518,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
   if (!record) {
     throw new Error(`Unknown managed channel lifecycle spec: ${channelId}`)
   }
+  const legacyCleanupPluginIds = record.cleanupPluginIds.filter((pluginId) => pluginId !== record.pluginId)
+  const orphanPruneCandidateIds = Array.from(new Set(record.cleanupPluginIds))
 
   if (channelId === 'feishu') {
     return {
@@ -425,8 +527,11 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       pluginScope: 'channel',
       entityScope: 'bot',
       canonicalPluginId: record.pluginId,
+      legacyCleanupPluginIds,
+      orphanPruneCandidateIds,
       cleanupPluginIds: record.cleanupPluginIds,
       cleanupChannelIds: record.cleanupChannelIds,
+      defaultReconcileScope: 'plugins-only',
       installStrategy: 'official-adapter',
       supportsBackgroundRestore: true,
       supportsInteractiveRepairUi: true,
@@ -436,6 +541,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
         config: cloneConfig(config),
         changed: false,
       }),
+      reconcileConfig: (config, runtime, options) =>
+        createNoopReconcileResult(config, runtime, options?.scope || 'plugins-only'),
     }
   }
 
@@ -445,8 +552,11 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       pluginScope: 'channel',
       entityScope: 'channel',
       canonicalPluginId: record.pluginId,
+      legacyCleanupPluginIds,
+      orphanPruneCandidateIds,
       cleanupPluginIds: record.cleanupPluginIds,
       cleanupChannelIds: record.cleanupChannelIds,
+      defaultReconcileScope: 'plugins-only',
       installStrategy: 'official-adapter',
       packageName: record.packageName,
       supportsBackgroundRestore: true,
@@ -454,6 +564,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       detectConfigured: ({ referenceConfig, currentConfig }) =>
         hasConfiguredDingtalkChannel(referenceConfig) || hasConfiguredDingtalkChannel(currentConfig),
       normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      reconcileConfig: (config, runtime, options) =>
+        reconcileGenericManagedPluginConfig(config, runtime, record.pluginId, record.cleanupPluginIds, options),
     }
   }
 
@@ -463,8 +575,11 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       pluginScope: 'channel',
       entityScope: 'channel',
       canonicalPluginId: record.pluginId,
+      legacyCleanupPluginIds,
+      orphanPruneCandidateIds,
       cleanupPluginIds: record.cleanupPluginIds,
       cleanupChannelIds: record.cleanupChannelIds,
+      defaultReconcileScope: 'plugins-only',
       installStrategy: 'npx',
       npxSpecifier: record.npxSpecifier,
       supportsBackgroundRestore: true,
@@ -472,6 +587,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       detectConfigured: ({ referenceConfig, currentConfig }) =>
         hasConfiguredWecomChannel(referenceConfig) || hasConfiguredWecomChannel(currentConfig),
       normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      reconcileConfig: (config, runtime, options) =>
+        reconcileGenericManagedPluginConfig(config, runtime, record.pluginId, record.cleanupPluginIds, options),
     }
   }
 
@@ -481,8 +598,11 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       pluginScope: 'channel',
       entityScope: 'channel',
       canonicalPluginId: record.pluginId,
+      legacyCleanupPluginIds,
+      orphanPruneCandidateIds,
       cleanupPluginIds: record.cleanupPluginIds,
       cleanupChannelIds: record.cleanupChannelIds,
+      defaultReconcileScope: 'plugins-only',
       installStrategy: 'package',
       packageName: record.packageName,
       supportsBackgroundRestore: true,
@@ -490,6 +610,8 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       detectConfigured: ({ referenceConfig, currentConfig }) =>
         hasConfiguredQqbotChannel(referenceConfig) || hasConfiguredQqbotChannel(currentConfig),
       normalizeConfig: (config) => normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds),
+      reconcileConfig: (config, runtime, options) =>
+        reconcileGenericManagedPluginConfig(config, runtime, record.pluginId, record.cleanupPluginIds, options),
     }
   }
 
@@ -498,8 +620,11 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
     pluginScope: 'channel',
     entityScope: 'account',
     canonicalPluginId: record.pluginId,
+    legacyCleanupPluginIds,
+    orphanPruneCandidateIds,
     cleanupPluginIds: record.cleanupPluginIds,
     cleanupChannelIds: record.cleanupChannelIds,
+    defaultReconcileScope: 'plugins-only',
     installStrategy: 'interactive-installer',
     packageName: record.packageName,
     npxSpecifier: record.npxSpecifier,
@@ -516,6 +641,13 @@ function buildLifecycleSpec(channelId: ManagedChannelLifecycleId): ManagedChanne
       }
       return normalizeGenericManagedPluginConfig(config, record.pluginId, record.cleanupPluginIds)
     },
+    reconcileConfig: (config, runtime, options) => {
+      const scope = options?.scope || 'plugins-only'
+      if (!runtime.installedOnDisk) {
+        return createNoopReconcileResult(config, runtime, scope)
+      }
+      return reconcileGenericManagedPluginConfig(config, runtime, record.pluginId, record.cleanupPluginIds, options)
+    },
   }
 }
 
@@ -525,6 +657,8 @@ const MANAGED_CHANNEL_LIFECYCLE_SPECS: ManagedChannelPluginLifecycleSpec[] =
 export function listManagedChannelLifecycleSpecs(): ManagedChannelPluginLifecycleSpec[] {
   return MANAGED_CHANNEL_LIFECYCLE_SPECS.map((spec) => ({
     ...spec,
+    legacyCleanupPluginIds: [...spec.legacyCleanupPluginIds],
+    orphanPruneCandidateIds: [...spec.orphanPruneCandidateIds],
     cleanupPluginIds: [...spec.cleanupPluginIds],
     cleanupChannelIds: [...spec.cleanupChannelIds],
   }))
@@ -538,10 +672,30 @@ export function getManagedChannelLifecycleSpec(
   return spec
     ? {
         ...spec,
+        legacyCleanupPluginIds: [...spec.legacyCleanupPluginIds],
+        orphanPruneCandidateIds: [...spec.orphanPruneCandidateIds],
         cleanupPluginIds: [...spec.cleanupPluginIds],
         cleanupChannelIds: [...spec.cleanupChannelIds],
       }
     : null
+}
+
+export function reconcileManagedChannelPluginConfig(
+  channelId: string,
+  config: Record<string, any> | null | undefined,
+  runtime?: Partial<ManagedChannelRuntimeSnapshot>,
+  options?: ManagedChannelConfigReconcileOptions
+): ManagedChannelConfigReconcileResult | null {
+  const spec = getManagedChannelLifecycleSpec(channelId)
+  if (!spec) return null
+  const result = spec.reconcileConfig(
+    config,
+    createManagedChannelRuntimeSnapshot(runtime),
+    {
+      scope: options?.scope || spec.defaultReconcileScope,
+    }
+  )
+  return cloneReconcileResult(result)
 }
 
 export function createManagedChannelCapabilitySnapshot(params: {

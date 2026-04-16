@@ -108,6 +108,13 @@ import {
   prepareManagedConfigWrite,
 } from './openclaw-config-guard'
 import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
+import { applyChannelAwareConfigPatchGuarded } from './channel-aware-config-patch'
+import {
+  classifyManagedPluginIpcTarget,
+  getManagedChannelPluginLockKey,
+  runManagedPluginIpcOperation,
+  runManagedPluginRepairIpcOperation,
+} from './managed-channel-ipc-guard'
 import { guardedWriteEnvFileWithGatewayApply } from './openclaw-env-write-service'
 import { listOpenClawBackups, resolveOpenClawBackupDirectoryToOpen } from './openclaw-backup-index'
 import { deleteAllOpenClawBackups, deleteOpenClawBackup } from './openclaw-backup-index'
@@ -268,6 +275,13 @@ function normalizeSafeInstallBinName(raw: string): string | null {
 
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs))
+}
+
+function runOfficialChannelMutation<T>(
+  channelId: 'feishu' | 'dingtalk',
+  operation: () => Promise<T>
+): Promise<T> {
+  return withManagedOperationLock(getManagedChannelPluginLockKey(channelId), operation)
 }
 
 function setConfigPathValue(target: Record<string, any>, path: string, value: unknown): void {
@@ -613,11 +627,23 @@ export function registerIpcHandlers() {
   })
   ipcMain.handle('openclaw:data-guard:get', (_e, candidate) => getDataGuardSummary(candidate))
   ipcMain.handle('openclaw:config:prepare', (_e, candidate) => prepareManagedConfigWrite(candidate))
-  ipcMain.handle('openclaw:config:guarded-write', (_e, request, candidate) =>
-    guardedWriteConfig(request, candidate)
-  )
+  ipcMain.handle('openclaw:config:guarded-write', async (_e, request, candidate) => {
+    const beforeConfig = await readConfig().catch(() => null)
+    return applyChannelAwareConfigPatchGuarded(
+      {
+        beforeConfig,
+        afterConfig: request?.config,
+        reason: request?.reason,
+      },
+      candidate,
+      {
+        applyConfigPatchGuardedImpl: (_patchRequest, preferredCandidate) =>
+          guardedWriteConfig(request, preferredCandidate),
+      }
+    )
+  })
   ipcMain.handle('openclaw:config:apply-patch', (_e, request, candidate) =>
-    applyConfigPatchGuarded(request, candidate)
+    applyChannelAwareConfigPatchGuarded(request, candidate)
   )
   ipcMain.handle('openclaw:env:guarded-write', (_e, request, candidate) =>
     guardedWriteEnvFileWithGatewayApply(request, candidate)
@@ -846,19 +872,34 @@ export function registerIpcHandlers() {
   )
 
   // Plugins
-  ipcMain.handle('plugins:install', (_e, name: string, expectedPluginIds?: string[]) => installPlugin(name, expectedPluginIds))
-  ipcMain.handle('plugins:installNpx', (_e, url: string, expectedPluginIds?: string[]) => installPluginNpx(url, expectedPluginIds))
+  ipcMain.handle('plugins:install', (_e, name: string, expectedPluginIds?: string[]) => {
+    const classification = classifyManagedPluginIpcTarget({ spec: name, expectedPluginIds })
+    return runManagedPluginIpcOperation(classification, (resolvedExpectedPluginIds) =>
+      installPlugin(name, resolvedExpectedPluginIds)
+    )
+  })
+  ipcMain.handle('plugins:installNpx', (_e, url: string, expectedPluginIds?: string[]) => {
+    const classification = classifyManagedPluginIpcTarget({ spec: url, expectedPluginIds })
+    return runManagedPluginIpcOperation(classification, (resolvedExpectedPluginIds) =>
+      installPluginNpx(url, resolvedExpectedPluginIds)
+    )
+  })
   ipcMain.handle('plugins:repair-incompatible', (_e, options?: RepairIncompatibleExtensionPluginsOptions) =>
-    repairIncompatibleExtensionPlugins(options || {})
+    runManagedPluginRepairIpcOperation(options || {}, () => repairIncompatibleExtensionPlugins(options || {}))
   )
   ipcMain.handle('plugins:scan-incompatible', (_e, options?: RepairIncompatibleExtensionPluginsOptions) =>
     scanIncompatibleExtensionPlugins(options || {})
   )
   ipcMain.handle('plugins:installed-on-disk', (_e, pluginId: string) => isPluginInstalledOnDisk(pluginId))
-  ipcMain.handle('plugins:uninstall', (_e, name: string) => uninstallPlugin(name))
+  ipcMain.handle('plugins:uninstall', (_e, name: string) => {
+    const classification = classifyManagedPluginIpcTarget({ spec: name })
+    return runManagedPluginIpcOperation(classification, () => uninstallPlugin(name))
+  })
   ipcMain.handle('plugins:feishu-installed', () => isFeishuOfficialPluginInstalledOnDisk())
   ipcMain.handle('plugins:feishu-state', () => getFeishuOfficialPluginState())
-  ipcMain.handle('plugins:feishu-ensure-ready', () => ensureFeishuOfficialPluginReady())
+  ipcMain.handle('plugins:feishu-ensure-ready', () =>
+    runOfficialChannelMutation('feishu', () => ensureFeishuOfficialPluginReady())
+  )
   ipcMain.handle('feishu:credentials:validate', (_e, appId: string, appSecret: string, domain?: string) =>
     validateFeishuCredentials(appId, appSecret, domain)
   )
@@ -897,13 +938,13 @@ export function registerIpcHandlers() {
   // Channels
   ipcMain.handle('channels:add', (_e, channel: string, token: string) => channelsAdd(channel, token))
   ipcMain.handle('channels:dingtalk:setup-official', (_e, formData: Record<string, string>) =>
-    setupDingtalkOfficialChannel(formData)
+    runOfficialChannelMutation('dingtalk', () => setupDingtalkOfficialChannel(formData))
   )
   ipcMain.handle('channels:official:status', (_e, channelId: 'feishu' | 'dingtalk') =>
     getOfficialChannelStatus(channelId)
   )
   ipcMain.handle('channels:official:repair', (_e, channelId: 'feishu' | 'dingtalk') =>
-    repairOfficialChannel(channelId)
+    runOfficialChannelMutation(channelId, () => repairOfficialChannel(channelId))
   )
   ipcMain.handle('channels:managed:status', (_e, channelId: string) =>
     getManagedChannelPluginStatus(channelId)

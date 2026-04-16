@@ -8,6 +8,7 @@ import {
   normalizeWindowsChannelRuntimeSnapshot,
   type WindowsChannelRuntimeSnapshot,
 } from './windows-channel-runtime-snapshot'
+import { isAnyManagedChannelOperationBusy } from '../../managed-channel-ipc-guard'
 
 export type BuildWindowsGatewayOwnerSnapshotFromLauncherIntegrity = (input: {
   launcherPath: string | null
@@ -43,6 +44,7 @@ export interface ReconcileWindowsChannelRuntimeSelectionDependencies {
   refreshRuntimeBridge?: (
     snapshot: WindowsActiveRuntimeSnapshot
   ) => Promise<unknown>
+  isManagedChannelOperationBusy?: () => boolean
 }
 
 export interface WindowsChannelRuntimeReconcileResult {
@@ -50,6 +52,8 @@ export interface WindowsChannelRuntimeReconcileResult {
   launcherIntegrity: WindowsGatewayLauncherIntegrity | null
   reconciled: boolean
   snapshot: WindowsChannelRuntimeSnapshot | null
+  busy?: boolean
+  message?: string
 }
 
 let cachedWindowsChannelRuntimeSnapshot: WindowsChannelRuntimeSnapshot | null = null
@@ -140,6 +144,18 @@ export async function reconcileWindowsChannelRuntimeSelection(
   }
 
   const previousSnapshot = readCachedWindowsChannelRuntimeSnapshot()
+  const isOperationBusy =
+    dependencies.isManagedChannelOperationBusy || isAnyManagedChannelOperationBusy
+  if (isOperationBusy()) {
+    return {
+      changed: true,
+      launcherIntegrity: null,
+      reconciled: false,
+      snapshot: persistSnapshot ? previousSnapshot : cloneSnapshot(previousSnapshot),
+      busy: true,
+      message: '官方消息渠道插件正在执行安装、修复或配置同步，暂不切换 Windows runtime。',
+    }
+  }
 
   if (!nextSelectedRuntimeSnapshot) {
     if (persistSnapshot) {

@@ -43,4 +43,17 @@ describe('collectChangedJsonPaths', () => {
 
     expect(collectChangedJsonPaths(config, config)).toEqual([])
   })
+
+  it('does not report cloned objects as changed when their JSON content is equal', () => {
+    const previousConfig = {
+      channels: {
+        feishu: {
+          appId: 'cli_default',
+        },
+      },
+    }
+    const nextConfig = JSON.parse(JSON.stringify(previousConfig))
+
+    expect(collectChangedJsonPaths(previousConfig, nextConfig)).toEqual([])
+  })
 })

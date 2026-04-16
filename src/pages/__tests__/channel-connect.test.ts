@@ -6,6 +6,8 @@ import {
   buildDingtalkOfficialSetupLog,
   buildChannelConnectCompletionCopy,
   buildDetectedWeixinBindingLogLine,
+  canFinishFeishuRecoveredCreateWithoutSession,
+  shouldAutoOpenFeishuQrModal,
   canFinalizeWeixinSetup,
   canPrepareFeishuManualBindingWithoutInstall,
   canFinishFeishuCreateMode,
@@ -16,10 +18,12 @@ import {
   hasRecoveredFeishuCreateMode,
   hasFeishuManualCredentialInput,
   isFeishuManualBindingReady,
+  mergeFeishuPairingAllowFromUsersIntoConfig,
   mergeFeishuCreateModeBots,
   resolveFeishuCreateModeRecoveryNotice,
   resolveChannelConnectBindingStrategy,
   resolveFeishuAutoRecoveryTarget,
+  resolveFeishuInstallerAutoPairOpenId,
   resolveFeishuManualBindingPreparationCopy,
   resolveFeishuPairingTarget,
   resolveFeishuCreateModeFinishStrategy,
@@ -30,8 +34,12 @@ import {
   restoreCapturedFeishuBotConfig,
   shouldAllowFeishuLinkPairingAfterGatewayFailure,
   shouldAutoFinishFeishuCreateMode,
+  shouldShowFeishuCreateInstallerArtifacts,
+  shouldShowOwnedFeishuCreateSurface,
   shouldValidateFeishuManualCredentials,
+  isOwnedFeishuCreateSession,
   isFeishuManualBindingOpenClawHotReloadPath,
+  isStaleExitedFeishuSession,
   upsertFeishuManualBindingConfig,
 } from '../ChannelConnect'
 import { getChannelDefinition } from '../../lib/openclaw-channel-registry'
@@ -56,8 +64,8 @@ describe('ChannelConnect source copy cleanup', () => {
     expect(channelConnectSource).not.toContain('如果二维码过期，安装器会自动刷新；连接成功后')
   })
 
-  it('recovers personal weixin setup when local account state already shows a binding', () => {
-    expect(channelConnectSource).toContain("tryFinishDetectedWeixinBinding('start')")
+  it('keeps personal weixin installer startup independent from local binding recovery', () => {
+    expect(channelConnectSource).not.toContain("tryFinishDetectedWeixinBinding('start')")
     expect(channelConnectSource).toContain("tryFinishDetectedWeixinBinding('installer-exit')")
   })
 })
@@ -1188,6 +1196,201 @@ describe('shouldValidateFeishuManualCredentials', () => {
   })
 })
 
+describe('Feishu create session ownership helpers', () => {
+  it('treats only matching owned sessions as the current create flow', () => {
+    expect(
+      isOwnedFeishuCreateSession({
+        ownership: {
+          sessionId: 'session-1',
+          source: 'started-here',
+        },
+        session: {
+          sessionId: 'session-1',
+          phase: 'running',
+          active: true,
+        },
+      })
+    ).toBe(true)
+
+    expect(
+      isOwnedFeishuCreateSession({
+        ownership: {
+          sessionId: 'session-1',
+          source: 'started-here',
+        },
+        session: {
+          sessionId: 'session-2',
+          phase: 'running',
+          active: true,
+        },
+      })
+    ).toBe(false)
+  })
+
+  it('marks exited unowned sessions as stale', () => {
+    expect(
+      isStaleExitedFeishuSession({
+        session: {
+          sessionId: 'session-old',
+          phase: 'exited',
+          active: false,
+        },
+      })
+    ).toBe(true)
+
+    expect(
+      isStaleExitedFeishuSession({
+        ownership: {
+          sessionId: 'session-owned',
+          source: 'started-here',
+        },
+        session: {
+          sessionId: 'session-owned',
+          phase: 'exited',
+          active: false,
+        },
+      })
+    ).toBe(false)
+  })
+
+  it('shows create-only installer surface only for the owned create session', () => {
+    expect(
+      shouldShowOwnedFeishuCreateSurface({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        ownership: {
+          sessionId: 'session-1',
+          source: 'resumed-running',
+        },
+        session: {
+          sessionId: 'session-1',
+          phase: 'running',
+          active: true,
+        },
+      })
+    ).toBe(true)
+
+    expect(
+      shouldShowOwnedFeishuCreateSurface({
+        selectedChannelId: 'feishu',
+        setupMode: 'link',
+        ownership: {
+          sessionId: 'session-1',
+          source: 'resumed-running',
+        },
+        session: {
+          sessionId: 'session-1',
+          phase: 'running',
+          active: true,
+        },
+      })
+    ).toBe(false)
+
+    expect(
+      shouldShowOwnedFeishuCreateSurface({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        ownership: {
+          sessionId: 'session-1',
+          source: 'resumed-running',
+        },
+        session: {
+          sessionId: 'session-old',
+          phase: 'exited',
+          active: false,
+        },
+      })
+    ).toBe(false)
+  })
+
+  it('lets recovered create config finish without reviving an installer session', () => {
+    expect(
+      canFinishFeishuRecoveredCreateWithoutSession({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        configRecoveredCreateReady: true,
+        hasRecoveredBotConfig: true,
+      })
+    ).toBe(true)
+
+    expect(
+      canFinishFeishuRecoveredCreateWithoutSession({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        configRecoveredCreateReady: false,
+        hasRecoveredBotConfig: true,
+      })
+    ).toBe(false)
+
+    expect(
+      canFinishFeishuRecoveredCreateWithoutSession({
+        selectedChannelId: 'feishu',
+        setupMode: 'link',
+        configRecoveredCreateReady: true,
+        hasRecoveredBotConfig: true,
+      })
+    ).toBe(false)
+  })
+
+  it('shows create installer artifacts only for the owned Feishu create flow', () => {
+    expect(
+      shouldShowFeishuCreateInstallerArtifacts({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        showOwnedCreateSessionSurface: true,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldShowFeishuCreateInstallerArtifacts({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        showOwnedCreateSessionSurface: false,
+      })
+    ).toBe(false)
+
+    expect(
+      shouldShowFeishuCreateInstallerArtifacts({
+        selectedChannelId: 'feishu',
+        setupMode: 'link',
+        showOwnedCreateSessionSurface: true,
+      })
+    ).toBe(false)
+  })
+
+  it('auto-opens the Feishu QR modal only for an owned running create session', () => {
+    expect(
+      shouldAutoOpenFeishuQrModal({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        showOwnedCreateSessionSurface: true,
+        installerRunning: true,
+        asciiQr: '██ QR',
+      })
+    ).toBe(true)
+
+    expect(
+      shouldAutoOpenFeishuQrModal({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        showOwnedCreateSessionSurface: false,
+        installerRunning: true,
+        asciiQr: '██ QR',
+      })
+    ).toBe(false)
+
+    expect(
+      shouldAutoOpenFeishuQrModal({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        showOwnedCreateSessionSurface: true,
+        installerRunning: false,
+        asciiQr: '██ QR',
+      })
+    ).toBe(false)
+  })
+})
+
 describe('shouldAutoFinishFeishuCreateMode', () => {
   it('allows auto finish only for ready Feishu create-mode setup', () => {
     expect(
@@ -1197,6 +1400,7 @@ describe('shouldAutoFinishFeishuCreateMode', () => {
         canFinish: true,
         finishing: false,
         finishStrategy: 'existing',
+        showOwnedCreateSessionSurface: true,
       })
     ).toBe(true)
   })
@@ -1209,11 +1413,12 @@ describe('shouldAutoFinishFeishuCreateMode', () => {
         canFinish: true,
         finishing: false,
         finishStrategy: 'invalid-manual',
+        showOwnedCreateSessionSurface: true,
       })
     ).toBe(false)
   })
 
-  it('blocks auto finish outside create mode or while another finish is in progress', () => {
+  it('blocks auto finish outside create mode, without an owned session, or while another finish is in progress', () => {
     expect(
       shouldAutoFinishFeishuCreateMode({
         selectedChannelId: 'feishu',
@@ -1221,6 +1426,7 @@ describe('shouldAutoFinishFeishuCreateMode', () => {
         canFinish: true,
         finishing: false,
         finishStrategy: 'existing',
+        showOwnedCreateSessionSurface: true,
       })
     ).toBe(false)
     expect(
@@ -1230,6 +1436,17 @@ describe('shouldAutoFinishFeishuCreateMode', () => {
         canFinish: true,
         finishing: true,
         finishStrategy: 'existing',
+        showOwnedCreateSessionSurface: true,
+      })
+    ).toBe(false)
+    expect(
+      shouldAutoFinishFeishuCreateMode({
+        selectedChannelId: 'feishu',
+        setupMode: 'create',
+        canFinish: true,
+        finishing: false,
+        finishStrategy: 'existing',
+        showOwnedCreateSessionSurface: false,
       })
     ).toBe(false)
     expect(
@@ -1239,6 +1456,7 @@ describe('shouldAutoFinishFeishuCreateMode', () => {
         canFinish: true,
         finishing: false,
         finishStrategy: 'existing',
+        showOwnedCreateSessionSurface: true,
       })
     ).toBe(false)
   })
@@ -1472,6 +1690,7 @@ describe('resolveFeishuAutoRecoveryTarget', () => {
           officialPluginConfigured: false,
           configChanged: false,
         },
+        hasCapturedPreviousFeishuConfigSnapshot: true,
         previousFeishuConfigSnapshot: null,
         nextConfig: {
           channels: {
@@ -1483,6 +1702,29 @@ describe('resolveFeishuAutoRecoveryTarget', () => {
         },
       })
     ).toBe('recover-create')
+  })
+
+  it('keeps create mode waiting when the pre-create baseline was never captured', () => {
+    expect(
+      resolveFeishuAutoRecoveryTarget({
+        setupMode: 'create',
+        pluginState: {
+          installedOnDisk: false,
+          officialPluginConfigured: false,
+          configChanged: false,
+        },
+        hasCapturedPreviousFeishuConfigSnapshot: false,
+        previousFeishuConfigSnapshot: null,
+        nextConfig: {
+          channels: {
+            feishu: {
+              appId: 'cli_created',
+              appSecret: 'secret-created',
+            },
+          },
+        },
+      })
+    ).toBe('wait')
   })
 
   it('asks link mode to heal config once the plugin is on disk but managed config is still missing', () => {
@@ -1518,6 +1760,7 @@ describe('hasRecoveredFeishuCreateMode', () => {
   it('returns false when only the previously existing bot is still present', () => {
     expect(
       hasRecoveredFeishuCreateMode({
+        hasCapturedPreviousFeishuConfigSnapshot: true,
         previousFeishuConfigSnapshot: {
           appId: 'cli_existing',
           appSecret: 'secret-existing',
@@ -1537,6 +1780,7 @@ describe('hasRecoveredFeishuCreateMode', () => {
   it('returns true once a newly created bot appears alongside the previous config', () => {
     expect(
       hasRecoveredFeishuCreateMode({
+        hasCapturedPreviousFeishuConfigSnapshot: true,
         previousFeishuConfigSnapshot: {
           appId: 'cli_existing',
           appSecret: 'secret-existing',
@@ -1557,6 +1801,23 @@ describe('hasRecoveredFeishuCreateMode', () => {
         },
       })
     ).toBe(true)
+  })
+
+  it('returns false when the previous create baseline is unknown', () => {
+    expect(
+      hasRecoveredFeishuCreateMode({
+        hasCapturedPreviousFeishuConfigSnapshot: false,
+        previousFeishuConfigSnapshot: null,
+        nextConfig: {
+          channels: {
+            feishu: {
+              appId: 'cli_created',
+              appSecret: 'secret-created',
+            },
+          },
+        },
+      })
+    ).toBe(false)
   })
 })
 
@@ -1719,5 +1980,47 @@ describe('mergeFeishuCreateModeBots', () => {
         id: '/lark/appSecret',
       },
     })
+  })
+})
+
+describe('mergeFeishuPairingAllowFromUsersIntoConfig', () => {
+  it('hydrates bot allowFrom from pairing users without dropping existing entries', () => {
+    const nextConfig = mergeFeishuPairingAllowFromUsersIntoConfig(
+      {
+        channels: {
+          feishu: {
+            appId: 'cli_default',
+            appSecret: 'secret-default',
+            allowFrom: [null, 'ou_existing'],
+            accounts: {
+              bot: {
+                appId: 'cli_bot',
+                appSecret: 'secret-bot',
+                allowFrom: [null],
+              },
+            },
+          },
+        },
+      },
+      {
+        default: [{ senderId: 'ou_scanned_default' }],
+        bot: [{ senderId: 'ou_scanned_bot' }],
+      }
+    )
+
+    expect(nextConfig.channels.feishu.allowFrom).toEqual(['ou_existing', 'ou_scanned_default'])
+    expect(nextConfig.channels.feishu.accounts.bot.allowFrom).toEqual(['ou_scanned_bot'])
+  })
+})
+
+describe('resolveFeishuInstallerAutoPairOpenId', () => {
+  it('matches the scanned openId to the created bot by appId', () => {
+    expect(resolveFeishuInstallerAutoPairOpenId({
+      authResults: [
+        { appId: 'cli_old', openId: 'ou_old' },
+        { appId: 'cli_new', openId: 'ou_new' },
+      ],
+      targetAppId: 'cli_new',
+    })).toBe('ou_new')
   })
 })

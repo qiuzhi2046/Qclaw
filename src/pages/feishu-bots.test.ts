@@ -211,6 +211,53 @@ describe('removeFeishuBotConfig', () => {
     expect(next.channels.feishu.appSecret).toBeUndefined()
     expect(next.channels.feishu.enabled).toBe(false)
   })
+
+  it('removes managed feishu agents and bindings after deleting the last bot', () => {
+    const next = removeFeishuBotConfig(
+      {
+        agents: {
+          list: [
+            { id: 'custom-agent', name: 'Custom Agent', workspace: '~/.openclaw/custom' },
+            { id: 'feishu-default', name: '机器人 Agent', workspace: '~/.openclaw/workspace-feishu-default' },
+            { id: 'feishu-bot', name: '机器人 Agent', workspace: '~/.openclaw/workspace-feishu-bot' },
+          ],
+        },
+        bindings: [
+          { agentId: 'custom-agent', match: { channel: 'discord' } },
+          { agentId: 'feishu-default', match: { channel: 'feishu', accountId: 'default' } },
+          { agentId: 'feishu-bot', match: { channel: 'feishu', accountId: 'bot' } },
+        ],
+        channels: {
+          feishu: {
+            enabled: true,
+            appId: 'cli_default',
+            appSecret: 'secret-default',
+          },
+        },
+      },
+      'default'
+    )
+
+    expect(next.channels.feishu.enabled).toBe(false)
+    expect(next.agents.list).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'custom-agent' })])
+    )
+    expect(next.agents.list).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ id: 'feishu-default' }),
+        expect.objectContaining({ id: 'feishu-bot' }),
+      ])
+    )
+    expect(next.bindings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ agentId: 'custom-agent' })])
+    )
+    expect(next.bindings).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ agentId: 'feishu-default' }),
+        expect.objectContaining({ agentId: 'feishu-bot' }),
+      ])
+    )
+  })
 })
 
 describe('activateFeishuBotConfig', () => {
@@ -373,6 +420,29 @@ describe('reconcileFeishuOfficialPluginConfig', () => {
     })
 
     expect(next.plugins.installs['openclaw-lark']).toBeDefined()
+  })
+
+  it('normalizes invalid allowFrom entries for default and account bots', () => {
+    const next = reconcileFeishuOfficialPluginConfig({
+      channels: {
+        feishu: {
+          enabled: true,
+          appId: 'cli_default',
+          appSecret: 'secret-default',
+          allowFrom: [null, 'ou_owner', ''],
+          accounts: {
+            bot: {
+              appId: 'cli_bot',
+              appSecret: 'secret-bot',
+              allowFrom: [null, '', 'ou_member'],
+            },
+          },
+        },
+      },
+    })
+
+    expect(next.channels.feishu.allowFrom).toEqual(['ou_owner'])
+    expect(next.channels.feishu.accounts.bot.allowFrom).toEqual(['ou_member'])
   })
 })
 

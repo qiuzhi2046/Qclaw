@@ -4,6 +4,7 @@ const {
   applyConfigPatchGuardedMock,
   getOpenClawPathsMock,
   installPluginNpxMock,
+  reconcileManagedPluginConfigMock,
   readConfigMock,
   repairIncompatibleExtensionPluginsMock,
   reloadGatewayForConfigChangeMock,
@@ -11,6 +12,7 @@ const {
   applyConfigPatchGuardedMock: vi.fn(),
   getOpenClawPathsMock: vi.fn(),
   installPluginNpxMock: vi.fn(),
+  reconcileManagedPluginConfigMock: vi.fn(),
   readConfigMock: vi.fn(),
   repairIncompatibleExtensionPluginsMock: vi.fn(),
   reloadGatewayForConfigChangeMock: vi.fn(),
@@ -27,6 +29,10 @@ vi.mock('../openclaw-config-coordinator', () => ({
   applyConfigPatchGuarded: applyConfigPatchGuardedMock,
 }))
 
+vi.mock('../managed-plugin-config-reconciler', () => ({
+  reconcileManagedPluginConfig: reconcileManagedPluginConfigMock,
+}))
+
 vi.mock('../gateway-lifecycle-controller', () => ({
   reloadGatewayForConfigChange: reloadGatewayForConfigChangeMock,
 }))
@@ -40,10 +46,68 @@ describe('getFeishuOfficialPluginState', () => {
     applyConfigPatchGuardedMock.mockReset()
     getOpenClawPathsMock.mockReset()
     installPluginNpxMock.mockReset()
+    reconcileManagedPluginConfigMock.mockReset()
     readConfigMock.mockReset()
     repairIncompatibleExtensionPluginsMock.mockReset()
     reloadGatewayForConfigChangeMock.mockReset()
     applyConfigPatchGuardedMock.mockResolvedValue({ ok: true })
+    reconcileManagedPluginConfigMock.mockImplementation(async (options) => ({
+      ok: true,
+      channelId: options.channelId,
+      scope: options.scope || 'plugins-only',
+      apply: options.apply === true,
+      changed: true,
+      written: options.apply === true,
+      configReadFailed: false,
+      retryable: false,
+      message: 'ok',
+      beforeConfig: options.currentConfig || null,
+      afterConfig: options.desiredConfig || options.currentConfig || {},
+      removedFrom: {
+        allow: [],
+        entries: [],
+        installs: [],
+        channels: [],
+      },
+      orphanedPluginIds: [],
+      prunedPluginIds: [],
+      manifest: {
+        channelId: options.channelId,
+        scope: options.scope || 'plugins-only',
+        apply: options.apply === true,
+        changed: true,
+        written: options.apply === true,
+        retryable: false,
+        removedFrom: {
+          allow: [],
+          entries: [],
+          installs: [],
+          channels: [],
+        },
+        orphanedPluginIds: [],
+        prunedPluginIds: [],
+        runtime: {
+          configPath: options.runtimeContext?.configPath || null,
+          homeDir: options.runtimeContext?.homeDir || null,
+          openclawVersion: options.runtimeContext?.openclawVersion || null,
+        },
+      },
+      writeResult: {
+        ok: true,
+        blocked: false,
+        wrote: options.apply === true,
+        target: 'config',
+        snapshotCreated: false,
+        snapshot: null,
+        changedJsonPaths: ['$.plugins'],
+        ownershipSummary: null,
+        gatewayApply: {
+          ok: true,
+          requestedAction: 'restart',
+          appliedAction: 'restart',
+        },
+      },
+    }))
     repairIncompatibleExtensionPluginsMock.mockResolvedValue({
       ok: true,
       repaired: false,
@@ -329,7 +393,7 @@ describe('getFeishuOfficialPluginState', () => {
         ['openclaw-lark']
       )
       expect(result.state.installedOnDisk).toBe(true)
-      expect(applyConfigPatchGuardedMock).toHaveBeenCalled()
+      expect(reconcileManagedPluginConfigMock).toHaveBeenCalled()
       expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('feishu-official-plugin-install')
     } finally {
       accessSpy.mockRestore()
@@ -353,7 +417,7 @@ describe('getFeishuOfficialPluginState', () => {
       expect(result.state.configAvailable).toBe(false)
       expect(result.message).toBe('飞书插件预检查失败')
       expect(result.stderr).toContain('配置读取失败')
-      expect(applyConfigPatchGuardedMock).not.toHaveBeenCalled()
+      expect(reconcileManagedPluginConfigMock).not.toHaveBeenCalled()
       expect(repairIncompatibleExtensionPluginsMock).not.toHaveBeenCalled()
       expect(installPluginNpxMock).not.toHaveBeenCalled()
       expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
@@ -388,8 +452,103 @@ describe('getFeishuOfficialPluginState', () => {
       expect(installPluginNpxMock).not.toHaveBeenCalled()
       expect(result.state.installedOnDisk).toBe(true)
       expect(result.state.officialPluginConfigured).toBe(true)
-      expect(applyConfigPatchGuardedMock).toHaveBeenCalledTimes(1)
-      expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith('feishu-official-plugin-config-sync')
+      expect(reconcileManagedPluginConfigMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: 'feishu',
+          apply: true,
+          applyGatewayPolicy: true,
+          scope: 'plugins-only',
+        })
+      )
+      expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
+    } finally {
+      accessSpy.mockRestore()
+    }
+  })
+
+  it('stops Feishu readiness when strict reconciler rejects final sync', async () => {
+    getOpenClawPathsMock.mockResolvedValue({
+      homeDir: '/Users/alice/.openclaw',
+      configFile: '/Users/alice/.openclaw/openclaw.json',
+    })
+    readConfigMock.mockResolvedValue({
+      channels: {
+        feishu: {
+          enabled: true,
+          appId: 'cli_default',
+          appSecret: 'secret-default',
+        },
+      },
+    })
+    reconcileManagedPluginConfigMock.mockResolvedValue({
+      ok: false,
+      channelId: 'feishu',
+      scope: 'plugins-only',
+      apply: true,
+      changed: true,
+      written: false,
+      configReadFailed: true,
+      retryable: true,
+      failureReason: 'config-read-failed',
+      message: 'OpenClaw 配置读取失败，已停止写入。',
+      beforeConfig: null,
+      afterConfig: null,
+      removedFrom: {
+        allow: [],
+        entries: [],
+        installs: [],
+        channels: [],
+      },
+      orphanedPluginIds: [],
+      prunedPluginIds: [],
+      manifest: {
+        channelId: 'feishu',
+        scope: 'plugins-only',
+        apply: true,
+        changed: true,
+        written: false,
+        retryable: true,
+        removedFrom: {
+          allow: [],
+          entries: [],
+          installs: [],
+          channels: [],
+        },
+        orphanedPluginIds: [],
+        prunedPluginIds: [],
+        runtime: {
+          configPath: '/Users/alice/.openclaw/openclaw.json',
+          homeDir: '/Users/alice/.openclaw',
+          openclawVersion: null,
+        },
+      },
+    })
+
+    const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
+    const accessSpy = vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined)
+
+    try {
+      const { ensureFeishuOfficialPluginReady } = await import('../feishu-official-plugin-state')
+      const result = await ensureFeishuOfficialPluginReady()
+
+      expect(result.ok).toBe(false)
+      expect(result.message).toBe('飞书插件预检查失败')
+      expect(result.stderr).toContain('配置读取失败')
+      expect(reconcileManagedPluginConfigMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: 'feishu',
+          scope: 'plugins-only',
+          apply: true,
+          applyGatewayPolicy: true,
+          runtimeContext: expect.objectContaining({
+            configPath: '/Users/alice/.openclaw/openclaw.json',
+            homeDir: '/Users/alice/.openclaw',
+          }),
+        })
+      )
+      expect(repairIncompatibleExtensionPluginsMock).not.toHaveBeenCalled()
+      expect(installPluginNpxMock).not.toHaveBeenCalled()
+      expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
     } finally {
       accessSpy.mockRestore()
     }
@@ -515,7 +674,7 @@ describe('getFeishuOfficialPluginState', () => {
 
       expect(result.ok).toBe(false)
       expect(result.installedThisRun).toBe(false)
-      expect(applyConfigPatchGuardedMock).toHaveBeenCalledTimes(1)
+      expect(reconcileManagedPluginConfigMock).toHaveBeenCalledTimes(1)
       expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
       expect(result.state.normalizedConfig.agents.list).toEqual(
         expect.arrayContaining([
@@ -551,8 +710,59 @@ describe('getFeishuOfficialPluginState', () => {
         },
       })
 
-    applyConfigPatchGuardedMock
-      .mockResolvedValueOnce({ ok: true })
+    reconcileManagedPluginConfigMock
+      .mockResolvedValueOnce({
+        ok: true,
+        channelId: 'feishu',
+        scope: 'plugins-only',
+        apply: true,
+        changed: true,
+        written: true,
+        configReadFailed: false,
+        retryable: false,
+        message: 'ok',
+        beforeConfig: {},
+        afterConfig: {},
+        removedFrom: {
+          allow: [],
+          entries: [],
+          installs: [],
+          channels: [],
+        },
+        orphanedPluginIds: [],
+        prunedPluginIds: [],
+        manifest: {
+          channelId: 'feishu',
+          scope: 'plugins-only',
+          apply: true,
+          changed: true,
+          written: true,
+          retryable: false,
+          removedFrom: {
+            allow: [],
+            entries: [],
+            installs: [],
+            channels: [],
+          },
+          orphanedPluginIds: [],
+          prunedPluginIds: [],
+          runtime: {
+            configPath: null,
+            homeDir: null,
+            openclawVersion: null,
+          },
+        },
+        writeResult: {
+          ok: true,
+          blocked: false,
+          wrote: true,
+          target: 'config',
+          snapshotCreated: false,
+          snapshot: null,
+          changedJsonPaths: ['$.plugins'],
+          ownershipSummary: null,
+        },
+      })
       .mockRejectedValueOnce(new Error('after-install-patch-failed'))
 
     const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')

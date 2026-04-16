@@ -24,4 +24,16 @@ describe('electron phase4 contract', () => {
     expect(source).toContain('checkCombinedUpdate: () => Promise<CombinedUpdateCheckResult>')
     expect(source).toContain('runCombinedUpdate: () => Promise<CombinedUpdateRunResult>')
   })
+
+  it('exposes structured channel installer guardrail fields to the renderer contract', async () => {
+    const source = await readFile(path.join(process.cwd(), 'src/types/electron.d.ts'), 'utf8')
+
+    expect(source).toContain('ChannelInstallerGuardrailStatus')
+    expect(source).toContain('interface FeishuInstallerSessionSnapshot')
+    expect(source).toContain('interface WeixinInstallerSessionSnapshot')
+    expect(source).toContain('guardrail?: ChannelInstallerGuardrailStatus')
+    expect(source).toContain('guardrail?: ChannelInstallerGuardrailStatus')
+    expect(source).toContain('onFeishuInstallerEvent: (listener: (payload: FeishuInstallerSessionEvent) => void) => () => void')
+    expect(source).toContain('onWeixinInstallerEvent: (listener: (payload: WeixinInstallerSessionEvent) => void) => () => void')
+  })
 })

@@ -67,6 +67,7 @@ import {
   finalizePluginInstallSafetyResult,
   repairIncompatibleExtensionPlugins as repairIncompatibleExtensionPluginsOnDisk,
   reconcileIncompatibleExtensionPlugins,
+  scanIncompatibleExtensionPlugins as scanIncompatibleExtensionPluginsOnDisk,
   type RepairIncompatibleExtensionsResult,
 } from './plugin-install-safety'
 import {
@@ -872,6 +873,15 @@ export async function commitSelectedWindowsActiveRuntimeSnapshot(
     }
   )
 
+  if (reconciledRuntimeSnapshot.busy) {
+    await appendEnvCheckDiagnostic('main-windows-runtime-selection-busy', {
+      previousStateDir: String(previousSelectedRuntimeSnapshot?.stateDir || '').trim() || null,
+      nextStateDir: String(nextSelectedRuntimeSnapshot?.stateDir || '').trim() || null,
+      message: reconciledRuntimeSnapshot.message || null,
+    }).catch(() => undefined)
+    return previousSelectedRuntimeSnapshot
+  }
+
   try {
     const committedSelectedRuntimeSnapshot = setSelectedRuntimeSnapshot(nextSelectedRuntimeSnapshot)
     persistCachedSnapshot(reconciledRuntimeSnapshot.snapshot)
@@ -1164,6 +1174,10 @@ interface ReadConfigOptions {
   configPath?: string | null
 }
 
+interface WriteConfigOptions {
+  configPath?: string | null
+}
+
 interface ReadEnvFileOptions {
   activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null
   openClawPaths?: OpenClawPaths | null
@@ -1427,6 +1441,10 @@ export interface RepairIncompatibleExtensionPluginsOptions {
   scopePluginIds?: string[]
   quarantineOfficialManagedPlugins?: boolean
   restoreConfiguredManagedChannels?: boolean
+  runtimeContext?: {
+    configPath?: string | null
+    homeDir?: string | null
+  }
 }
 
 export interface ScanIncompatibleExtensionPluginsOptions {
@@ -1484,7 +1502,7 @@ export async function scanIncompatibleExtensionPlugins(
     }
   }
 
-  return repairIncompatibleExtensionPluginsOnDisk({
+  return scanIncompatibleExtensionPluginsOnDisk({
     homeDir,
     readConfig,
     writeConfig,
@@ -1496,12 +1514,20 @@ export async function scanIncompatibleExtensionPlugins(
 export async function repairIncompatibleExtensionPlugins(
   options: RepairIncompatibleExtensionPluginsOptions = {}
 ): Promise<RepairIncompatibleExtensionsResult> {
+  const runtimeHomeDir = String(options.runtimeContext?.homeDir || '').trim()
+  const runtimeConfigPath = String(options.runtimeContext?.configPath || '').trim()
   await appendEnvCheckDiagnostic('main-plugin-repair-start', {
     restoreConfiguredManagedChannels: options.restoreConfiguredManagedChannels === true,
     scopePluginIds: options.scopePluginIds || [],
     quarantineOfficialManagedPlugins: options.quarantineOfficialManagedPlugins === true,
+    runtimeContextPinned: Boolean(runtimeHomeDir || runtimeConfigPath),
   })
-  const openClawPaths = await resolveOpenClawPluginRepairPaths()
+  const openClawPaths = runtimeHomeDir
+    ? resolveOpenClawPathsFromStateRoot({
+        stateRoot: runtimeHomeDir,
+        ...(runtimeConfigPath ? { configFile: runtimeConfigPath } : {}),
+      })
+    : await resolveOpenClawPluginRepairPaths()
   const homeDir = String(openClawPaths?.homeDir || '').trim()
   const configPath = String(openClawPaths?.configFile || '').trim()
   if (!homeDir) {
@@ -1523,7 +1549,16 @@ export async function repairIncompatibleExtensionPlugins(
       : null
     : null
 
-  const result = await scanIncompatibleExtensionPlugins({
+  const repairReadConfig = configPath
+    ? () => readConfig({ configPath })
+    : readConfig
+  const repairWriteConfig = configPath
+    ? (config: Record<string, any>) => writeConfig(config, { configPath })
+    : writeConfig
+  const result = await repairIncompatibleExtensionPluginsOnDisk({
+    homeDir,
+    readConfig: repairReadConfig,
+    writeConfig: repairWriteConfig,
     scopePluginIds: options.scopePluginIds,
     quarantineOfficialManagedPlugins: options.quarantineOfficialManagedPlugins,
   })
@@ -3841,8 +3876,14 @@ export async function gatewayForceRestart(): Promise<CliResult> {
   })
 }
 
-export async function gatewayStop(): Promise<CliResult> {
-  return runCli(['gateway', 'stop'], MAIN_RUNTIME_POLICY.cli.gatewayStopTimeoutMs, 'gateway')
+export async function gatewayStop(options: GatewayMutationCommandOptions = {}): Promise<CliResult> {
+  const activeRuntimeSnapshot =
+    options.activeRuntimeSnapshot || await resolveWindowsActiveRuntimeSnapshotForRead()
+  return runCli(['gateway', 'stop'], MAIN_RUNTIME_POLICY.cli.gatewayStopTimeoutMs, 'gateway', {
+    activeRuntimeSnapshot: activeRuntimeSnapshot || undefined,
+    skipConfigRepairPreflight: true,
+    skipPermissionAutoRepair: true,
+  })
 }
 
 export async function getStatus(): Promise<CliResult> {
@@ -3893,14 +3934,17 @@ export async function readConfig(options: ReadConfigOptions = {}): Promise<Recor
   }
 }
 
-export async function writeConfig(config: Record<string, any>): Promise<void> {
+export async function writeConfig(config: Record<string, any>, options: WriteConfigOptions = {}): Promise<void> {
+  const requestedConfigPath = String(options.configPath || '').trim()
   await runFsWithPermissionAutoRepair(
     async () => {
-      const openClawPaths = await getOpenClawPaths()
-      await mkdir(openClawPaths.homeDir, { recursive: true })
+      const openClawPaths = requestedConfigPath ? null : await getOpenClawPaths()
+      const configFile = requestedConfigPath || openClawPaths?.configFile || ''
+      const configDir = requestedConfigPath ? dirname(configFile) : openClawPaths?.homeDir || dirname(configFile)
+      await mkdir(configDir, { recursive: true })
       const repairedConfig = repairKnownProviderConfigGaps(config).config || config
       const sanitizedConfig = sanitizeManagedPluginConfig(repairedConfig).config
-      await atomicWriteJson(openClawPaths.configFile, sanitizedConfig, {
+      await atomicWriteJson(configFile, sanitizedConfig, {
         description: 'OpenClaw 主配置',
       })
     },

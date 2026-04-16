@@ -36,6 +36,10 @@ const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 const { access, cp, mkdir } = fs.promises
 
+export interface GuardedWriteConfigOptions {
+  configPath?: string | null
+}
+
 function normalizeDiagnosticText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -317,7 +321,8 @@ export async function prepareManagedConfigWrite(
 
 export async function guardedWriteConfig(
   request: OpenClawGuardedConfigWriteRequest,
-  preferredCandidate?: OpenClawInstallCandidate | null
+  preferredCandidate?: OpenClawInstallCandidate | null,
+  options: GuardedWriteConfigOptions = {}
 ): Promise<OpenClawGuardedWriteResult> {
   const preparation = await ensureManagedWritePreparation(preferredCandidate)
   if (!preparation.ok || !preparation.candidate) {
@@ -336,7 +341,9 @@ export async function guardedWriteConfig(
   }
 
   try {
-    const currentConfig = await readConfig()
+    const configPath = normalizeDiagnosticText(options.configPath)
+    const ownershipConfigPath = configPath || preparation.candidate.configPath
+    const currentConfig = await readConfig(configPath ? { configPath } : undefined)
     const changedJsonPaths = collectChangedJsonPaths(currentConfig, request.config)
     const reason = normalizeDiagnosticText(request.reason) || 'unknown'
 
@@ -373,9 +380,9 @@ export async function guardedWriteConfig(
       })
     }
 
-    await writeConfig(request.config)
+    await writeConfig(request.config, configPath ? { configPath } : undefined)
     const ownershipEntry = await recordManagedConfigWrite(preparation.candidate, {
-      filePath: preparation.candidate.configPath,
+      filePath: ownershipConfigPath,
       jsonPaths: changedJsonPaths,
     })
 

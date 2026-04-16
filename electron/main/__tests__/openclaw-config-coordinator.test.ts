@@ -136,6 +136,160 @@ describe('openclaw config coordinator', () => {
     expect(runCliMock).not.toHaveBeenCalled()
   })
 
+  it('keeps the legacy fallback-to-empty latest config behavior unless strictRead is enabled', async () => {
+    readConfigMock.mockResolvedValue(null)
+    guardedWriteConfigMock.mockResolvedValue({
+      ok: true,
+      blocked: false,
+      wrote: true,
+      target: 'config',
+      snapshotCreated: false,
+      snapshot: null,
+      changedJsonPaths: ['$.models.openai.enabled'],
+      ownershipSummary: null,
+      message: 'ok',
+    })
+
+    await applyConfigPatchGuarded(
+      {
+        beforeConfig: {
+          models: {
+            openai: {
+              enabled: false,
+            },
+          },
+        },
+        afterConfig: {
+          models: {
+            openai: {
+              enabled: true,
+            },
+          },
+        },
+        reason: 'unknown',
+      },
+      undefined,
+      {
+        applyGatewayPolicy: false,
+      }
+    )
+
+    expect(guardedWriteConfigMock).toHaveBeenCalledWith(
+      {
+        config: {
+          models: {
+            openai: {
+              enabled: true,
+            },
+          },
+        },
+        reason: 'unknown',
+      },
+      undefined
+    )
+  })
+
+  it('blocks strict config patches when the latest config cannot be read', async () => {
+    readConfigMock.mockResolvedValue(null)
+
+    const result = await applyConfigPatchGuarded(
+      {
+        beforeConfig: {
+          plugins: {
+            allow: ['wecom'],
+          },
+        },
+        afterConfig: {
+          plugins: {
+            allow: ['wecom-openclaw-plugin'],
+          },
+        },
+        reason: 'managed-channel-plugin-repair',
+      },
+      undefined,
+      {
+        strictRead: true,
+        applyGatewayPolicy: false,
+      }
+    )
+
+    expect(result).toMatchObject({
+      ok: false,
+      blocked: true,
+      wrote: false,
+      errorCode: 'config_read_failed',
+    })
+    expect(result.message).toContain('配置读取失败')
+    expect(guardedWriteConfigMock).not.toHaveBeenCalled()
+  })
+
+  it('uses a fixed config path for latest read and guarded write when a runtime context is provided', async () => {
+    readConfigMock.mockResolvedValue({
+      plugins: {
+        allow: ['wecom'],
+      },
+      ui: {
+        compact: true,
+      },
+    })
+    guardedWriteConfigMock.mockResolvedValue({
+      ok: true,
+      blocked: false,
+      wrote: true,
+      target: 'config',
+      snapshotCreated: false,
+      snapshot: null,
+      changedJsonPaths: ['$.plugins.allow'],
+      ownershipSummary: null,
+      message: 'ok',
+    })
+
+    await applyConfigPatchGuarded(
+      {
+        beforeConfig: {
+          plugins: {
+            allow: ['wecom'],
+          },
+        },
+        afterConfig: {
+          plugins: {
+            allow: ['wecom-openclaw-plugin'],
+          },
+        },
+        reason: 'managed-channel-plugin-repair',
+      },
+      undefined,
+      {
+        runtimeContext: {
+          configPath: 'C:/Users/demo/.openclaw/openclaw.json',
+        },
+        strictRead: true,
+        applyGatewayPolicy: false,
+      }
+    )
+
+    expect(readConfigMock).toHaveBeenCalledWith({
+      configPath: 'C:/Users/demo/.openclaw/openclaw.json',
+    })
+    expect(guardedWriteConfigMock).toHaveBeenCalledWith(
+      {
+        config: {
+          plugins: {
+            allow: ['wecom-openclaw-plugin'],
+          },
+          ui: {
+            compact: true,
+          },
+        },
+        reason: 'managed-channel-plugin-repair',
+      },
+      undefined,
+      {
+        configPath: 'C:/Users/demo/.openclaw/openclaw.json',
+      }
+    )
+  })
+
   it('serializes concurrent config patch requests through one write queue', async () => {
     const firstWrite = createDeferred<any>()
 

@@ -60,6 +60,7 @@ describe('official channel adapters', () => {
     const { getOfficialChannelStatus } = await import('../official-channel-adapters')
     const result = await getOfficialChannelStatus('dingtalk')
 
+    expect(repairDingtalkOfficialChannelMock).not.toHaveBeenCalled()
     expect(result.summary).toContain('已安装并已注册')
     expect(result.stages).toEqual([
       {

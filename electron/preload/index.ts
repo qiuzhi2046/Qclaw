@@ -9,9 +9,14 @@ import type {
   FeishuBotDiagnosticListenRequest,
   FeishuBotDiagnosticSendRequest,
 } from '../../src/shared/feishu-diagnostics'
+import type { ChannelInstallerGuardrailStatus } from '../../src/shared/channel-installer-session'
 
 const OPEN_CONTACT_MODAL_CHANNEL = 'app:open-contact-modal'
 const OPEN_MODELS_PAGE_CHANNEL = 'app:open-models-page'
+
+type InstallerEventPayload = Record<string, any> & {
+  guardrail?: ChannelInstallerGuardrailStatus
+}
 
 function subscribeToChannel<T>(channel: string, listener: (payload: T) => void) {
   const wrapped = (_event: unknown, payload: T) => listener(payload)
@@ -188,12 +193,12 @@ export const api = {
   answerFeishuInstallerPrompt: (sessionId: string, promptId: string, resolution: 'confirm' | 'cancel') =>
     ipcRenderer.invoke('feishu:installer:prompt:answer', sessionId, promptId, resolution),
   stopFeishuInstaller: () => ipcRenderer.invoke('feishu:installer:stop'),
-  onFeishuInstallerEvent: (listener: (payload: Record<string, any>) => void) =>
+  onFeishuInstallerEvent: (listener: (payload: InstallerEventPayload) => void) =>
     subscribeToChannel('feishu:installer:event', listener),
   getWeixinInstallerState: () => ipcRenderer.invoke('weixin:installer:state:get'),
   startWeixinInstaller: () => ipcRenderer.invoke('weixin:installer:start'),
   stopWeixinInstaller: () => ipcRenderer.invoke('weixin:installer:stop'),
-  onWeixinInstallerEvent: (listener: (payload: Record<string, any>) => void) =>
+  onWeixinInstallerEvent: (listener: (payload: InstallerEventPayload) => void) =>
     subscribeToChannel('weixin:installer:event', listener),
   listWeixinAccounts: () => ipcRenderer.invoke('weixin:accounts:list'),
   removeWeixinAccount: (accountId: string) => ipcRenderer.invoke('weixin:accounts:remove', accountId),

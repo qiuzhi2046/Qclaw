@@ -13,6 +13,11 @@ let configWriteQueue: Promise<void> = Promise.resolve()
 
 export interface ApplyConfigPatchGuardedOptions {
   applyGatewayPolicy?: boolean
+  strictRead?: boolean
+  configPath?: string | null
+  runtimeContext?: {
+    configPath?: string | null
+  } | null
 }
 
 function enqueueConfigWriteTask<T>(task: () => Promise<T>): Promise<T> {
@@ -134,6 +139,25 @@ function appendMessage(baseMessage: string | undefined, extraMessage: string): s
   return `${normalizedBase} ${extraMessage}`
 }
 
+function normalizeOptionalPath(value: string | null | undefined): string {
+  return String(value || '').trim()
+}
+
+function buildStrictReadFailureResult(message: string): OpenClawGuardedWriteResult {
+  return {
+    ok: false,
+    blocked: true,
+    wrote: false,
+    target: 'config',
+    snapshotCreated: false,
+    snapshot: null,
+    changedJsonPaths: [],
+    ownershipSummary: null,
+    message,
+    errorCode: 'config_read_failed',
+  }
+}
+
 async function applyGatewayDecision(action: 'none' | 'hot-reload' | 'restart'): Promise<{
   ok: boolean
   mode: 'none' | 'hot-reload' | 'restart'
@@ -191,22 +215,27 @@ export async function applyConfigPatchGuarded(
   return enqueueConfigWriteTask(async () => {
     const beforeConfig = normalizeConfig(request.beforeConfig)
     const afterConfig = normalizeConfig(request.afterConfig)
+    const configPath = normalizeOptionalPath(options.configPath || options.runtimeContext?.configPath || null)
     const requestedChangedJsonPaths = collectChangedJsonPaths(beforeConfig, afterConfig)
     if (requestedChangedJsonPaths.length === 0) {
       return buildNoopResult()
     }
 
-    const latestConfig = normalizeConfig(await readConfig().catch(() => null))
+    const latestConfigRaw = await readConfig(configPath ? { configPath } : undefined).catch(() => null)
+    if (options.strictRead === true && !isPlainObject(latestConfigRaw)) {
+      return buildStrictReadFailureResult('OpenClaw 配置读取失败，已停止写入以避免覆盖现有配置。')
+    }
+    const latestConfig = normalizeConfig(latestConfigRaw)
     const rebasedConfig = rebaseConfigValue(beforeConfig, afterConfig, latestConfig)
     const nextConfig = normalizeConfig(isPlainObject(rebasedConfig) ? rebasedConfig : null)
 
-    const writeResult = await guardedWriteConfig(
-      {
-        config: nextConfig,
-        reason: request.reason,
-      },
-      preferredCandidate
-    )
+    const writeRequest = {
+      config: nextConfig,
+      reason: request.reason,
+    }
+    const writeResult = configPath
+      ? await guardedWriteConfig(writeRequest, preferredCandidate, { configPath })
+      : await guardedWriteConfig(writeRequest, preferredCandidate)
 
     if (writeResult.ok && writeResult.wrote && options.applyGatewayPolicy !== false) {
       const decision = resolveGatewayApplyAction({

@@ -146,6 +146,7 @@ export default function ChannelsPage() {
   const [loading, setLoading] = useState(!initialSnapshot)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const [channelConfigNotice, setChannelConfigNotice] = useState('')
   const [showConfigModal, setShowConfigModal] = useState(false)
   const [showPairingModal, setShowPairingModal] = useState(false)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
@@ -230,13 +231,9 @@ export default function ChannelsPage() {
 
       const normalizedConfig = feishuPluginState?.normalizedConfig || sanitizeFeishuPluginConfig(config)
       if (feishuPluginState?.configChanged && feishuPluginState.configAvailable !== false) {
-        void window.api.applyConfigPatchGuarded({
-          beforeConfig: config,
-          afterConfig: normalizedConfig,
-          reason: 'unknown',
-        }).catch(() => {
-          // Keep listing channels even if the background healing write fails.
-        })
+        setChannelConfigNotice('检测到飞书官方插件配置需要同步。请打开飞书渠道执行显式修复或重新完成配置；本页不会在后台静默写入 managed channel 配置。')
+      } else {
+        setChannelConfigNotice('')
       }
       setLegacyFeishuAgentIds(listResidualLegacyFeishuAgentIds(normalizedConfig))
 
@@ -607,6 +604,7 @@ export default function ChannelsPage() {
         const feishuPluginState = await window.api.getFeishuOfficialPluginState()
         const beforeConfig = JSON.parse(JSON.stringify(config)) as Record<string, any>
         let nextConfig = JSON.parse(JSON.stringify(config)) as Record<string, any>
+        let weixinAccountStateToRemove = ''
         if (channel.channelId === 'feishu' && channel.pairingAccountId) {
           nextConfig = removeFeishuBotConfigForPluginState(
             config,
@@ -614,10 +612,7 @@ export default function ChannelsPage() {
             feishuPluginState.installedOnDisk
           )
         } else if (channel.channelId === 'openclaw-weixin' && channel.pairingAccountId) {
-          const removeStateResult = await window.api.removeWeixinAccount(channel.pairingAccountId)
-          if (!removeStateResult.ok) {
-            throw new Error(`删除个人微信账号失败: ${channel.pairingAccountId}`)
-          }
+          weixinAccountStateToRemove = channel.pairingAccountId
           nextConfig = removeWeixinChannelAccountConfig(config, channel.pairingAccountId)
         } else {
           if (!nextConfig.channels || typeof nextConfig.channels !== 'object') {
@@ -632,6 +627,12 @@ export default function ChannelsPage() {
         })
         if (!writeResult.ok) {
           throw new Error(writeResult.message || '配置文件写入失败')
+        }
+        if (weixinAccountStateToRemove) {
+          const removeStateResult = await window.api.removeWeixinAccount(weixinAccountStateToRemove)
+          if (!removeStateResult.ok) {
+            throw new Error(`删除个人微信账号状态失败: ${weixinAccountStateToRemove}`)
+          }
         }
         removeBotDisplayName(channel.id)
         await fetchChannels({ background: true })
@@ -801,6 +802,12 @@ export default function ChannelsPage() {
       {error && (
         <Alert color="red" title="错误" onClose={() => setError('')}>
           {error}
+        </Alert>
+      )}
+
+      {channelConfigNotice && (
+        <Alert color="yellow" title="需要显式同步飞书配置" onClose={() => setChannelConfigNotice('')}>
+          {channelConfigNotice}
         </Alert>
       )}
 

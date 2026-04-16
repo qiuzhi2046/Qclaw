@@ -35,6 +35,21 @@ describe('plugin repair guardrails', () => {
     expect(nodeRuntimeSource).not.toContain('ELECTRON_RUN_AS_NODE')
   })
 
+  it('keeps dry-run plugin scans separate from entry smoke tests and writes', () => {
+    const pluginSafetySource = readMainSource('plugin-install-safety.ts')
+    const scanStart = pluginSafetySource.indexOf('export async function scanIncompatibleExtensionPlugins(')
+    const repairStart = pluginSafetySource.indexOf('export function buildIncompatiblePluginRepairSummary', scanStart)
+
+    expect(scanStart).toBeGreaterThan(-1)
+    expect(repairStart).toBeGreaterThan(scanStart)
+
+    const scanBlock = pluginSafetySource.slice(scanStart, repairStart)
+    expect(scanBlock).toContain('findPotentialIncompatibleExtensionPlugins')
+    expect(scanBlock).not.toContain('smokeTestPluginEntry')
+    expect(scanBlock).not.toContain('quarantinePlugins')
+    expect(scanBlock).not.toContain('pruneStalePluginConfigEntries')
+  })
+
   it('keeps IPC plugin repair options aligned with the CLI repair contract', () => {
     const cliSource = readMainSource('cli.ts')
     const ipcHandlersSource = readMainSource('ipc-handlers.ts')

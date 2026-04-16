@@ -5,9 +5,9 @@ import {
 } from '../../src/lib/feishu-multi-bot-routing'
 import { getOpenClawPaths, installPluginNpx, readConfig, repairIncompatibleExtensionPlugins } from './cli'
 import { reconcileTrustedPluginAllowlist, sanitizeManagedPluginConfig } from './openclaw-plugin-config'
-import { applyConfigPatchGuarded } from './openclaw-config-coordinator'
 import { FEISHU_PLUGIN_NPX_SPECIFIER } from './plugin-install-npx'
 import { reloadGatewayForConfigChange } from './gateway-lifecycle-controller'
+import { reconcileManagedPluginConfig } from './managed-plugin-config-reconciler'
 
 const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs')
 const path = process.getBuiltinModule('node:path') as typeof import('node:path')
@@ -193,7 +193,9 @@ async function isFeishuOfficialPluginInstalledOnDisk(homeDir: string): Promise<b
 export interface FeishuOfficialPluginState {
   pluginId: string
   installedOnDisk: boolean
+  homeDir: string
   installPath: string
+  configPath: string
   officialPluginConfigured: boolean
   legacyPluginIdsPresent: string[]
   configChanged: boolean
@@ -211,29 +213,66 @@ export interface EnsureFeishuOfficialPluginReadyResult {
   message?: string
 }
 
-async function applyNormalizedConfigIfNeeded(state: FeishuOfficialPluginState): Promise<boolean> {
-  if (!state.configChanged) return false
+export interface FeishuOfficialPluginRuntimeContext {
+  configPath?: string | null
+  homeDir?: string | null
+}
+
+export interface EnsureFeishuOfficialPluginReadyOptions {
+  runtimeContext?: FeishuOfficialPluginRuntimeContext | null
+}
+
+function normalizeRuntimeContext(
+  context: FeishuOfficialPluginRuntimeContext | null | undefined
+): { configPath: string; homeDir: string } {
+  return {
+    configPath: String(context?.configPath || '').trim(),
+    homeDir: String(context?.homeDir || '').trim(),
+  }
+}
+
+async function applyNormalizedConfigIfNeeded(state: FeishuOfficialPluginState): Promise<{
+  applied: boolean
+  gatewayApplied: boolean
+}> {
+  if (!state.configChanged) {
+    return {
+      applied: false,
+      gatewayApplied: false,
+    }
+  }
   if (!state.configAvailable) {
     throw new Error('当前 OpenClaw 配置读取失败，已停止飞书插件配置同步以避免覆盖现有配置')
   }
 
-  const currentConfig = await readConfig().catch(() => null)
+  const currentConfig = await readConfig(
+    state.configPath ? { configPath: state.configPath } : undefined
+  ).catch(() => null)
   if (!hasOwnRecord(currentConfig)) {
     throw new Error('当前 OpenClaw 配置读取失败，已停止飞书插件配置同步以避免覆盖现有配置')
   }
-  const writeResult = await applyConfigPatchGuarded(
+  const reconcileResult = await reconcileManagedPluginConfig(
     {
-      beforeConfig: currentConfig,
-      afterConfig: state.normalizedConfig,
-      reason: 'unknown',
+      channelId: 'feishu',
+      currentConfig,
+      desiredConfig: state.normalizedConfig,
+      installedOnDisk: state.installedOnDisk,
+      runtimeContext: {
+        configPath: state.configPath || undefined,
+        homeDir: state.homeDir || undefined,
+      },
+      scope: 'plugins-only',
+      apply: true,
+      applyGatewayPolicy: true,
     },
-    undefined,
-    { applyGatewayPolicy: false }
   )
-  if (!writeResult.ok) {
-    throw new Error(writeResult.message || '飞书官方插件配置归一化失败')
+  if (!reconcileResult.ok) {
+    throw new Error(reconcileResult.message || '飞书官方插件配置归一化失败')
   }
-  return true
+  return {
+    applied: reconcileResult.written || reconcileResult.changed,
+    gatewayApplied: reconcileResult.writeResult?.gatewayApply?.ok === true,
+  }
 }
 
 async function reloadGatewayAfterFeishuRepair(reason: string): Promise<void> {
@@ -243,13 +282,23 @@ async function reloadGatewayAfterFeishuRepair(reason: string): Promise<void> {
   }
 }
 
-export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPluginState> {
+export async function getFeishuOfficialPluginState(
+  options: EnsureFeishuOfficialPluginReadyOptions = {}
+): Promise<FeishuOfficialPluginState> {
+  const pinnedRuntimeContext = normalizeRuntimeContext(options.runtimeContext)
   const [config, openClawPaths] = await Promise.all([
-    readConfig().catch(() => null),
-    getOpenClawPaths().catch(() => null),
+    readConfig(
+      pinnedRuntimeContext.configPath
+        ? { configPath: pinnedRuntimeContext.configPath }
+        : undefined
+    ).catch(() => null),
+    pinnedRuntimeContext.homeDir && pinnedRuntimeContext.configPath
+      ? Promise.resolve(null)
+      : getOpenClawPaths().catch(() => null),
   ])
 
-  const homeDir = String(openClawPaths?.homeDir || '').trim()
+  const homeDir = pinnedRuntimeContext.homeDir || String(openClawPaths?.homeDir || '').trim()
+  const configPath = pinnedRuntimeContext.configPath || String(openClawPaths?.configFile || '').trim()
   const installPath = homeDir ? path.join(homeDir, 'extensions', FEISHU_OFFICIAL_PLUGIN_ID) : ''
   const installedOnDisk = await isFeishuOfficialPluginInstalledOnDisk(homeDir)
 
@@ -259,7 +308,9 @@ export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPlug
     return {
       pluginId: FEISHU_OFFICIAL_PLUGIN_ID,
       installedOnDisk,
+      homeDir,
       installPath,
+      configPath,
       officialPluginConfigured: false,
       legacyPluginIdsPresent: [],
       configChanged: false,
@@ -279,7 +330,9 @@ export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPlug
   return {
     pluginId: FEISHU_OFFICIAL_PLUGIN_ID,
     installedOnDisk,
+    homeDir,
     installPath,
+    configPath,
     officialPluginConfigured: isOfficialPluginEnabled(normalizedConfig),
     legacyPluginIdsPresent,
     configChanged,
@@ -288,21 +341,35 @@ export async function getFeishuOfficialPluginState(): Promise<FeishuOfficialPlug
   }
 }
 
-export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOfficialPluginReadyResult> {
-  let beforeState = await getFeishuOfficialPluginState()
+export async function ensureFeishuOfficialPluginReady(
+  options: EnsureFeishuOfficialPluginReadyOptions = {}
+): Promise<EnsureFeishuOfficialPluginReadyResult> {
+  const pinnedRuntimeContext = normalizeRuntimeContext(options.runtimeContext)
+  const runtimeContextOption = pinnedRuntimeContext.homeDir || pinnedRuntimeContext.configPath
+    ? {
+        runtimeContext: {
+          ...(pinnedRuntimeContext.homeDir ? { homeDir: pinnedRuntimeContext.homeDir } : {}),
+          ...(pinnedRuntimeContext.configPath ? { configPath: pinnedRuntimeContext.configPath } : {}),
+        },
+      }
+    : {}
+  let beforeState = await getFeishuOfficialPluginState(options)
   let appliedBeforeReady = false
+  let gatewayAppliedBeforeReady = false
   let lastAppliedConfigFingerprint = ''
 
   try {
     if (!beforeState.configAvailable) {
       throw new Error('当前 OpenClaw 配置读取失败，无法安全同步飞书官方插件配置')
     }
-    appliedBeforeReady = await applyNormalizedConfigIfNeeded(beforeState)
+    const applyBeforeReadyResult = await applyNormalizedConfigIfNeeded(beforeState)
+    appliedBeforeReady = applyBeforeReadyResult.applied
+    gatewayAppliedBeforeReady = applyBeforeReadyResult.gatewayApplied
     if (appliedBeforeReady) {
       lastAppliedConfigFingerprint = JSON.stringify(beforeState.normalizedConfig)
     }
     if (appliedBeforeReady) {
-      beforeState = await getFeishuOfficialPluginState()
+      beforeState = await getFeishuOfficialPluginState(options)
     }
   } catch (error) {
     return {
@@ -319,6 +386,7 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   const repairResult = await repairIncompatibleExtensionPlugins({
     scopePluginIds: FEISHU_PLUGIN_REPAIR_SCOPE,
     quarantineOfficialManagedPlugins: true,
+    ...runtimeContextOption,
   })
   if (!repairResult.ok) {
     return {
@@ -332,7 +400,7 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
     }
   }
   if (repairResult.repaired) {
-    beforeState = await getFeishuOfficialPluginState()
+    beforeState = await getFeishuOfficialPluginState(options)
     if (!beforeState.configAvailable) {
       return {
         ok: false,
@@ -357,7 +425,7 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   }
 
   if (isStateReady(beforeState)) {
-    if (appliedBeforeReady) {
+    if (appliedBeforeReady && !gatewayAppliedBeforeReady) {
       try {
         await reloadGatewayAfterFeishuRepair('feishu-official-plugin-config-sync')
       } catch (error) {
@@ -385,8 +453,9 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   }
 
   const installResult = await installPluginNpx(FEISHU_PLUGIN_NPX_SPECIFIER, [FEISHU_OFFICIAL_PLUGIN_ID])
-  let afterState = await getFeishuOfficialPluginState()
+  let afterState = await getFeishuOfficialPluginState(options)
   let appliedAfterInstall = false
+  let gatewayAppliedAfterInstall = false
 
   try {
     if (!afterState.configAvailable) {
@@ -399,9 +468,12 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
 
     appliedAfterInstall = alreadyAppliedSameConfig
       ? false
-      : await applyNormalizedConfigIfNeeded(afterState)
+      : await applyNormalizedConfigIfNeeded(afterState).then((result) => {
+          gatewayAppliedAfterInstall = result.gatewayApplied
+          return result.applied
+        })
     if (appliedAfterInstall) {
-      afterState = await getFeishuOfficialPluginState()
+      afterState = await getFeishuOfficialPluginState(options)
     }
   } catch (error) {
     return {
@@ -430,13 +502,15 @@ export async function ensureFeishuOfficialPluginReady(): Promise<EnsureFeishuOff
   }
 
   try {
-    await reloadGatewayAfterFeishuRepair(
-      installResult.ok
+    if (installResult.ok || (!gatewayAppliedAfterInstall && (appliedAfterInstall || appliedBeforeReady))) {
+      await reloadGatewayAfterFeishuRepair(
+        installResult.ok
         ? 'feishu-official-plugin-install'
         : appliedAfterInstall || appliedBeforeReady
           ? 'feishu-official-plugin-config-sync'
           : 'feishu-official-plugin-ready'
-    )
+      )
+    }
   } catch (error) {
     return {
       ok: false,

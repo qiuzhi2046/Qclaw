@@ -77,7 +77,7 @@ function extractGatewayHealthSource(cliSource: string): string {
 
 function extractReadConfigSource(cliSource: string): string {
   const start = cliSource.indexOf('export async function readConfig(')
-  const end = cliSource.indexOf('export async function writeConfig(config: Record<string, any>): Promise<void> {', start)
+  const end = cliSource.indexOf('export async function writeConfig(', start)
   if (start < 0 || end < 0) {
     throw new Error('readConfig source block not found')
   }

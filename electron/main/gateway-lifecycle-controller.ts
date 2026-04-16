@@ -15,6 +15,13 @@ import type {
   GatewayBootstrapProgressState,
   GatewayEnsureRunningResult,
 } from './openclaw-gateway-service'
+import type { WindowsGatewayOwnerSnapshot } from './platforms/windows/windows-channel-runtime-snapshot'
+import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
+import {
+  buildWindowsGatewayOwnerSnapshotFromLauncherIntegrity,
+  inspectWindowsGatewayLauncherIntegrity,
+} from './platforms/windows/windows-platform-ops'
+import { getSelectedWindowsActiveRuntimeSnapshot } from './windows-active-runtime'
 
 type GatewayLifecycleMutationAction =
   | 'ensure'
@@ -55,6 +62,32 @@ export interface GatewayReloadResult extends CliResult {
   running?: boolean
   summary?: string
   stateCode?: string
+}
+
+export interface GatewayInstallerStopSnapshot {
+  gatewayOwner: WindowsGatewayOwnerSnapshot | null
+  runtimeSnapshot: WindowsActiveRuntimeSnapshot | null
+  stopped: boolean
+  wasOwnedByQclaw: boolean
+  wasRunning: boolean
+}
+
+export interface GatewayInstallerStopResult {
+  ok: boolean
+  skipped: boolean
+  stopped: boolean
+  stopResult: CliResult | null
+  snapshot: GatewayInstallerStopSnapshot
+}
+
+export interface GatewayRecoveryResult {
+  ok: boolean
+  recovered: boolean
+  skipped: boolean
+  code?: number | null
+  message?: string
+  stderr?: string
+  stdout?: string
 }
 
 let lifecycleMutationQueue: Promise<void> = Promise.resolve()
@@ -192,6 +225,65 @@ async function waitForGatewayHealthyAfterReload(
   }
 }
 
+function cloneWindowsActiveRuntimeSnapshot(
+  snapshot: WindowsActiveRuntimeSnapshot | null | undefined
+): WindowsActiveRuntimeSnapshot | null {
+  return snapshot ? { ...snapshot } : null
+}
+
+function isQclawManagedWindowsGatewayOwner(
+  owner: WindowsGatewayOwnerSnapshot | null | undefined
+): boolean {
+  return owner?.ownerKind === 'scheduled-task' || owner?.ownerKind === 'startup-folder'
+}
+
+async function captureGatewayInstallerStopSnapshot(): Promise<GatewayInstallerStopSnapshot> {
+  const status = await gatewayStatus().catch((): GatewayStatusCheckResult => ({
+    running: false,
+    raw: '',
+    stderr: '',
+    code: null,
+    stateCode: 'gateway_not_running',
+    summary: '无法确认网关状态',
+  }))
+  const wasRunning = Boolean(status?.running)
+
+  if (process.platform !== 'win32') {
+    return {
+      gatewayOwner: null,
+      runtimeSnapshot: null,
+      stopped: false,
+      wasOwnedByQclaw: wasRunning,
+      wasRunning,
+    }
+  }
+
+  const runtimeSnapshot = cloneWindowsActiveRuntimeSnapshot(getSelectedWindowsActiveRuntimeSnapshot())
+  let gatewayOwner: WindowsGatewayOwnerSnapshot | null = null
+  if (runtimeSnapshot?.stateDir) {
+    try {
+      const launcherIntegrity = await inspectWindowsGatewayLauncherIntegrity({
+        homeDir: runtimeSnapshot.stateDir,
+      })
+      gatewayOwner = buildWindowsGatewayOwnerSnapshotFromLauncherIntegrity(launcherIntegrity)
+    } catch {
+      gatewayOwner = {
+        ownerKind: 'unknown',
+        ownerLauncherPath: '',
+        ownerTaskName: '',
+      }
+    }
+  }
+
+  return {
+    gatewayOwner,
+    runtimeSnapshot,
+    stopped: false,
+    wasOwnedByQclaw: isQclawManagedWindowsGatewayOwner(gatewayOwner),
+    wasRunning,
+  }
+}
+
 export function getGatewayLifecycleState(): GatewayLifecycleState {
   return {
     busy: Boolean(inFlightMutation),
@@ -274,4 +366,101 @@ export async function reloadGatewayForConfigChange(
 
 export async function stopGatewayIfOwned(reason = 'stop'): Promise<CliResult> {
   return runSharedLifecycleMutation('stop', 'stop', reason, () => gatewayStop())
+}
+
+export async function stopGatewayForInstaller(
+  reason = 'installer-stop'
+): Promise<GatewayInstallerStopResult> {
+  return runSharedLifecycleMutation('installer-stop', 'stop', reason, async () => {
+    const snapshot = await captureGatewayInstallerStopSnapshot()
+    await appendEnvCheckDiagnostic('gateway-installer-stop-snapshot', {
+      reason,
+      wasRunning: snapshot.wasRunning,
+      wasOwnedByQclaw: snapshot.wasOwnedByQclaw,
+      ownerKind: snapshot.gatewayOwner?.ownerKind || null,
+      stateDir: snapshot.runtimeSnapshot?.stateDir || null,
+    })
+
+    if (!snapshot.wasRunning || !snapshot.wasOwnedByQclaw) {
+      return {
+        ok: true,
+        skipped: true,
+        stopped: false,
+        stopResult: null,
+        snapshot,
+      }
+    }
+
+    const stopResult = await gatewayStop({
+      activeRuntimeSnapshot: snapshot.runtimeSnapshot || undefined,
+    })
+    const stopped = Boolean(stopResult.ok)
+    const nextSnapshot = {
+      ...snapshot,
+      stopped,
+    }
+    await appendEnvCheckDiagnostic('gateway-installer-stop-result', {
+      reason,
+      ok: stopResult.ok,
+      stopped,
+      code: stopResult.code ?? null,
+    })
+
+    return {
+      ok: stopResult.ok,
+      skipped: false,
+      stopped,
+      stopResult,
+      snapshot: nextSnapshot,
+    }
+  })
+}
+
+export async function recoverGatewayForInstaller(
+  snapshot: GatewayInstallerStopSnapshot | null | undefined,
+  reason = 'installer-recovery'
+): Promise<GatewayRecoveryResult> {
+  return runSharedLifecycleMutation('installer-recovery', 'start', reason, async () => {
+    const stopSnapshot = snapshot || null
+    if (
+      !stopSnapshot
+      || !stopSnapshot.stopped
+      || !stopSnapshot.wasRunning
+      || !stopSnapshot.wasOwnedByQclaw
+    ) {
+      return {
+        ok: true,
+        recovered: false,
+        skipped: true,
+        message: 'Qclaw 未停止托管网关，已跳过恢复。',
+      }
+    }
+
+    await appendEnvCheckDiagnostic('gateway-installer-recovery-start', {
+      reason,
+      ownerKind: stopSnapshot.gatewayOwner?.ownerKind || null,
+      stateDir: stopSnapshot.runtimeSnapshot?.stateDir || null,
+    })
+    const startResult = await gatewayStart({
+      activeRuntimeSnapshot: stopSnapshot.runtimeSnapshot || undefined,
+      configRepairPreflightHomeDir: stopSnapshot.runtimeSnapshot?.stateDir || undefined,
+    })
+    await appendEnvCheckDiagnostic('gateway-installer-recovery-result', {
+      reason,
+      ok: startResult.ok,
+      code: startResult.code ?? null,
+    })
+
+    return {
+      ok: startResult.ok,
+      recovered: Boolean(startResult.ok),
+      skipped: false,
+      code: startResult.code,
+      stdout: startResult.stdout,
+      stderr: startResult.stderr,
+      message: startResult.ok
+        ? '安装器结束后网关已恢复。'
+        : startResult.stderr || startResult.stdout || '安装器结束后网关恢复失败。',
+    }
+  })
 }

@@ -6,7 +6,13 @@ import {
   listManagedChannelLifecycleSpecs,
 } from '../../../src/shared/managed-channel-plugin-lifecycle'
 import { createManagedChannelPluginLifecycleService } from '../managed-channel-plugin-lifecycle'
-import { resetManagedOperationLocksForTests } from '../managed-operation-lock'
+import {
+  acquireManagedOperationLease,
+  resetManagedOperationLocksForTests,
+} from '../managed-operation-lock'
+import {
+  reconcileManagedPluginConfig as reconcileManagedPluginConfigOnDisk,
+} from '../managed-plugin-config-reconciler'
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -28,7 +34,7 @@ function createStatus(params: Partial<ManagedChannelPluginStatusView> & Pick<Man
 }
 
 function createDependencies() {
-  return {
+  const dependencies = {
     getOfficialChannelStatus: vi.fn(),
     repairOfficialChannel: vi.fn(),
     repairIncompatiblePlugins: vi.fn().mockResolvedValue({
@@ -55,6 +61,7 @@ function createDependencies() {
     isPluginInstalledOnDisk: vi.fn().mockResolvedValue(false),
     listRegisteredPlugins: vi.fn().mockResolvedValue([]),
     readConfig: vi.fn().mockResolvedValue({ channels: {}, plugins: {} }),
+    reconcileManagedPluginConfig: vi.fn(),
     writeConfig: vi.fn(async (_config: Record<string, any>) => {}),
     reloadGatewayForConfigChange: vi.fn().mockResolvedValue({
       ok: true,
@@ -66,6 +73,35 @@ function createDependencies() {
     }),
     now: vi.fn(() => 0),
   }
+  dependencies.reconcileManagedPluginConfig.mockImplementation(async (options) =>
+    reconcileManagedPluginConfigOnDisk(options, {
+      readConfig: async () => dependencies.readConfig(),
+      applyConfigPatchGuarded: async (request, _candidate, writeOptions) => {
+        await dependencies.writeConfig(request.afterConfig)
+        return {
+          ok: true,
+          blocked: false,
+          wrote: true,
+          target: 'config' as const,
+          snapshotCreated: false,
+          snapshot: null,
+          changedJsonPaths: ['$.plugins'],
+          ownershipSummary: null,
+          message: 'ok',
+          ...(writeOptions?.applyGatewayPolicy
+            ? {
+                gatewayApply: {
+                  ok: true,
+                  requestedAction: 'restart' as const,
+                  appliedAction: 'restart' as const,
+                },
+              }
+            : {}),
+        }
+      },
+    })
+  )
+  return dependencies
 }
 
 describe('managed channel lifecycle specs', () => {
@@ -219,6 +255,97 @@ describe('createManagedChannelPluginLifecycleService', () => {
     })
   })
 
+  it('passes pinned runtime context into personal weixin installer preflight repair', async () => {
+    const dependencies = createDependencies()
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+
+    await service.prepareManagedChannelPluginForSetup('openclaw-weixin', {
+      runtimeContext: {
+        configPath: 'C:\\OpenClaw\\openclaw.json',
+        homeDir: 'C:\\OpenClaw',
+      },
+    })
+
+    expect(dependencies.repairIncompatiblePlugins).toHaveBeenCalledWith({
+      scopePluginIds: ['openclaw-weixin'],
+      quarantineOfficialManagedPlugins: true,
+      runtimeContext: {
+        configPath: 'C:\\OpenClaw\\openclaw.json',
+        homeDir: 'C:\\OpenClaw',
+      },
+    })
+    expect(dependencies.reconcileManagedPluginConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'openclaw-weixin',
+        runtimeContext: {
+          configPath: 'C:\\OpenClaw\\openclaw.json',
+          homeDir: 'C:\\OpenClaw',
+        },
+        scope: 'plugins-only',
+        apply: true,
+        applyGatewayPolicy: false,
+      })
+    )
+  })
+
+  it('prunes stale personal weixin plugin config during pinned installer preflight without deleting accounts', async () => {
+    const dependencies = createDependencies()
+    let currentConfig: Record<string, any> = {
+      channels: {
+        'openclaw-weixin': {
+          enabled: true,
+          accounts: {
+            wxid_demo: {
+              token: 'keep-token',
+            },
+          },
+        },
+      },
+      plugins: {
+        allow: ['openclaw-weixin'],
+        entries: {
+          'openclaw-weixin': {
+            installPath: 'C:\\OpenClaw\\extensions\\missing-openclaw-weixin',
+          },
+        },
+      },
+    }
+    dependencies.readConfig.mockImplementation(async () => currentConfig)
+    dependencies.writeConfig.mockImplementation(async (config: Record<string, any>) => {
+      currentConfig = config
+    })
+
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+    const result = await service.prepareManagedChannelPluginForSetup('openclaw-weixin', {
+      runtimeContext: {
+        configPath: 'C:\\OpenClaw\\openclaw.json',
+        homeDir: 'C:\\OpenClaw',
+      },
+    })
+
+    expect(result).toMatchObject({
+      kind: 'manual-action-required',
+      channelId: 'openclaw-weixin',
+      action: 'launch-interactive-installer',
+    })
+    expect(dependencies.writeConfig).toHaveBeenCalledWith({
+      channels: {
+        'openclaw-weixin': {
+          enabled: true,
+          accounts: {
+            wxid_demo: {
+              token: 'keep-token',
+            },
+          },
+        },
+      },
+      plugins: {
+        allow: [],
+        entries: {},
+      },
+    })
+  })
+
   it('hands personal weixin setup to the interactive installer without running package install preflight', async () => {
     const dependencies = createDependencies()
 
@@ -239,6 +366,40 @@ describe('createManagedChannelPluginLifecycleService', () => {
         ]),
       },
     })
+  })
+
+  it('keeps generic inspect as a dry-run config reconcile without writes or repair', async () => {
+    const dependencies = createDependencies()
+    dependencies.isPluginInstalledOnDisk.mockResolvedValue(true)
+    dependencies.listRegisteredPlugins.mockResolvedValue(['wecom-openclaw-plugin'])
+    dependencies.readConfig.mockResolvedValue({
+      channels: {
+        wecom: {
+          enabled: true,
+          botId: 'bot_123',
+          secret: 'secret_456',
+        },
+      },
+      plugins: {},
+    })
+
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+    const result = await service.inspectManagedChannelPlugin('wecom')
+
+    expect(result).toMatchObject({
+      kind: 'config-sync-required',
+      channelId: 'wecom',
+    })
+    expect(dependencies.reconcileManagedPluginConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'wecom',
+        apply: false,
+      })
+    )
+    expect(dependencies.repairIncompatiblePlugins).not.toHaveBeenCalled()
+    expect(dependencies.installPluginNpx).not.toHaveBeenCalled()
+    expect(dependencies.writeConfig).not.toHaveBeenCalled()
+    expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
   })
 
   it('repairs config drift for an already-installed managed plugin during setup preflight instead of forcing reinstall', async () => {
@@ -281,7 +442,57 @@ describe('createManagedChannelPluginLifecycleService', () => {
         allow: ['wecom-openclaw-plugin'],
       },
     })
-    expect(dependencies.reloadGatewayForConfigChange).toHaveBeenCalledTimes(1)
+    expect(dependencies.reconcileManagedPluginConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'wecom',
+        apply: true,
+        applyGatewayPolicy: true,
+      })
+    )
+    expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
+  })
+
+  it('forwards repair options when setup preflight escalates generic config drift into repair', async () => {
+    const dependencies = createDependencies()
+    let currentConfig: Record<string, any> = {
+      channels: {
+        wecom: {
+          enabled: true,
+          botId: 'bot_123',
+          secret: 'secret_456',
+        },
+      },
+      plugins: {},
+    }
+    dependencies.isPluginInstalledOnDisk.mockResolvedValue(true)
+    dependencies.listRegisteredPlugins.mockResolvedValue(['wecom-openclaw-plugin'])
+    dependencies.readConfig.mockImplementation(async () => currentConfig)
+    dependencies.writeConfig.mockImplementation(async (config: Record<string, any>) => {
+      currentConfig = config
+    })
+
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+    const result = await service.prepareManagedChannelPluginForSetup('wecom', {
+      runtimeContext: {
+        configPath: 'C:\\OpenClaw\\openclaw.json',
+        homeDir: 'C:\\OpenClaw',
+      },
+      assumeOperationLock: true,
+    })
+
+    expect(result).toMatchObject({
+      kind: 'ok',
+      channelId: 'wecom',
+      action: 'repair-before-setup',
+    })
+    expect(dependencies.repairIncompatiblePlugins).toHaveBeenCalledWith({
+      scopePluginIds: ['wecom-openclaw-plugin', 'wecom'],
+      quarantineOfficialManagedPlugins: true,
+      runtimeContext: {
+        configPath: 'C:\\OpenClaw\\openclaw.json',
+        homeDir: 'C:\\OpenClaw',
+      },
+    })
   })
 
   it('treats hidden install-stage metadata as config drift for an already-installed managed plugin during setup preflight', async () => {
@@ -462,6 +673,28 @@ describe('createManagedChannelPluginLifecycleService', () => {
     expect(trace).toEqual(['1:start', '1:end', '2:start', '2:end'])
   })
 
+  it('does not re-enter the managed channel lock when repair already owns the operation lease', async () => {
+    resetManagedOperationLocksForTests()
+    const lease = await acquireManagedOperationLease('managed-channel-plugin:openclaw-weixin')
+    try {
+      const dependencies = createDependencies()
+      const service = createManagedChannelPluginLifecycleService(dependencies)
+
+      const result = await Promise.race([
+        service.repairManagedChannelPlugin('openclaw-weixin', { assumeOperationLock: true }),
+        delay(100).then(() => ({ kind: 'timeout' as const })),
+      ])
+
+      expect(result).toMatchObject({
+        kind: 'manual-action-required',
+        channelId: 'openclaw-weixin',
+      })
+    } finally {
+      lease.release()
+      resetManagedOperationLocksForTests()
+    }
+  })
+
   it('maps quarantine permission failures into a dedicated repair result and stops before install or reload', async () => {
     const dependencies = createDependencies()
     dependencies.repairIncompatiblePlugins.mockResolvedValue({
@@ -487,6 +720,201 @@ describe('createManagedChannelPluginLifecycleService', () => {
       failedPluginIds: ['wecom-openclaw-plugin'],
     })
     expect(dependencies.installPluginNpx).not.toHaveBeenCalled()
+    expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
+  })
+
+  it('uses the config reconciler as the single writer for generic managed config sync', async () => {
+    const dependencies = createDependencies()
+    dependencies.isPluginInstalledOnDisk.mockResolvedValue(true)
+    dependencies.listRegisteredPlugins.mockResolvedValue(['wecom-openclaw-plugin'])
+    dependencies.readConfig.mockResolvedValue({
+      channels: {
+        wecom: {
+          enabled: true,
+          botId: 'bot_123',
+          secret: 'secret_456',
+        },
+      },
+      plugins: {},
+    })
+    dependencies.writeConfig.mockImplementation(async () => {
+      throw new Error('lifecycle must not write config directly')
+    })
+    dependencies.reconcileManagedPluginConfig.mockImplementation(async (options) => ({
+      ok: true,
+      channelId: options.channelId,
+      scope: 'plugins-only',
+      apply: options.apply === true,
+      changed: true,
+      written: options.apply === true,
+      configReadFailed: false,
+      retryable: false,
+      message: options.apply === true ? 'written by reconciler' : 'dry run',
+      beforeConfig: options.currentConfig || null,
+      afterConfig: {
+        ...(options.currentConfig || {}),
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
+        },
+      },
+      removedFrom: {
+        allow: [],
+        entries: [],
+        installs: [],
+        channels: [],
+      },
+      orphanedPluginIds: [],
+      prunedPluginIds: [],
+      manifest: {
+        channelId: options.channelId,
+        scope: 'plugins-only',
+        apply: options.apply === true,
+        changed: true,
+        written: options.apply === true,
+        retryable: false,
+        removedFrom: {
+          allow: [],
+          entries: [],
+          installs: [],
+          channels: [],
+        },
+        orphanedPluginIds: [],
+        prunedPluginIds: [],
+        runtime: {
+          configPath: null,
+          homeDir: null,
+          openclawVersion: null,
+        },
+      },
+      ...(options.apply === true
+        ? {
+            writeResult: {
+              ok: true,
+              blocked: false,
+              wrote: true,
+              target: 'config' as const,
+              snapshotCreated: false,
+              snapshot: null,
+              changedJsonPaths: ['$.plugins.allow'],
+              ownershipSummary: null,
+              gatewayApply: {
+                ok: true,
+                requestedAction: 'restart' as const,
+                appliedAction: 'restart' as const,
+              },
+            },
+          }
+        : {}),
+    }))
+
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+    const result = await service.repairManagedChannelPlugin('wecom')
+
+    expect(result).toMatchObject({
+      kind: 'ok',
+      channelId: 'wecom',
+    })
+    expect(dependencies.reconcileManagedPluginConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'wecom',
+        apply: true,
+        applyGatewayPolicy: true,
+      })
+    )
+    expect(dependencies.writeConfig).not.toHaveBeenCalled()
+    expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
+  })
+
+  it('maps reconciler-owned gateway apply failures without calling the legacy reload owner', async () => {
+    const dependencies = createDependencies()
+    dependencies.isPluginInstalledOnDisk.mockResolvedValue(true)
+    dependencies.listRegisteredPlugins.mockResolvedValue(['wecom-openclaw-plugin'])
+    dependencies.readConfig.mockResolvedValue({
+      channels: {
+        wecom: {
+          enabled: true,
+          botId: 'bot_123',
+          secret: 'secret_456',
+        },
+      },
+      plugins: {},
+    })
+    dependencies.reconcileManagedPluginConfig.mockImplementation(async (options) => ({
+      ok: true,
+      channelId: options.channelId,
+      scope: 'plugins-only',
+      apply: options.apply === true,
+      changed: true,
+      written: options.apply === true,
+      configReadFailed: false,
+      retryable: false,
+      message: options.apply === true ? 'write ok; gateway failed' : 'dry run',
+      beforeConfig: options.currentConfig || null,
+      afterConfig: {
+        ...(options.currentConfig || {}),
+        plugins: {
+          allow: ['wecom-openclaw-plugin'],
+        },
+      },
+      removedFrom: {
+        allow: [],
+        entries: [],
+        installs: [],
+        channels: [],
+      },
+      orphanedPluginIds: [],
+      prunedPluginIds: [],
+      manifest: {
+        channelId: options.channelId,
+        scope: 'plugins-only',
+        apply: options.apply === true,
+        changed: true,
+        written: options.apply === true,
+        retryable: false,
+        removedFrom: {
+          allow: [],
+          entries: [],
+          installs: [],
+          channels: [],
+        },
+        orphanedPluginIds: [],
+        prunedPluginIds: [],
+        runtime: {
+          configPath: null,
+          homeDir: null,
+          openclawVersion: null,
+        },
+      },
+      ...(options.apply === true
+        ? {
+            writeResult: {
+              ok: true,
+              blocked: false,
+              wrote: true,
+              target: 'config' as const,
+              snapshotCreated: false,
+              snapshot: null,
+              changedJsonPaths: ['$.plugins.allow'],
+              ownershipSummary: null,
+              gatewayApply: {
+                ok: false,
+                requestedAction: 'restart' as const,
+                appliedAction: 'restart' as const,
+                note: 'gateway restart failed',
+              },
+            },
+          }
+        : {}),
+    }))
+
+    const service = createManagedChannelPluginLifecycleService(dependencies)
+    const result = await service.repairManagedChannelPlugin('wecom')
+
+    expect(result).toMatchObject({
+      kind: 'gateway-reload-failed',
+      channelId: 'wecom',
+      reloadReason: 'gateway restart failed',
+    })
     expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
   })
 
@@ -525,7 +953,14 @@ describe('createManagedChannelPluginLifecycleService', () => {
         allow: ['wecom-openclaw-plugin'],
       },
     })
-    expect(dependencies.reloadGatewayForConfigChange).toHaveBeenCalledTimes(1)
+    expect(dependencies.reconcileManagedPluginConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'wecom',
+        apply: true,
+        applyGatewayPolicy: true,
+      })
+    )
+    expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
   })
 
   it('fails safe instead of overwriting config when config sync is needed but the current config cannot be read', async () => {
@@ -580,6 +1015,13 @@ describe('createManagedChannelPluginLifecycleService', () => {
     })
     expect(dependencies.installPluginNpx).toHaveBeenCalledWith('@wecom/wecom-openclaw-cli', ['wecom-openclaw-plugin'])
     expect(dependencies.writeConfig).toHaveBeenCalled()
-    expect(dependencies.reloadGatewayForConfigChange).toHaveBeenCalledTimes(1)
+    expect(dependencies.reconcileManagedPluginConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'wecom',
+        apply: true,
+        applyGatewayPolicy: true,
+      })
+    )
+    expect(dependencies.reloadGatewayForConfigChange).not.toHaveBeenCalled()
   })
 })

@@ -29,7 +29,7 @@ function collectChangedJsonPathsInternal(
         ...collectChangedJsonPathsInternal(previousValue[index], nextValue[index], `${currentPath}[${index}]`)
       )
     }
-    return nextPaths.length > 0 ? nextPaths : [currentPath]
+    return nextPaths
   }
 
   if (isPlainObject(previousValue) && isPlainObject(nextValue)) {
@@ -39,7 +39,7 @@ function collectChangedJsonPathsInternal(
       const nextPath = currentPath === '$' ? `$.${key}` : `${currentPath}.${key}`
       nextPaths.push(...collectChangedJsonPathsInternal(previousValue[key], nextValue[key], nextPath))
     }
-    return nextPaths.length > 0 ? nextPaths : [currentPath]
+    return nextPaths
   }
 
   return [currentPath]

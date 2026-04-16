@@ -580,6 +580,48 @@ describe('commitSelectedWindowsActiveRuntimeSnapshot', () => {
     })
   })
 
+  it('does not commit a new selected runtime when reconcile reports a managed channel busy state', async () => {
+    const previousRuntime = createGlobalRuntimeSnapshot()
+    const nextRuntime = createPrivateRuntimeSnapshot()
+    const previousSnapshot = createChannelRuntimeSnapshot({
+      agentId: 'feishu-runtime-a',
+      runtime: previousRuntime,
+    })
+    const reconcileWindowsChannelRuntimeSelection = vi.fn(async () => ({
+      busy: true,
+      changed: true,
+      launcherIntegrity: null,
+      message: 'busy',
+      reconciled: false,
+      snapshot: previousSnapshot,
+    }))
+    const setSelectedRuntimeSnapshot = vi.fn((snapshot: WindowsActiveRuntimeSnapshot | null | undefined) =>
+      snapshot ? { ...snapshot } : null
+    )
+    let cachedSnapshot: WindowsChannelRuntimeSnapshot | null = previousSnapshot
+
+    await withStubbedWindowsPlatform(async () => {
+      const cliModule = await loadCliModule()
+      const committedSnapshot = await cliModule.commitSelectedWindowsActiveRuntimeSnapshot(nextRuntime, {
+        getSelectedRuntimeSnapshot: () => previousRuntime,
+        readCachedWindowsChannelRuntimeSnapshot: () => cachedSnapshot,
+        reconcileWindowsChannelRuntimeSelection,
+        replaceCachedWindowsChannelRuntimeSnapshot: (
+          snapshot: WindowsChannelRuntimeSnapshot | null | undefined
+        ) => {
+          cachedSnapshot = snapshot ?? null
+          return cachedSnapshot
+        },
+        setSelectedRuntimeSnapshot,
+      })
+
+      expect(committedSnapshot).toEqual(previousRuntime)
+      expect(reconcileWindowsChannelRuntimeSelection).toHaveBeenCalledTimes(1)
+      expect(setSelectedRuntimeSnapshot).not.toHaveBeenCalled()
+      expect(cachedSnapshot).toEqual(previousSnapshot)
+    })
+  })
+
   it('repairs the authoritative snapshot cache when the selected runtime is unchanged', async () => {
     const currentRuntime = createPrivateRuntimeSnapshot()
     const ensuredSnapshot = createChannelRuntimeSnapshot({

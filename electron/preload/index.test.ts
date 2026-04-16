@@ -400,6 +400,9 @@ describe('preload api model channels', () => {
     const offFeishuInstaller = api.onFeishuInstallerEvent(() => {})
     expect(onMock).toHaveBeenCalledWith('feishu:installer:event', expect.any(Function))
 
+    const offWeixinInstaller = api.onWeixinInstallerEvent(() => {})
+    expect(onMock).toHaveBeenCalledWith('weixin:installer:event', expect.any(Function))
+
     const offState = api.onOAuthState(() => {})
     expect(onMock).toHaveBeenCalledWith('oauth:state', expect.any(Function))
 
@@ -415,11 +418,12 @@ describe('preload api model channels', () => {
     offChat()
     offGatewayBootstrap()
     offFeishuInstaller()
+    offWeixinInstaller()
     offState()
     offCode()
     offSuccess()
     offError()
-    expect(removeListenerMock).toHaveBeenCalledTimes(7)
+    expect(removeListenerMock).toHaveBeenCalledTimes(8)
 
     await api.startModelOAuth({ providerId: 'qwen', methodId: 'qwen-portal', setDefault: true })
     expect(invokeMock).toHaveBeenLastCalledWith('models:oauth:start', {

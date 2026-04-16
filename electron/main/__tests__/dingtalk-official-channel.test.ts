@@ -257,6 +257,99 @@ describe('setupDingtalkOfficialChannel', () => {
     )
   })
 
+  it('keeps the legacy root-key sanitize step before doctor and setup writes', async () => {
+    const legacyConfig = {
+      streaming: {
+        legacy: true,
+      },
+      gateway: {
+        auth: {
+          token: 'gw-token',
+        },
+      },
+      channels: {},
+    }
+    const sanitizedConfig = {
+      gateway: {
+        auth: {
+          token: 'gw-token',
+        },
+      },
+      channels: {},
+    }
+    readConfigMock
+      .mockResolvedValueOnce(legacyConfig)
+      .mockResolvedValueOnce(sanitizedConfig)
+    isPluginInstalledOnDiskMock.mockResolvedValue(true)
+    applyConfigPatchGuardedMock
+      .mockResolvedValueOnce({
+        ok: true,
+        blocked: false,
+        wrote: true,
+        target: 'config',
+        snapshotCreated: false,
+        snapshot: null,
+        changedJsonPaths: ['$.streaming'],
+        ownershipSummary: null,
+        message: '已清理历史 root 级别渠道键',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        blocked: false,
+        wrote: true,
+        target: 'config',
+        snapshotCreated: false,
+        snapshot: null,
+        changedJsonPaths: ['$.channels.dingtalk-connector'],
+        ownershipSummary: null,
+        message: '写入成功',
+      })
+
+    const { setupDingtalkOfficialChannel } = await import('../dingtalk-official-channel')
+    const result = await setupDingtalkOfficialChannel({
+      clientId: 'cli_ding',
+      clientSecret: 'ding-secret',
+    })
+
+    expect(applyConfigPatchGuardedMock).toHaveBeenNthCalledWith(
+      1,
+      {
+        beforeConfig: legacyConfig,
+        afterConfig: sanitizedConfig,
+        reason: 'channel-connect-sanitize',
+      },
+      undefined,
+      {
+        applyGatewayPolicy: false,
+      }
+    )
+    expect(applyConfigPatchGuardedMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        beforeConfig: sanitizedConfig,
+        reason: 'channel-connect-configure',
+      }),
+      undefined,
+      {
+        applyGatewayPolicy: false,
+      }
+    )
+    expect(applyConfigPatchGuardedMock.mock.invocationCallOrder[0]).toBeLessThan(
+      runDoctorMock.mock.invocationCallOrder[0]
+    )
+    expect(runDoctorMock.mock.invocationCallOrder[0]).toBeLessThan(
+      applyConfigPatchGuardedMock.mock.invocationCallOrder[1]
+    )
+    expect(result.ok).toBe(true)
+    expect(result.evidence.map((item) => item.message)).toEqual(
+      expect.arrayContaining([
+        '已清理历史 root 级别渠道键',
+        '已完成钉钉官方预检修复',
+        '已写入钉钉最小配置补丁',
+      ])
+    )
+  })
+
   it('stops before plugin install when doctor fix fails', async () => {
     readConfigMock.mockResolvedValue(null)
     runDoctorMock.mockResolvedValue({
@@ -277,5 +370,54 @@ describe('setupDingtalkOfficialChannel', () => {
     expect(installPluginMock).not.toHaveBeenCalled()
     expect(applyConfigPatchGuardedMock).not.toHaveBeenCalled()
     expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
+  })
+
+  it('surfaces setup config patch failures without reloading gateway', async () => {
+    isPluginInstalledOnDiskMock.mockResolvedValue(true)
+    applyConfigPatchGuardedMock.mockResolvedValue({
+      ok: false,
+      blocked: true,
+      wrote: false,
+      target: 'config',
+      snapshotCreated: false,
+      snapshot: null,
+      changedJsonPaths: [],
+      ownershipSummary: null,
+      message: '配置文件正被其他流程处理，请稍后重试。',
+    })
+
+    const { setupDingtalkOfficialChannel } = await import('../dingtalk-official-channel')
+    const result = await setupDingtalkOfficialChannel({
+      clientId: 'cli_ding',
+      clientSecret: 'ding-secret',
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.summary).toBe('钉钉配置写入失败，请检查当前 OpenClaw 配置后重试。')
+    expect(result.message).toBe('配置文件正被其他流程处理，请稍后重试。')
+    expect(reloadGatewayForConfigChangeMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps repair on the legacy doctor / repair / install / gateway pipeline without fallback config writes', async () => {
+    isPluginInstalledOnDiskMock.mockResolvedValue(true)
+
+    const { repairDingtalkOfficialChannel } = await import('../dingtalk-official-channel')
+    const result = await repairDingtalkOfficialChannel()
+
+    expect(runDoctorMock).toHaveBeenCalledWith({ fix: true, nonInteractive: true })
+    expect(repairIncompatibleExtensionPluginsMock).toHaveBeenCalledWith({
+      scopePluginIds: ['dingtalk-connector', 'dingtalk'],
+      quarantineOfficialManagedPlugins: true,
+    })
+    expect(installPluginMock).not.toHaveBeenCalled()
+    expect(applyConfigPatchGuardedMock).not.toHaveBeenCalled()
+    expect(reloadGatewayForConfigChangeMock).toHaveBeenCalledWith(
+      'dingtalk-official-channel-repair',
+      {
+        preferEnsureWhenNotRunning: true,
+      }
+    )
+    expect(result.ok).toBe(true)
+    expect(result.summary).toBe('钉钉官方插件已修复；loaded / ready 仍待上游证据。')
   })
 })

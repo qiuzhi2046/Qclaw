@@ -1,6 +1,7 @@
 import type { OpenClawPaths } from './openclaw-paths'
 import type { WindowsActiveRuntimeSnapshot } from './platforms/windows/windows-runtime-policy'
 
+import { getDetectedNodeBinDir } from './detected-node-bin'
 import { listExecutablePathCandidates } from './runtime-path-discovery'
 import { resolveRuntimeOpenClawPaths } from './openclaw-runtime-paths'
 import {
@@ -16,6 +17,7 @@ const path = process.getBuiltinModule('node:path') as typeof import('node:path')
 type ResolveOpenClawPathsForReadOptions = {
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
+  detectedNodeBinDir?: string | null
   activeRuntimeSnapshot?: WindowsActiveRuntimeSnapshot | null | undefined
   getCachedRuntimeSnapshot?:
     | (() => WindowsActiveRuntimeSnapshot | null)
@@ -33,7 +35,13 @@ type ResolveOpenClawPathsForReadOptions = {
 
 type ResolveWindowsActiveRuntimeSnapshotForReadOptions = Pick<
   ResolveOpenClawPathsForReadOptions,
-  'activeRuntimeSnapshot' | 'env' | 'getCachedRuntimeSnapshot' | 'platform' | 'resolvePaths' | 'resolveSelectedRuntimeSnapshot'
+  | 'activeRuntimeSnapshot'
+  | 'detectedNodeBinDir'
+  | 'env'
+  | 'getCachedRuntimeSnapshot'
+  | 'platform'
+  | 'resolvePaths'
+  | 'resolveSelectedRuntimeSnapshot'
 >
 
 async function canAccessPath(targetPath: string): Promise<boolean> {
@@ -67,10 +75,14 @@ async function canAccessWindowsActiveRuntimeSnapshot(
   return nodeExists && openclawExists && hostPackageRootExists
 }
 
-async function resolveSelectedWindowsNodeExecutablePath(env: NodeJS.ProcessEnv): Promise<string> {
+async function resolveSelectedWindowsNodeExecutablePath(
+  env: NodeJS.ProcessEnv,
+  detectedNodeBinDir?: string | null
+): Promise<string> {
   const candidates = listExecutablePathCandidates('node', {
     platform: 'win32',
     currentPath: env.PATH || '',
+    detectedNodeBinDir: detectedNodeBinDir || undefined,
     env,
   })
 
@@ -88,7 +100,11 @@ async function deriveSelectedWindowsRuntimeSnapshotForRead(
 ): Promise<WindowsActiveRuntimeSnapshot | null> {
   const env = options.env || process.env
   const resolvePaths = options.resolvePaths || resolveRuntimeOpenClawPaths
-  const nodeExecutable = await resolveSelectedWindowsNodeExecutablePath(env)
+  const detectedNodeBinDir =
+    options.detectedNodeBinDir === undefined
+      ? getDetectedNodeBinDir()
+      : options.detectedNodeBinDir
+  const nodeExecutable = await resolveSelectedWindowsNodeExecutablePath(env, detectedNodeBinDir)
   if (!nodeExecutable) return null
 
   const requiredRuntimePaths = resolveRequiredWindowsOpenClawRuntimePathsForNodeExecutable(
@@ -160,6 +176,7 @@ export async function resolveOpenClawPathsForRead(
   const runtimeSnapshot =
     await resolveWindowsActiveRuntimeSnapshotForRead({
       platform,
+      detectedNodeBinDir: options.detectedNodeBinDir,
       env: options.env,
       activeRuntimeSnapshot: options.activeRuntimeSnapshot,
       getCachedRuntimeSnapshot: options.getCachedRuntimeSnapshot,

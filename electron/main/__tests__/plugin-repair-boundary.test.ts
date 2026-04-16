@@ -13,6 +13,8 @@ describe('plugin repair API boundaries', () => {
     const scanBlock = cliSource.slice(scanStart, repairStart)
     expect(scanBlock).not.toContain('restoreConfiguredManagedChannelPlugins')
     expect(scanBlock).not.toContain('restoreConfiguredManagedChannels === true')
+    expect(scanBlock).toContain('scanIncompatibleExtensionPluginsOnDisk')
+    expect(scanBlock).not.toContain('repairIncompatibleExtensionPluginsOnDisk')
   })
 
   it('resolves plugin repair paths from readonly runtime state first and then falls back safely', () => {
@@ -41,5 +43,6 @@ describe('plugin repair API boundaries', () => {
     expect(repairBlock).not.toContain('await getOpenClawPathsForRead().catch(() => null)')
     expect(repairBlock).toContain('await resolveOpenClawPluginRepairPaths()')
     expect(repairBlock).toContain("await readConfig({ configPath }).catch(() => null)")
+    expect(repairBlock).toContain('repairIncompatibleExtensionPluginsOnDisk')
   })
 })

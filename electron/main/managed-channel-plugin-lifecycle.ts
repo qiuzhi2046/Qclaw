@@ -17,6 +17,11 @@ import { isPluginAlreadyInstalledError } from '../../src/shared/openclaw-cli-err
 import type { CliResult, RepairIncompatibleExtensionPluginsOptions } from './cli'
 import { appendEnvCheckDiagnostic } from './env-check-diagnostics'
 import { withManagedOperationLock } from './managed-operation-lock'
+import {
+  reconcileManagedPluginConfig,
+  type ManagedPluginConfigReconcileOptions,
+  type ManagedPluginConfigReconcileResult,
+} from './managed-plugin-config-reconciler'
 import type { RepairIncompatibleExtensionsResult } from './plugin-install-safety'
 
 interface GatewayReloadLikeResult {
@@ -39,12 +44,20 @@ export interface ManagedChannelPluginLifecycleDependencies {
   isPluginInstalledOnDisk: (pluginId: string) => Promise<boolean>
   listRegisteredPlugins: () => Promise<string[] | null>
   readConfig: () => Promise<Record<string, any> | null>
+  reconcileManagedPluginConfig: (
+    options: ManagedPluginConfigReconcileOptions
+  ) => Promise<ManagedPluginConfigReconcileResult>
   writeConfig: (config: Record<string, any>) => Promise<void>
   reloadGatewayForConfigChange: (
     reason: string,
     options?: { preferEnsureWhenNotRunning?: boolean }
   ) => Promise<GatewayReloadLikeResult>
   now: () => number
+}
+
+export interface ManagedChannelPluginOperationOptions {
+  assumeOperationLock?: boolean
+  runtimeContext?: RepairIncompatibleExtensionPluginsOptions['runtimeContext']
 }
 
 interface ManagedChannelRepairCooldownState {
@@ -97,12 +110,17 @@ function getInstalledStageState(
 }
 
 function buildScopedRepairOptions(
-  spec: ManagedChannelPluginLifecycleSpec
+  spec: ManagedChannelPluginLifecycleSpec,
+  options: ManagedChannelPluginOperationOptions = {}
 ): RepairIncompatibleExtensionPluginsOptions {
-  return {
+  const repairOptions: RepairIncompatibleExtensionPluginsOptions = {
     scopePluginIds: Array.from(new Set([spec.canonicalPluginId, ...spec.cleanupPluginIds])),
     quarantineOfficialManagedPlugins: true,
   }
+  if (options.runtimeContext) {
+    repairOptions.runtimeContext = options.runtimeContext
+  }
+  return repairOptions
 }
 
 function toRuntimeSnapshot(status: ManagedChannelPluginStatusView) {
@@ -227,6 +245,9 @@ function createUnavailableDependencies(): ManagedChannelPluginLifecycleDependenc
     readConfig: async () => {
       throw new Error('readConfig dependency unavailable')
     },
+    reconcileManagedPluginConfig: async () => {
+      throw new Error('reconcileManagedPluginConfig dependency unavailable')
+    },
     writeConfig: async () => {
       throw new Error('writeConfig dependency unavailable')
     },
@@ -252,6 +273,7 @@ async function buildGenericStatus(
   configNeedsSync: boolean
   configAvailable: boolean
   currentConfig: Record<string, any> | null
+  configReconcile: ManagedPluginConfigReconcileResult
   normalizedConfig: { config: Record<string, any>; changed: boolean }
 }> {
   const [installedOnDisk, registeredPlugins, currentConfig] = await Promise.all([
@@ -272,8 +294,17 @@ async function buildGenericStatus(
         ? 'missing'
         : 'unknown',
   })
-  const normalizedConfig = spec.normalizeConfig(currentConfig, runtime)
   const configAvailable = hasOwnRecord(currentConfig)
+  const configReconcile = await dependencies.reconcileManagedPluginConfig({
+    channelId: spec.channelId,
+    currentConfig: configAvailable ? currentConfig : null,
+    installedOnDisk,
+    apply: false,
+  })
+  const normalizedConfig = {
+    config: configReconcile.afterConfig || {},
+    changed: configAvailable && configReconcile.changed,
+  }
   const configNeedsSync = configAvailable && normalizedConfig.changed
 
   return {
@@ -339,6 +370,7 @@ async function buildGenericStatus(
     configNeedsSync,
     configAvailable,
     currentConfig: configAvailable ? currentConfig : null,
+    configReconcile,
     normalizedConfig,
   }
 }
@@ -374,9 +406,25 @@ export function createManagedChannelPluginLifecycleService(
   }
 
   async function repairManagedPluginScope(
-    spec: ManagedChannelPluginLifecycleSpec
+    spec: ManagedChannelPluginLifecycleSpec,
+    options: ManagedChannelPluginOperationOptions = {}
   ): Promise<RepairIncompatibleExtensionsResult> {
-    return resolvedDependencies.repairIncompatiblePlugins(buildScopedRepairOptions(spec))
+    return resolvedDependencies.repairIncompatiblePlugins(buildScopedRepairOptions(spec, options))
+  }
+
+  async function reconcileInteractiveInstallerConfig(
+    spec: ManagedChannelPluginLifecycleSpec,
+    options: ManagedChannelPluginOperationOptions = {}
+  ): Promise<ManagedPluginConfigReconcileResult | null> {
+    if (!options.runtimeContext) return null
+
+    return resolvedDependencies.reconcileManagedPluginConfig({
+      channelId: spec.channelId,
+      runtimeContext: options.runtimeContext,
+      scope: spec.defaultReconcileScope,
+      apply: true,
+      applyGatewayPolicy: false,
+    })
   }
 
   function toPrepareResultFromRepairResult(
@@ -490,7 +538,10 @@ export function createManagedChannelPluginLifecycleService(
     }
   }
 
-  async function prepareManagedChannelPluginForSetup(channelId: string): Promise<ManagedChannelPluginPrepareResult> {
+  async function prepareManagedChannelPluginForSetup(
+    channelId: string,
+    options: ManagedChannelPluginOperationOptions = {}
+  ): Promise<ManagedChannelPluginPrepareResult> {
     const spec = getManagedChannelLifecycleSpec(channelId)
     if (!spec) {
       return {
@@ -503,8 +554,8 @@ export function createManagedChannelPluginLifecycleService(
     }
 
     if (spec.installStrategy === 'interactive-installer') {
-      return withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, async () => {
-        const preflightRepair = await repairManagedPluginScope(spec)
+      const run = async (): Promise<ManagedChannelPluginPrepareResult> => {
+        const preflightRepair = await repairManagedPluginScope(spec, options)
         if (!preflightRepair.ok) {
           recordFailure(spec.channelId, preflightRepair.failureKind || 'prepare-repair-failed')
           return {
@@ -513,6 +564,18 @@ export function createManagedChannelPluginLifecycleService(
             pluginScope: 'channel',
             entityScope: spec.entityScope,
             error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
+          }
+        }
+
+        const reconcileResult = await reconcileInteractiveInstallerConfig(spec, options)
+        if (reconcileResult && !reconcileResult.ok) {
+          recordFailure(spec.channelId, reconcileResult.failureReason || 'config-reconcile-failed')
+          return {
+            kind: 'prepare-failed',
+            channelId: spec.channelId,
+            pluginScope: 'channel',
+            entityScope: spec.entityScope,
+            error: reconcileResult.message,
           }
         }
 
@@ -529,13 +592,16 @@ export function createManagedChannelPluginLifecycleService(
           reason: '该渠道需要交互式安装器，不能在后台自动安装。',
           status,
         }
-      })
+      }
+      return options.assumeOperationLock
+        ? run()
+        : withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, run)
     }
 
     const inspection = await inspectManagedChannelPlugin(spec.channelId)
     if (inspection.kind === 'config-sync-required') {
       if (getInstalledStageState(inspection.status) === 'verified') {
-        return toPrepareResultFromRepairResult(await repairManagedChannelPlugin(spec.channelId))
+        return toPrepareResultFromRepairResult(await repairManagedChannelPlugin(spec.channelId, options))
       }
       return {
         kind: 'ok',
@@ -577,7 +643,10 @@ export function createManagedChannelPluginLifecycleService(
     }
   }
 
-  async function repairManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginRepairResult> {
+  async function repairManagedChannelPlugin(
+    channelId: string,
+    options: ManagedChannelPluginOperationOptions = {}
+  ): Promise<ManagedChannelPluginRepairResult> {
     await appendEnvCheckDiagnostic('main-managed-channel-repair-start', {
       channelId,
     })
@@ -593,21 +662,36 @@ export function createManagedChannelPluginLifecycleService(
           pluginScope: 'channel',
           entityScope: 'channel',
           canonicalPluginId: channelId,
+          legacyCleanupPluginIds: [],
+          orphanPruneCandidateIds: [],
           cleanupPluginIds: [],
           cleanupChannelIds: [],
+          defaultReconcileScope: 'plugins-only',
           installStrategy: 'package',
           supportsBackgroundRestore: true,
           supportsInteractiveRepairUi: true,
           detectConfigured: () => false,
           normalizeConfig: (config) => ({ config: hasOwnRecord(config) ? config : {}, changed: false }),
+          reconcileConfig: (config) => ({
+            config: hasOwnRecord(config) ? config : {},
+            changed: false,
+            scope: 'plugins-only',
+            configReadFailed: false,
+            removedFrom: {
+              allow: [],
+              entries: [],
+              installs: [],
+              channels: [],
+            },
+          }),
         }, '不支持的 managed channel'),
         error: `Unsupported managed channel: ${channelId}`,
       }
     }
 
-    return withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, async () => {
+    const run = async (): Promise<ManagedChannelPluginRepairResult> => {
       if (spec.installStrategy === 'interactive-installer') {
-        const preflightRepair = await repairManagedPluginScope(spec)
+        const preflightRepair = await repairManagedPluginScope(spec, options)
         if (!preflightRepair.ok) {
           if (preflightRepair.failureKind && preflightRepair.failedPluginIds && preflightRepair.failedPaths) {
             recordFailure(spec.channelId, preflightRepair.failureKind)
@@ -630,6 +714,18 @@ export function createManagedChannelPluginLifecycleService(
             entityScope: spec.entityScope,
             status: createEmptyStatus(spec, preflightRepair.summary || '损坏插件环境修复失败'),
             error: preflightRepair.summary || preflightRepair.stderr || '损坏插件环境修复失败',
+          }
+        }
+        const reconcileResult = await reconcileInteractiveInstallerConfig(spec, options)
+        if (reconcileResult && !reconcileResult.ok) {
+          recordFailure(spec.channelId, reconcileResult.failureReason || 'config-reconcile-failed')
+          return {
+            kind: 'repair-failed',
+            channelId: spec.channelId,
+            pluginScope: 'channel',
+            entityScope: spec.entityScope,
+            status: createEmptyStatus(spec, reconcileResult.message),
+            error: reconcileResult.message,
           }
         }
         resetFailure(spec.channelId)
@@ -670,7 +766,7 @@ export function createManagedChannelPluginLifecycleService(
         }
       }
 
-      const repairResult = await repairManagedPluginScope(spec)
+      const repairResult = await repairManagedPluginScope(spec, options)
       await appendEnvCheckDiagnostic('main-managed-channel-repair-after-scope-repair', {
         channelId: spec.channelId,
         ok: repairResult.ok,
@@ -731,7 +827,7 @@ export function createManagedChannelPluginLifecycleService(
       }
 
       const statusBeforeNormalize = await buildGenericStatus(spec, resolvedDependencies)
-      if (statusBeforeNormalize.normalizedConfig.changed && !statusBeforeNormalize.configAvailable) {
+      if (statusBeforeNormalize.configReconcile.configReadFailed) {
         recordFailure(spec.channelId, 'repair-failed')
         return {
           kind: 'repair-failed',
@@ -742,29 +838,45 @@ export function createManagedChannelPluginLifecycleService(
           error: '当前 OpenClaw 配置读取失败或格式异常，已停止自动修复以避免覆盖现有配置。',
         }
       }
-      if (statusBeforeNormalize.normalizedConfig.changed) {
-        await resolvedDependencies.writeConfig(statusBeforeNormalize.normalizedConfig.config)
-      }
-
-      const reloadResult = await resolvedDependencies.reloadGatewayForConfigChange(
-        'managed-channel-plugin-repair',
-        { preferEnsureWhenNotRunning: true }
-      )
-      await appendEnvCheckDiagnostic('main-managed-channel-repair-after-gateway-reload', {
-        channelId: spec.channelId,
-        ok: reloadResult.ok,
-        running: reloadResult.running === true,
-        summary: String(reloadResult.summary || reloadResult.stderr || '').trim() || null,
-      })
-      if (!reloadResult.ok || reloadResult.running !== true) {
-        recordFailure(spec.channelId, 'gateway-reload-failed')
-        return {
-          kind: 'gateway-reload-failed',
+      const shouldSyncConfig = statusBeforeNormalize.normalizedConfig.changed || !installedBefore
+      if (shouldSyncConfig) {
+        const reconcileResult = await resolvedDependencies.reconcileManagedPluginConfig({
           channelId: spec.channelId,
-          pluginScope: 'channel',
-          entityScope: spec.entityScope,
-          reloadReason: reloadResult.summary || reloadResult.stderr || '网关重载失败',
-          status: statusBeforeNormalize.status,
+          currentConfig: statusBeforeNormalize.currentConfig,
+          installedOnDisk: true,
+          apply: true,
+          applyGatewayPolicy: true,
+        })
+        await appendEnvCheckDiagnostic('main-managed-channel-repair-after-config-reconcile', {
+          channelId: spec.channelId,
+          ok: reconcileResult.ok,
+          changed: reconcileResult.changed,
+          written: reconcileResult.written,
+          gatewayApplyOk: reconcileResult.writeResult?.gatewayApply?.ok ?? null,
+          failureReason: reconcileResult.failureReason || null,
+        })
+        if (!reconcileResult.ok) {
+          recordFailure(spec.channelId, reconcileResult.failureReason || 'config-reconcile-failed')
+          return {
+            kind: 'repair-failed',
+            channelId: spec.channelId,
+            pluginScope: 'channel',
+            entityScope: spec.entityScope,
+            status: statusBeforeNormalize.status,
+            error: reconcileResult.message,
+          }
+        }
+
+        if (reconcileResult.writeResult?.gatewayApply?.ok === false) {
+          recordFailure(spec.channelId, 'gateway-reload-failed')
+          return {
+            kind: 'gateway-reload-failed',
+            channelId: spec.channelId,
+            pluginScope: 'channel',
+            entityScope: spec.entityScope,
+            reloadReason: reconcileResult.writeResult.gatewayApply.note || reconcileResult.message,
+            status: statusBeforeNormalize.status,
+          }
         }
       }
 
@@ -778,7 +890,11 @@ export function createManagedChannelPluginLifecycleService(
         action,
         status: finalStatus.status,
       }
-    })
+    }
+
+    return options.assumeOperationLock
+      ? run()
+      : withManagedOperationLock(`managed-channel-plugin:${spec.channelId}`, run)
   }
 
   return {
@@ -837,6 +953,7 @@ async function getDefaultManagedChannelPluginLifecycleService() {
           return []
         },
         readConfig: cli.readConfig,
+        reconcileManagedPluginConfig,
         writeConfig: cli.writeConfig,
         reloadGatewayForConfigChange: gateway.reloadGatewayForConfigChange,
         now: () => Date.now(),
@@ -857,12 +974,18 @@ export async function getManagedChannelPluginStatus(channelId: string): Promise<
   return service.getManagedChannelPluginStatus(channelId)
 }
 
-export async function prepareManagedChannelPluginForSetup(channelId: string): Promise<ManagedChannelPluginPrepareResult> {
+export async function prepareManagedChannelPluginForSetup(
+  channelId: string,
+  options: ManagedChannelPluginOperationOptions = {}
+): Promise<ManagedChannelPluginPrepareResult> {
   const service = await getDefaultManagedChannelPluginLifecycleService()
-  return service.prepareManagedChannelPluginForSetup(channelId)
+  return service.prepareManagedChannelPluginForSetup(channelId, options)
 }
 
-export async function repairManagedChannelPlugin(channelId: string): Promise<ManagedChannelPluginRepairResult> {
+export async function repairManagedChannelPlugin(
+  channelId: string,
+  options: ManagedChannelPluginOperationOptions = {}
+): Promise<ManagedChannelPluginRepairResult> {
   const service = await getDefaultManagedChannelPluginLifecycleService()
-  return service.repairManagedChannelPlugin(channelId)
+  return service.repairManagedChannelPlugin(channelId, options)
 }

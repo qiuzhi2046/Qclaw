@@ -24,6 +24,8 @@ const MANAGED_CHANNEL_PLUGIN_RECORDS: ManagedChannelPluginRecord[] = [
   {
     channelId: 'feishu',
     pluginId: 'openclaw-lark',
+    packageName: '@larksuite/openclaw-lark',
+    npxSpecifier: '@larksuite/openclaw-lark-tools',
     cleanupPluginIds: ['feishu', 'feishu-openclaw-plugin', 'openclaw-lark'],
     cleanupChannelIds: ['feishu'],
     smokeTestPolicy: 'diagnostic-only',

@@ -25,6 +25,9 @@ export interface ReconcileIncompatibleExtensionsResult {
   incompatiblePlugins: IncompatibleExtensionPlugin[]
   quarantinedPluginIds: string[]
   prunedPluginIds: string[]
+  orphanedPluginIds?: string[]
+  dryRun?: boolean
+  smokeTestSkipped?: boolean
   failureKind?: 'permission-denied' | 'filesystem-write-failed' | 'partial-quarantine'
   failedPluginIds?: string[]
   failedPaths?: string[]
@@ -44,6 +47,7 @@ interface PluginInstallSafetyOptions {
   readConfig?: () => Promise<Record<string, any> | null>
   resolveHostOpenClawPackageRoot?: () => Promise<string | null>
   writeConfig?: (config: Record<string, any>) => Promise<void>
+  env?: NodeJS.ProcessEnv
   now?: () => number
   runNodeEval?: typeof runNodeEvalWithQualifiedRuntime
   scopePluginIds?: string[]
@@ -60,6 +64,7 @@ interface ExtensionPackageManifest {
 }
 
 const MANAGED_CHANNEL_PLUGIN_RECORDS = listManagedChannelPluginRecords()
+const PLUGIN_ENTRY_SMOKE_TEST_TIMEOUT_MS = 5_000
 
 function normalizePluginIds(values: string[] | undefined): string[] {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))]
@@ -140,6 +145,19 @@ function shouldSkipManagedPluginQuarantine(pluginId: string): boolean {
   return managedPlugin.channelId === 'openclaw-weixin'
 }
 
+function buildPluginSmokeTestEnv(sourceEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const keys = process.platform === 'win32'
+    ? ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'LOCALAPPDATA', 'APPDATA', 'USERPROFILE']
+    : ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP']
+  const env: Record<string, string> = {}
+  for (const key of keys) {
+    const value = sourceEnv[key]
+    if (value !== undefined) env[key] = value
+  }
+  if (!env.PATH && env.Path) env.PATH = env.Path
+  return env as NodeJS.ProcessEnv
+}
+
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
     const raw = await readFile(filePath, 'utf8')
@@ -190,7 +208,7 @@ async function pluginTreeReferencesPluginSdk(rootPath: string): Promise<boolean>
 
 async function smokeTestPluginEntry(
   entryPath: string,
-  options: Pick<PluginInstallSafetyOptions, 'runNodeEval'>
+  options: Pick<PluginInstallSafetyOptions, 'env' | 'runNodeEval'>
 ): Promise<{ ok: boolean; stderr: string }> {
   const script = `
     import { pathToFileURL } from 'node:url'
@@ -206,6 +224,9 @@ async function smokeTestPluginEntry(
   const result = await runNodeEval({
     script,
     args: [entryPath],
+    env: buildPluginSmokeTestEnv(options.env),
+    timeoutMs: PLUGIN_ENTRY_SMOKE_TEST_TIMEOUT_MS,
+    maxBuffer: 512 * 1024,
   })
   const mergedStderr = [result.stderr, result.stdout].filter(Boolean).join('\n').trim()
 
@@ -231,6 +252,60 @@ async function smokeTestPluginEntry(
     throw new Error(`插件导入 smoke test 超时: ${entryPath}`)
   }
   throw new Error(`插件导入 smoke test 执行失败: ${detail}`)
+}
+
+async function findPotentialIncompatibleExtensionPlugins(
+  options: Pick<
+    PluginInstallSafetyOptions,
+    'homeDir' | 'quarantineOfficialManagedPlugins' | 'scopePluginIds'
+  >
+): Promise<IncompatibleExtensionPlugin[]> {
+  const homeDir = options.homeDir
+  const scopedPluginIds = normalizePluginIds(options.scopePluginIds)
+  const extensionsDir = path.join(homeDir, 'extensions')
+  let entries: Array<import('node:fs').Dirent<string>>
+
+  try {
+    entries = await readdir(extensionsDir, { withFileTypes: true, encoding: 'utf8' })
+  } catch {
+    return []
+  }
+
+  const incompatible: IncompatibleExtensionPlugin[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (scopedPluginIds.length > 0 && !scopedPluginIds.includes(entry.name)) continue
+    if (!shouldQuarantineOfficialManagedPlugin(entry.name, options)) continue
+    if (shouldSkipManagedPluginQuarantine(entry.name)) continue
+
+    const pluginDir = path.join(extensionsDir, entry.name)
+    const packageJsonPath = path.join(pluginDir, 'package.json')
+    const manifest = await readJsonFile<ExtensionPackageManifest>(packageJsonPath)
+    if (!manifest) continue
+
+    const extensionEntries = Array.isArray(manifest.openclaw?.extensions)
+      ? manifest.openclaw?.extensions.filter((item) => typeof item === 'string' && item.trim())
+      : []
+    if (extensionEntries.length === 0) continue
+    if (!await pluginTreeReferencesPluginSdk(pluginDir)) continue
+
+    try {
+      createRequire(packageJsonPath).resolve('openclaw/plugin-sdk')
+      continue
+    } catch (error) {
+      if (!looksLikePluginSdkResolutionFailure(error)) continue
+    }
+
+    incompatible.push({
+      pluginId: entry.name,
+      packageName: String(manifest.name || entry.name).trim() || entry.name,
+      installPath: pluginDir,
+      displayInstallPath: formatDisplayPath(pluginDir),
+      reason: "只读扫描发现插件引用 'openclaw/plugin-sdk'，但当前插件目录无法解析宿主 SDK；未导入插件入口。",
+    })
+  }
+
+  return incompatible
 }
 
 async function findIncompatibleExtensionPlugins(
@@ -523,6 +598,69 @@ export async function reconcileIncompatibleExtensionPlugins(
     incompatiblePlugins,
     quarantinedPluginIds,
     prunedPluginIds,
+    ...(orphanedPluginIds.length > 0 ? { orphanedPluginIds } : {}),
+  }
+}
+
+function buildIncompatiblePluginScanSummary(
+  scanResult: Pick<ReconcileIncompatibleExtensionsResult, 'incompatiblePlugins' | 'orphanedPluginIds'>
+): string {
+  const incompatibleCount = scanResult.incompatiblePlugins.length
+  const orphanedCount = scanResult.orphanedPluginIds?.length || 0
+  if (incompatibleCount > 0 || orphanedCount > 0) {
+    const parts = [
+      incompatibleCount > 0 ? `${incompatibleCount} 个疑似不兼容插件` : '',
+      orphanedCount > 0 ? `${orphanedCount} 个残留插件配置` : '',
+    ].filter(Boolean)
+    return `只读扫描发现 ${parts.join('、')}，未做写盘修改。`
+  }
+  return '未发现损坏插件。'
+}
+
+export async function scanIncompatibleExtensionPlugins(
+  options: PluginInstallSafetyOptions
+): Promise<RepairIncompatibleExtensionsResult> {
+  try {
+    const normalizedScopePluginIds = normalizePluginIds(options.scopePluginIds)
+    const incompatiblePlugins = await findPotentialIncompatibleExtensionPlugins(options)
+    const currentConfig = await loadCurrentConfig(options)
+    const orphanedPluginIds = normalizedScopePluginIds.length > 0
+      ? await findOrphanedManagedPluginConfigIds(
+        options.homeDir,
+        currentConfig,
+        normalizedScopePluginIds,
+        options.platform
+      )
+      : []
+    const scanResult: ReconcileIncompatibleExtensionsResult = {
+      incompatiblePlugins,
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+      orphanedPluginIds,
+      dryRun: true,
+      smokeTestSkipped: true,
+    }
+
+    return {
+      ok: true,
+      repaired: false,
+      summary: buildIncompatiblePluginScanSummary(scanResult),
+      stderr: '',
+      ...scanResult,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      repaired: false,
+      incompatiblePlugins: [],
+      quarantinedPluginIds: [],
+      prunedPluginIds: [],
+      orphanedPluginIds: [],
+      dryRun: true,
+      smokeTestSkipped: true,
+      summary: '只读扫描损坏插件环境失败，请重试。',
+      stderr: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 

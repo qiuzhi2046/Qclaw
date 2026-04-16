@@ -24,13 +24,14 @@ async function createTempDir(prefix: string): Promise<string> {
   return dir
 }
 
-async function writeHostOpenClawPackage(rootDir: string): Promise<void> {
+async function writeHostOpenClawPackage(rootDir: string, version = '2026.4.12'): Promise<void> {
   await mkdir(path.join(rootDir, 'dist', 'plugin-sdk'), { recursive: true })
   await writeFile(
     path.join(rootDir, 'package.json'),
     JSON.stringify(
       {
         name: 'openclaw',
+        version,
         type: 'module',
         exports: {
           './plugin-sdk': './dist/plugin-sdk/index.js',
@@ -65,6 +66,8 @@ describe('ensureWindowsPluginHostRuntimeBridge', () => {
 
     const bridgePath = path.join(homeDir, 'node_modules', 'openclaw')
     expect(result.ok).toBe(true)
+    expect(result.packageVersion).toBe('2026.4.12')
+    expect(result.diagnosticSeverity).toBe('none')
     expect(result.bridgePath).toBe(bridgePath)
     expect(await realpath(bridgePath)).toBe(await realpath(hostOpenClawPackageRoot))
 
@@ -96,6 +99,7 @@ describe('ensureWindowsPluginHostRuntimeBridge', () => {
 
     const bridgePath = path.join(homeDir, 'node_modules', 'openclaw')
     expect(result.ok).toBe(true)
+    expect(result.packageVersion).toBe('2026.4.12')
     expect(result.bridgePath).toBe(bridgePath)
     expect(await realpath(bridgePath)).toBe(await realpath(hostOpenClawPackageRoot))
   })
@@ -131,6 +135,85 @@ describe('ensureWindowsPluginHostRuntimeBridge', () => {
 
     const bridgePath = path.join(homeDir, 'node_modules', 'openclaw')
     expect(result.ok).toBe(true)
+    expect(result.packageVersion).toBe('2026.4.12')
     expect(await realpath(bridgePath)).toBe(await realpath(newHostOpenClawPackageRoot))
+  })
+
+  itOnWindows('rejects a host package root that is not OpenClaw 2026.4.12', async () => {
+    const homeDir = await createTempDir('qclaw-win-plugin-home-version-')
+    const hostRootParent = await createTempDir('qclaw-win-plugin-host-version-')
+    const hostOpenClawPackageRoot = path.join(hostRootParent, 'node_modules', 'openclaw')
+    await writeHostOpenClawPackage(hostOpenClawPackageRoot, '2026.3.24')
+
+    const result = await ensureWindowsPluginHostRuntimeBridge({
+      caller: 'channel-preflight',
+      homeDir,
+      hostOpenClawPackageRoot,
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      created: false,
+      diagnosticSeverity: 'error',
+      failureKind: 'version_mismatch',
+      packageVersion: '2026.3.24',
+    })
+  })
+
+  itOnWindows('treats startup bridge failures as warnings and channel preflight failures as hard errors', async () => {
+    const homeDir = await createTempDir('qclaw-win-plugin-home-severity-')
+    const hostRootParent = await createTempDir('qclaw-win-plugin-host-severity-')
+    const hostOpenClawPackageRoot = path.join(hostRootParent, 'node_modules', 'openclaw')
+    await mkdir(hostOpenClawPackageRoot, { recursive: true })
+    await writeFile(path.join(hostOpenClawPackageRoot, 'package.json'), JSON.stringify({ name: 'not-openclaw' }))
+
+    await expect(
+      ensureWindowsPluginHostRuntimeBridge({
+        caller: 'startup',
+        homeDir,
+        hostOpenClawPackageRoot,
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      diagnosticSeverity: 'warning',
+      failureKind: 'invalid_host_package',
+    })
+
+    await expect(
+      ensureWindowsPluginHostRuntimeBridge({
+        caller: 'channel-preflight',
+        homeDir,
+        hostOpenClawPackageRoot,
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      diagnosticSeverity: 'error',
+      failureKind: 'invalid_host_package',
+    })
+  })
+
+  itOnWindows('refuses to delete an existing real bridge directory', async () => {
+    const homeDir = await createTempDir('qclaw-win-plugin-home-real-dir-')
+    const hostRootParent = await createTempDir('qclaw-win-plugin-host-real-dir-')
+    const hostOpenClawPackageRoot = path.join(hostRootParent, 'node_modules', 'openclaw')
+    await writeHostOpenClawPackage(hostOpenClawPackageRoot)
+
+    const bridgePath = path.join(homeDir, 'node_modules', 'openclaw')
+    await mkdir(bridgePath, { recursive: true })
+    await writeFile(path.join(bridgePath, 'do-not-delete.txt'), 'keep me')
+
+    const result = await ensureWindowsPluginHostRuntimeBridge({
+      caller: 'channel-preflight',
+      homeDir,
+      hostOpenClawPackageRoot,
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      created: false,
+      diagnosticSeverity: 'error',
+      failureKind: 'unsafe_existing_bridge_path',
+    })
+    await expect(readFile(path.join(bridgePath, 'do-not-delete.txt'), 'utf8')).resolves.toBe('keep me')
   })
 })

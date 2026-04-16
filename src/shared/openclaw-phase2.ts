@@ -153,7 +153,7 @@ export interface OpenClawGuardedWriteResult {
   changedJsonPaths: string[]
   ownershipSummary: OpenClawOwnershipSummary | null
   message?: string
-  errorCode?: 'no_active_install' | 'baseline_backup_required' | 'snapshot_failed' | 'write_failed'
+  errorCode?: 'no_active_install' | 'baseline_backup_required' | 'snapshot_failed' | 'write_failed' | 'config_read_failed' | 'managed_channel_busy'
   gatewayApply?: {
     ok: boolean
     requestedAction: 'none' | 'hot-reload' | 'restart'

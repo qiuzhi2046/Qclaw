@@ -19,6 +19,9 @@ import type {
   FeishuInstallerPendingPrompt,
   FeishuInstallerPromptResolution,
 } from '../shared/feishu-installer-session'
+import type {
+  ChannelInstallerGuardrailStatus,
+} from '../shared/channel-installer-session'
 import type { OpenClawBackupRootInfo } from '../shared/openclaw-phase3'
 import type {
   OpenClawInstallCandidate as SharedOpenClawInstallCandidate,
@@ -219,7 +222,9 @@ interface FeishuInstallerSessionSnapshot {
   ok: boolean
   canceled: boolean
   command: string[]
+  guardrail?: ChannelInstallerGuardrailStatus
   pendingPrompt: FeishuInstallerPendingPrompt | null
+  authResults: FeishuInstallerAuthResult[]
 }
 
 interface FeishuInstallerSessionEvent {
@@ -232,7 +237,15 @@ interface FeishuInstallerSessionEvent {
   ok?: boolean
   canceled?: boolean
   command?: string[]
+  guardrail?: ChannelInstallerGuardrailStatus
   pendingPrompt?: FeishuInstallerPendingPrompt | null
+}
+
+interface FeishuInstallerAuthResult {
+  appId: string
+  openId: string
+  isExisting?: boolean
+  domain?: string
 }
 
 interface WeixinInstallerSessionSnapshot {
@@ -244,6 +257,7 @@ interface WeixinInstallerSessionSnapshot {
   ok: boolean
   canceled: boolean
   command: string[]
+  guardrail?: ChannelInstallerGuardrailStatus
   beforeAccountIds: string[]
   afterAccountIds: string[]
   newAccountIds: string[]
@@ -259,6 +273,7 @@ interface WeixinInstallerSessionEvent {
   ok?: boolean
   canceled?: boolean
   command?: string[]
+  guardrail?: ChannelInstallerGuardrailStatus
   beforeAccountIds?: string[]
   afterAccountIds?: string[]
   newAccountIds?: string[]

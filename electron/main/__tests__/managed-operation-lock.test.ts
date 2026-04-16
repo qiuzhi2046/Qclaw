@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isManagedOperationLockBusy,
+  tryAcquireManagedOperationLease,
+  tryAcquireManagedOperationLeases,
   resetManagedOperationLocksForTests,
   withManagedOperationLock,
 } from '../managed-operation-lock'
@@ -42,5 +45,35 @@ describe('managed-operation-lock', () => {
 
     await Promise.all([runWithKey('runtime-install'), runWithKey('oauth-install')])
     expect(maxActive).toBe(2)
+  })
+
+  it('supports atomic try-acquire for a single key', () => {
+    resetManagedOperationLocksForTests()
+
+    const lease = tryAcquireManagedOperationLease('runtime-install')
+    const duplicate = tryAcquireManagedOperationLease('runtime-install')
+
+    expect(lease?.key).toBe('runtime-install')
+    expect(duplicate).toBeNull()
+    expect(isManagedOperationLockBusy('runtime-install')).toBe(true)
+
+    lease?.release()
+    expect(isManagedOperationLockBusy('runtime-install')).toBe(false)
+  })
+
+  it('rolls back earlier keys when multi-key try-acquire fails', () => {
+    resetManagedOperationLocksForTests()
+
+    const held = tryAcquireManagedOperationLease('managed-channel-plugin:feishu')
+    const leases = tryAcquireManagedOperationLeases([
+      'managed-channel-plugin:dingtalk',
+      'managed-channel-plugin:feishu',
+    ])
+
+    expect(leases).toBeNull()
+    expect(isManagedOperationLockBusy('managed-channel-plugin:dingtalk')).toBe(false)
+    expect(isManagedOperationLockBusy('managed-channel-plugin:feishu')).toBe(true)
+
+    held?.release()
   })
 })

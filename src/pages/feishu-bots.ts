@@ -3,6 +3,7 @@ import {
   applyFeishuMultiBotIsolation,
   detectFeishuIsolationDrift,
   getFeishuManagedAgentId,
+  isFeishuManagedAgentId,
 } from '../lib/feishu-multi-bot-routing'
 
 const DEFAULT_FEISHU_ACCOUNT_ID = 'default'
@@ -35,6 +36,16 @@ function cloneConfig(config: Record<string, any> | null): Record<string, any> {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeAllowFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const users = new Set<string>()
+  for (const item of value) {
+    const normalized = normalizeText(item)
+    if (normalized) users.add(normalized)
+  }
+  return Array.from(users)
 }
 
 function normalizeLegacyBotDisplayName(rawName: string, accountId: string, isDefault: boolean): string {
@@ -82,6 +93,13 @@ function normalizeFeishuBlockStreamingCoalesce(blockStreaming: unknown): { enabl
 function alignFeishuAccountConfigWithRuntime(account: Record<string, any>): void {
   if (!hasOwnRecord(account)) return
 
+  const allowFrom = normalizeAllowFrom(account.allowFrom)
+  if (allowFrom.length > 0) {
+    account.allowFrom = allowFrom
+  } else {
+    delete account.allowFrom
+  }
+
   if (!hasOwnRecord(account.blockStreamingCoalesce)) {
     const nextBlockStreamingCoalesce = normalizeFeishuBlockStreamingCoalesce(account.blockStreaming)
     if (nextBlockStreamingCoalesce) {
@@ -94,6 +112,13 @@ function alignFeishuAccountConfigWithRuntime(account: Record<string, any>): void
 
 function alignFeishuChannelConfigWithRuntime(feishu: Record<string, any>): void {
   if (!hasOwnRecord(feishu)) return
+
+  const allowFrom = normalizeAllowFrom(feishu.allowFrom)
+  if (allowFrom.length > 0) {
+    feishu.allowFrom = allowFrom
+  } else {
+    delete feishu.allowFrom
+  }
 
   if (!normalizeText(feishu.connectionMode)) {
     feishu.connectionMode = FEISHU_RUNTIME_DEFAULT_CONNECTION_MODE
@@ -217,6 +242,20 @@ export function listResidualLegacyFeishuAgentIds(config: Record<string, any> | n
   return Array.from(residualAgentIds).sort((left, right) => left.localeCompare(right, 'en'))
 }
 
+function stripManagedFeishuRoutingState(config: Record<string, any>): void {
+  if (Array.isArray(config?.agents?.list)) {
+    config.agents.list = config.agents.list.filter(
+      (agent: Record<string, any>) => !isFeishuManagedAgentId(agent?.id)
+    )
+  }
+
+  if (Array.isArray(config?.bindings)) {
+    config.bindings = config.bindings.filter((binding: Record<string, any>) => !(
+      normalizeText(binding?.match?.channel) === 'feishu' && isFeishuManagedAgentId(binding?.agentId)
+    ))
+  }
+}
+
 export function addFeishuBotConfig(
   config: Record<string, any> | null,
   input: AddFeishuBotInput
@@ -286,6 +325,7 @@ export function removeFeishuBotConfig(
 
   if (listFeishuBots(next).length === 0) {
     feishu.enabled = false
+    stripManagedFeishuRoutingState(next)
   }
 
   return applyFeishuMultiBotIsolation(next)

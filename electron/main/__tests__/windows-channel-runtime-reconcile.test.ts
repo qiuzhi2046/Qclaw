@@ -335,4 +335,65 @@ describe('windows channel runtime reconcile', () => {
     })
     expect(readCachedWindowsChannelRuntimeSnapshot()).toEqual(cachedBeforeStage)
   })
+
+  it('returns busy without switching cache when a managed channel operation is active', async () => {
+    const previousRuntime = createRuntimeSnapshot('runtime-a')
+    const nextRuntime = createRuntimeSnapshot('runtime-b')
+    const cachedSnapshot = createChannelRuntimeSnapshot({
+      agentId: 'feishu-runtime-a',
+      runtime: previousRuntime,
+    })
+    await reconcileWindowsChannelRuntimeSelection(
+      {
+        nextSelectedRuntimeSnapshot: previousRuntime,
+        previousSelectedRuntimeSnapshot: null,
+      },
+      {
+        buildAuthoritativeSnapshot: async () => cachedSnapshot,
+        buildGatewayOwnerSnapshotFromLauncherIntegrity,
+        inspectGatewayLauncherIntegrity: async () => ({
+          launcherPath: 'C:\\Users\\alice\\runtime-a\\gateway.cmd',
+          shouldReinstallService: false,
+          status: 'healthy',
+          taskName: '\\OpenClaw Gateway',
+        }),
+        platform: 'win32',
+        refreshRuntimeBridge: async () => ({ ok: true }),
+      }
+    )
+    const refreshRuntimeBridge = vi.fn(async () => ({ ok: true }))
+
+    const result = await reconcileWindowsChannelRuntimeSelection(
+      {
+        nextSelectedRuntimeSnapshot: nextRuntime,
+        previousSelectedRuntimeSnapshot: previousRuntime,
+      },
+      {
+        buildAuthoritativeSnapshot: async () =>
+          createChannelRuntimeSnapshot({
+            agentId: 'feishu-runtime-b',
+            runtime: nextRuntime,
+          }),
+        buildGatewayOwnerSnapshotFromLauncherIntegrity,
+        inspectGatewayLauncherIntegrity: async () => ({
+          launcherPath: 'C:\\Users\\alice\\runtime-b\\gateway.cmd',
+          shouldReinstallService: false,
+          status: 'healthy',
+          taskName: '\\OpenClaw Gateway',
+        }),
+        isManagedChannelOperationBusy: () => true,
+        platform: 'win32',
+        refreshRuntimeBridge,
+      }
+    )
+
+    expect(result).toMatchObject({
+      busy: true,
+      changed: true,
+      reconciled: false,
+      snapshot: cachedSnapshot,
+    })
+    expect(refreshRuntimeBridge).not.toHaveBeenCalled()
+    expect(readCachedWindowsChannelRuntimeSnapshot()).toEqual(cachedSnapshot)
+  })
 })

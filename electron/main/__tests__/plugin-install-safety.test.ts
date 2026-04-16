@@ -4,6 +4,7 @@ import {
   finalizePluginInstallSafetyResult,
   repairIncompatibleExtensionPlugins,
   reconcileIncompatibleExtensionPlugins,
+  scanIncompatibleExtensionPlugins,
 } from '../plugin-install-safety'
 
 const tempDirs: string[] = []
@@ -63,6 +64,7 @@ async function writeHostOpenClawPackage(rootDir: string): Promise<void> {
     JSON.stringify(
       {
         name: 'openclaw',
+        version: '2026.4.12',
         type: 'module',
         exports: {
           './plugin-sdk': './dist/plugin-sdk/index.js',
@@ -85,6 +87,98 @@ afterEach(async () => {
 })
 
 describe('reconcileIncompatibleExtensionPlugins', () => {
+  it('scans suspected plugin-sdk breakage without importing plugin entries or writing to disk', async () => {
+    const homeDir = await createTempHome()
+    await writePluginPackage(
+      homeDir,
+      'broken-sdk-plugin',
+      '@demo/broken-sdk-plugin',
+      'index.ts',
+      'import { buildChannelConfigSchema } from "openclaw/plugin-sdk"\nexport default {}'
+    )
+
+    const writeConfig = vi.fn(async () => {
+      throw new Error('scan must not write config')
+    })
+    const runNodeEval = vi.fn(async () => {
+      throw new Error('scan must not import plugin entry')
+    })
+    const mkdirDirectory = vi.fn(async () => {
+      throw new Error('scan must not create quarantine directory')
+    })
+    const renameDirectory = vi.fn(async () => {
+      throw new Error('scan must not quarantine plugins')
+    })
+
+    const result = await scanIncompatibleExtensionPlugins({
+      homeDir,
+      readConfig: async () => ({
+        plugins: {
+          allow: ['broken-sdk-plugin'],
+        },
+      }),
+      writeConfig,
+      runNodeEval,
+      mkdirDirectory,
+      renameDirectory,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.repaired).toBe(false)
+    expect(result.dryRun).toBe(true)
+    expect(result.smokeTestSkipped).toBe(true)
+    expect(result.incompatiblePlugins).toEqual([
+      expect.objectContaining({
+        pluginId: 'broken-sdk-plugin',
+        packageName: '@demo/broken-sdk-plugin',
+      }),
+    ])
+    expect(result.quarantinedPluginIds).toEqual([])
+    expect(result.prunedPluginIds).toEqual([])
+    expect(writeConfig).not.toHaveBeenCalled()
+    expect(runNodeEval).not.toHaveBeenCalled()
+    expect(mkdirDirectory).not.toHaveBeenCalled()
+    expect(renameDirectory).not.toHaveBeenCalled()
+    await expect(
+      readFile(path.join(homeDir, 'extensions', 'broken-sdk-plugin', 'package.json'), 'utf8')
+    ).resolves.toContain('@demo/broken-sdk-plugin')
+  })
+
+  it('reports scoped orphaned managed plugin config during scan without pruning it', async () => {
+    const homeDir = await createTempHome()
+    const writeConfig = vi.fn(async () => {
+      throw new Error('scan must not write config')
+    })
+
+    const result = await scanIncompatibleExtensionPlugins({
+      homeDir,
+      scopePluginIds: ['dingtalk-connector', 'dingtalk'],
+      readConfig: async () => ({
+        channels: {
+          'dingtalk-connector': {
+            enabled: true,
+          },
+        },
+        plugins: {
+          allow: ['dingtalk-connector'],
+          installs: {
+            'dingtalk-connector': {
+              installPath: path.join(homeDir, 'extensions', 'dingtalk-connector'),
+            },
+          },
+        },
+      }),
+      writeConfig,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.repaired).toBe(false)
+    expect(result.orphanedPluginIds).toEqual(['dingtalk-connector'])
+    expect(result.prunedPluginIds).toEqual([])
+    expect(result.summary).toContain('残留插件配置')
+    expect(writeConfig).not.toHaveBeenCalled()
+  })
+
   itOnWindows('does not quarantine plugin-sdk plugins when a host runtime bridge can be established to the active OpenClaw package root', async () => {
     const homeDir = await createTempHome()
     const hostOpenClawPackageRoot = path.join(homeDir, 'global-host', 'node_modules', 'openclaw')
@@ -259,6 +353,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     expect(result).toEqual({
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
+      orphanedPluginIds: ['dingtalk-connector'],
       prunedPluginIds: ['dingtalk-connector'],
     })
     expect(writeConfig).toHaveBeenCalledWith({
@@ -308,6 +403,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     expect(result).toEqual({
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
+      orphanedPluginIds: ['dingtalk-connector'],
       prunedPluginIds: ['dingtalk-connector'],
     })
     expect(writeConfig).toHaveBeenCalledWith({
@@ -366,6 +462,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     expect(result).toEqual({
       incompatiblePlugins: [],
       quarantinedPluginIds: [],
+      orphanedPluginIds: ['dingtalk-connector'],
       prunedPluginIds: ['dingtalk-connector'],
     })
     expect(writeConfig).toHaveBeenCalledWith({
@@ -789,6 +886,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     expect(result.ok).toBe(true)
     expect(result.repaired).toBe(true)
     expect(result.summary).toContain('已自动清理')
+    expect(result.orphanedPluginIds).toEqual(['openclaw-weixin'])
     expect(result.prunedPluginIds).toEqual(['openclaw-weixin'])
   })
 
@@ -820,6 +918,7 @@ describe('reconcileIncompatibleExtensionPlugins', () => {
     })
 
     expect(result.ok).toBe(true)
+    expect(result.orphanedPluginIds).toEqual(['openclaw-weixin'])
     expect(result.prunedPluginIds).toEqual(['openclaw-weixin'])
     expect(runNodeEval).not.toHaveBeenCalled()
   })
