@@ -23,6 +23,7 @@ function failedWithStdout(stdout: string, code = 1): CliCommandResult {
 
 beforeEach(() => {
   resetOpenClawLegacyEnvWarningsForTests()
+  vi.unstubAllGlobals()
 })
 
 describe('applyModelConfigAction', () => {
@@ -599,5 +600,91 @@ describe('scanLocalModels', () => {
 
     expect(result.ok).toBe(false)
     expect(result.errorCode).toBe('parse_error')
+  })
+
+  it('falls back to direct /models discovery for custom-openai when the CLI reports no models found', async () => {
+    const runCommand = vi.fn(async () => ok('No models found.'))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'gpt-5' },
+          { id: 'gpt-4.1', display_name: 'GPT-4.1' },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await scanLocalModels(
+      {
+        provider: 'custom-openai',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        apiKey: 'sk-test',
+      },
+      { runCommand }
+    )
+
+    expect(runCommand).toHaveBeenCalledWith(
+      ['models', 'list', '--all', '--local', '--json', '--provider', 'custom-openai'],
+      expect.any(Number)
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1234/v1/models',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          Authorization: 'Bearer sk-test',
+        }),
+      })
+    )
+    expect(result.ok).toBe(true)
+    expect((result.data as any).models).toEqual([
+      { key: 'custom-openai/gpt-5', name: 'gpt-5' },
+      { key: 'custom-openai/gpt-4.1', name: 'gpt-4.1' },
+    ])
+    expect((result.data as any).count).toBe(2)
+  })
+
+  it('applies timeoutMs to the custom-openai /models HTTP fallback', async () => {
+    vi.useFakeTimers()
+    try {
+      const runCommand = vi.fn(async () => ok('No models found.'))
+      const fetchMock = vi.fn((_: string, init?: RequestInit) =>
+        new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            ;(error as Error & { name: string }).name = 'AbortError'
+            reject(error)
+          })
+        })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const resultPromise = scanLocalModels(
+        {
+          provider: 'custom-openai',
+          baseUrl: 'http://127.0.0.1:1234/v1',
+          apiKey: 'sk-test',
+          timeoutMs: 25,
+        },
+        { runCommand }
+      )
+
+      await vi.advanceTimersByTimeAsync(25)
+      const result = await resultPromise
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1234/v1/models',
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        })
+      )
+      expect(result.ok).toBe(true)
+      expect((result.data as any).count).toBe(0)
+      expect((result.data as any).models).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
