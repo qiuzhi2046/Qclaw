@@ -1073,7 +1073,7 @@ export default function ModelsPage() {
       setEnvVars(env)
       setConfig(cfg)
 
-      logUpstreamModelStateFallback('ModelsPage', upstreamState)
+      logUpstreamModelStateFallback('ModelsPage', upstreamState, console.info, import.meta.env.DEV)
 
       const upstreamStatusData = getUpstreamModelStatusLike(upstreamState)
       const upstreamCatalog = getUpstreamCatalogItemsLike(upstreamState)
