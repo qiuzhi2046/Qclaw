@@ -27,7 +27,15 @@
     <a href="https://github.com/qiuzhi2046/qclaw/issues/new?labels=enhancement">功能建议</a>
   </p>
 </div>
+<br><br>
 
+**👋 雷猴哇，朋友们，我们决定暂停 Qclaw 的更新了~**<br>
+OpenClaw官方已经出了Mac版安装包（也还没出win），虽然目前非常不好用<br>
+但相信不久后就能成为主流了（期望吧。。。。。如果他们未来做得还是不好，那我就再回来搞！！！）<br>
+而且最近OpenClaw已经变成2天一更了，这更新频率是真跟不上了😂<br>
+**综上所述，我觉得Qclaw的使命已经完成啦，如果它有帮到过你，我们真的会很开心🤗**<br>
+点进来的朋友希望大家都能动手拉代码改改呀，练习下Vibe Coding，嘿嘿~<br>
+我们也在筹备新的项目啦，希望未来尽快能跟大家见面~❤️
 ## Star History
 
 <a href="https://www.star-history.com/?repos=qiuzhi2046%2FQclaw&type=date&legend=top-left">
@@ -223,9 +231,7 @@ build/              应用图标与打包资源
 
 ## 支持环境
 
-- macOS 11 (Big Sur)+
-- Windows 10+（x64）(开发中)
-- Linux（计划中）
+- macOS 12+
 
 ## 贡献指南
 我们欢迎每一个致力于让前沿 AI Agent 变得更好用、更易用的朋友加入贡献者行列！
