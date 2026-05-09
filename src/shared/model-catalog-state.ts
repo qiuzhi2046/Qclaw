@@ -315,6 +315,62 @@ export function mergeConfiguredProviderModelsIntoCatalog<T extends ModelsPageCat
   return merged
 }
 
+export function mergeRuntimeProviderModelsIntoCatalog<T extends ModelsPageCatalogItem>(
+  catalog: T[],
+  providers: ModelsPageConfiguredProvider[],
+  statusData: Record<string, any> | null
+): T[] {
+  const merged = Array.isArray(catalog) ? [...catalog] : []
+  if (merged.length === 0 && providers.length === 0) return merged
+
+  const keyToIndex = new Map<string, number>()
+  const runtimeKeyToIndex = new Map<string, number>()
+  merged.forEach((item, index) => {
+    const key = String(item?.key || '').trim().toLowerCase()
+    if (key) keyToIndex.set(key, index)
+    const runtimeKey = toRuntimeModelEquivalenceKey(item?.key)
+    if (runtimeKey) {
+      runtimeKeyToIndex.set(runtimeKey, index)
+    }
+  })
+
+  for (const provider of providers) {
+    const providerId = canonicalizeModelProviderId(provider.id)
+    if (!providerId) continue
+
+    for (const runtimeModelKey of collectRuntimeProviderModelKeys(providerId, statusData)) {
+      const normalizedRuntimeKey = String(runtimeModelKey || '').trim()
+      if (!normalizedRuntimeKey) continue
+
+      const existingIndex = keyToIndex.get(normalizedRuntimeKey.toLowerCase())
+      if (existingIndex !== undefined) {
+        continue
+      }
+
+      const runtimeEquivalenceKey = toRuntimeModelEquivalenceKey(normalizedRuntimeKey)
+      if (runtimeEquivalenceKey && runtimeKeyToIndex.has(runtimeEquivalenceKey)) {
+        continue
+      }
+
+      const modelName = String(normalizedRuntimeKey.split('/').slice(1).join('/') || normalizedRuntimeKey).trim()
+      merged.push({
+        key: normalizedRuntimeKey,
+        provider: providerId,
+        name: modelName,
+        available: false,
+        verificationState: 'unverified',
+        tags: ['configured'],
+      } as T)
+      keyToIndex.set(normalizedRuntimeKey.toLowerCase(), merged.length - 1)
+      if (runtimeEquivalenceKey) {
+        runtimeKeyToIndex.set(runtimeEquivalenceKey, merged.length - 1)
+      }
+    }
+  }
+
+  return merged
+}
+
 export function canSwitchModelsPageCatalogItem(item: ModelsPageCatalogItem | null | undefined): boolean {
   return Boolean(item)
 }
@@ -493,23 +549,28 @@ export function resolveModelsPageCatalogState<T extends ModelsPageCatalogItem>(p
     statusData: params.statusData,
   })
   const catalogWithConfiguredModels = mergeConfiguredProviderModelsIntoCatalog(params.catalog, params.config)
-  const effectiveCatalog = buildEffectiveModelCatalog(catalogWithConfiguredModels, {
+  const catalogWithRuntimeProviderModels = mergeRuntimeProviderModelsIntoCatalog(
+    catalogWithConfiguredModels,
+    locallyConfiguredProviders,
+    params.statusData
+  )
+  const effectiveCatalogWithRuntimeModels = buildEffectiveModelCatalog(catalogWithRuntimeProviderModels, {
     statusData: params.statusData,
     preferredModelKey: params.preferredModelKey,
     configuredProviderIds: locallyConfiguredProviders.map((provider) => provider.id),
     verificationRecords: params.verificationRecords || [],
   })
   const visibleCatalog = filterCatalogForDisplay(
-    effectiveCatalog,
+    effectiveCatalogWithRuntimeModels,
     params.mode || 'available'
   ) as T[]
   const configuredProviders = filterConfiguredProvidersWithVisibleModels(
     locallyConfiguredProviders,
     visibleCatalog,
-    effectiveCatalog
+    effectiveCatalogWithRuntimeModels
   )
   const scopedCatalog = filterModelsPageCatalogByConfiguredProviders(
-    effectiveCatalog,
+    effectiveCatalogWithRuntimeModels,
     configuredProviders
   ) as T[]
   const scopedVisibleCatalog = filterModelsPageCatalogByConfiguredProviders(
@@ -518,7 +579,7 @@ export function resolveModelsPageCatalogState<T extends ModelsPageCatalogItem>(p
   ) as T[]
 
   return {
-    effectiveCatalog,
+    effectiveCatalog: effectiveCatalogWithRuntimeModels,
     visibleCatalog: scopedVisibleCatalog,
     scopedCatalog,
     configuredProviders,

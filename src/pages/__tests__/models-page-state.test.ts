@@ -642,6 +642,51 @@ describe('models page state helpers', () => {
     ])
   })
 
+  it('keeps custom-openai visible by merging runtime default models when the shared catalog has no provider entries yet', () => {
+    const state = resolveModelsPageCatalogState({
+      catalog: [],
+      envVars: {
+        OPENAI_BASE_URL: 'http://192.168.31.139:12995/v1',
+      },
+      config: null,
+      statusData: {
+        auth: {
+          providers: [{ provider: 'custom-openai', status: 'static', profiles: [{ profileId: 'custom-openai:local' }] }],
+        },
+        defaultModel: 'custom-openai/gpt-4',
+        resolvedDefault: 'custom-openai/gpt-4',
+      },
+      mode: 'all',
+    })
+
+    expect(state.configuredProviders).toEqual([
+      expect.objectContaining({
+        id: 'custom-openai',
+        name: '自定义 OpenAI 兼容',
+      }),
+    ])
+    expect(state.visibleCatalog).toEqual([
+      {
+        key: 'custom-openai/gpt-4',
+        provider: 'custom-openai',
+        name: 'gpt-4',
+        available: true,
+        verificationState: 'verified-available',
+        tags: ['configured'],
+      },
+    ])
+    expect(state.scopedCatalog).toEqual([
+      {
+        key: 'custom-openai/gpt-4',
+        provider: 'custom-openai',
+        name: 'gpt-4',
+        available: true,
+        verificationState: 'verified-available',
+        tags: ['configured'],
+      },
+    ])
+  })
+
   it('applies persisted verification records across alias-equivalent minimax models in the merged provider card', () => {
     const state = resolveModelsPageCatalogState({
       catalog: [

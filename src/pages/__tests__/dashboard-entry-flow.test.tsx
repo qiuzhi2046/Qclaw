@@ -145,6 +145,43 @@ describe('dashboard entry bootstrap flow', () => {
     expect(api.getModelStatus).not.toHaveBeenCalled()
   })
 
+  it('renders saved custom-openai provider models from the shared selector path', () => {
+    const html = renderToStaticMarkup(
+      <MantineProvider>
+        <Dashboard
+          entrySnapshot={{
+            gatewayRunning: true,
+            loadedAt: '2026-04-01T00:00:00.000Z',
+            pairingSummary: null,
+            config: {
+              models: {
+                providers: {
+                  'custom-openai': {
+                    baseUrl: 'http://192.168.31.139:12995/v1',
+                    models: [
+                      { id: 'gpt-4', name: 'gpt-4' },
+                      { id: 'gpt-4.1', name: 'gpt-4.1' },
+                    ],
+                  },
+                },
+              },
+            },
+            modelStatus: {
+              defaultModel: 'custom-openai/gpt-4',
+              resolvedDefault: 'custom-openai/gpt-4',
+              auth: {
+                providers: [{ provider: 'custom-openai', status: 'static', profiles: [{ profileId: 'custom-openai:local' }] }],
+              },
+            },
+          }}
+        />
+      </MantineProvider>
+    )
+
+    expect(html).toContain('自定义 OpenAI 兼容')
+    expect(html).toContain('gpt-4')
+  })
+
   it('allows dashboard entry when gateway probes fail and keeps gatewayRunning false', async () => {
     const api = createBootstrapApi({
       gatewayHealth: vi.fn().mockRejectedValue(new Error('health down')),

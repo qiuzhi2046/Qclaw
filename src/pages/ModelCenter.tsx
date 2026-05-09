@@ -121,6 +121,82 @@ export function buildLocalProviderEnvUpdatesForSubmit(params: {
   return {}
 }
 
+function cloneConfigValue(config: Record<string, any> | null | undefined): Record<string, any> {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return {}
+  }
+  return JSON.parse(JSON.stringify(config)) as Record<string, any>
+}
+
+function ensureObjectRecord(parent: Record<string, any>, key: string): Record<string, any> {
+  const current = parent[key]
+  if (current && typeof current === 'object' && !Array.isArray(current)) {
+    return current as Record<string, any>
+  }
+  parent[key] = {}
+  return parent[key] as Record<string, any>
+}
+
+function stripProviderPrefix(modelKey: string, providerId: string): string {
+  const normalizedModelKey = String(modelKey || '').trim()
+  const normalizedProviderId = String(providerId || '').trim()
+  if (!normalizedModelKey) return ''
+  const providerPrefix = `${normalizedProviderId}/`
+  if (normalizedProviderId && normalizedModelKey.startsWith(providerPrefix)) {
+    return normalizedModelKey.slice(providerPrefix.length).trim()
+  }
+  if (!normalizedModelKey.includes('/')) return normalizedModelKey
+  return normalizedModelKey.split('/').slice(1).join('/').trim()
+}
+
+export function buildNextConfigWithLocalProviderSnapshot(params: {
+  currentConfig: Record<string, any> | null | undefined
+  providerId: string
+  baseUrl: string
+  selectedModelKey: string
+  discoveredModels?: Array<{ key: string; name: string }> | null
+}): Record<string, any> {
+  const providerId = String(params.providerId || '').trim()
+  if (!providerId) {
+    return cloneConfigValue(params.currentConfig)
+  }
+
+  const nextConfig = cloneConfigValue(params.currentConfig)
+  const modelsSection = ensureObjectRecord(nextConfig, 'models')
+  const providersSection = ensureObjectRecord(modelsSection, 'providers')
+  const currentProviderConfig =
+    providersSection[providerId] && typeof providersSection[providerId] === 'object' && !Array.isArray(providersSection[providerId])
+      ? { ...(providersSection[providerId] as Record<string, any>) }
+      : {}
+
+  const persistedModels = new Map<string, { id: string; name: string }>()
+  for (const entry of params.discoveredModels || []) {
+    const modelId = stripProviderPrefix(entry?.key, providerId)
+    if (!modelId || persistedModels.has(modelId)) continue
+    persistedModels.set(modelId, {
+      id: modelId,
+      name: String(entry?.name || modelId).trim() || modelId,
+    })
+  }
+
+  const selectedModelId = stripProviderPrefix(params.selectedModelKey, providerId)
+  if (selectedModelId && !persistedModels.has(selectedModelId)) {
+    persistedModels.set(selectedModelId, {
+      id: selectedModelId,
+      name: selectedModelId,
+    })
+  }
+
+  const normalizedBaseUrl = String(params.baseUrl || '').trim()
+  providersSection[providerId] = {
+    ...currentProviderConfig,
+    ...(normalizedBaseUrl ? { baseUrl: normalizedBaseUrl } : {}),
+    ...(persistedModels.size > 0 ? { models: Array.from(persistedModels.values()) } : {}),
+  }
+
+  return nextConfig
+}
+
 interface LocalConnectionTestResult {
   ok: boolean
   reachable: boolean
@@ -2583,6 +2659,32 @@ export default function ModelCenter({
           toUserFacingCliFailureMessage({
             stderr: authResult.error,
             fallback: '写入认证配置失败',
+          })
+        )
+        return
+      }
+
+      setStatusText('正在写入本地 Provider 配置...')
+      const currentConfig = await window.api.readConfig()
+      const nextConfig = buildNextConfigWithLocalProviderSnapshot({
+        currentConfig,
+        providerId: selectedProviderId,
+        baseUrl: localBaseUrl,
+        selectedModelKey: selectedLocalModel,
+        discoveredModels: scanResult?.models || [],
+      })
+      const writeResult = await window.api.applyConfigPatchGuarded({
+        beforeConfig: currentConfig,
+        afterConfig: nextConfig,
+        reason: 'unknown',
+      })
+      if (!writeResult.ok) {
+        setPhase('ready')
+        setStatusText('')
+        setError(
+          toUserFacingCliFailureMessage({
+            stderr: writeResult.message,
+            fallback: '写入本地 Provider 配置失败',
           })
         )
         return
