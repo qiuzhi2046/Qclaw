@@ -508,6 +508,16 @@ export function createEnvCheckRestartState(currentRunAttempt: number): EnvCheckR
   }
 }
 
+export function buildDevBypassReadyPayload(): EnvCheckReadyPayload {
+  return {
+    hadOpenClawInstalled: false,
+    installedOpenClawDuringCheck: false,
+    gatewayRunning: false,
+    sharedConfigInitialized: false,
+    discoveryResult: null,
+  }
+}
+
 function TakeoverNotification({
   backupRootDirectory,
   failures,
@@ -704,6 +714,7 @@ export default function EnvCheck({
   const [historyOnlyRecoveryFailure, setHistoryOnlyRecoveryFailure] =
     useState<HistoryOnlyRecoveryFailureState | null>(null)
   const [historyOnlyRecoveryConfirmOpened, setHistoryOnlyRecoveryConfirmOpened] = useState(false)
+  const canBypassInDev = import.meta.env.DEV
 
   const updateStep = (id: string, update: Partial<Step>) => {
     setSteps(prev => prev.map(s => s.id === id ? { ...s, ...update } : s))
@@ -797,6 +808,10 @@ export default function EnvCheck({
   const handleRestartEnvCheck = () => {
     closeStartupIssue()
     resetEnvCheck(runAttempt)
+  }
+
+  const handleDevBypass = () => {
+    onReady(buildDevBypassReadyPayload())
   }
 
   const inspectExistingOpenClaw = async (
@@ -1728,6 +1743,16 @@ export default function EnvCheck({
               修复损坏插件环境
             </Button>
           </Tooltip>
+          {canBypassInDev && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="yellow"
+              onClick={handleDevBypass}
+            >
+              开发调试：跳过环境检测
+            </Button>
+          )}
         </div>
       </div>
 

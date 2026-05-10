@@ -60,12 +60,15 @@ export default function Welcome({ onAccept }: WelcomeProps) {
           <IconPinFilled size={12} className="text-red-400 flex-shrink-0" />
           <Text fw={600} size="sm" className="app-text-primary">环境风险</Text>
         </div>
-        <Text size="xs" className="app-text-warning mt-0.5 font-medium">
+        <div
+          className="app-text-warning mt-0.5 font-medium"
+          style={{ fontSize: 'var(--mantine-font-size-xs)', lineHeight: 'var(--mantine-line-height-xs)' }}
+        >
           <ul className="list-disc list-inside app-text-secondary mt-0.5 flex flex-col" style={{ fontSize: '12.5px', lineHeight: 1.7 }}>
-          <li><span className="app-text-warning font-medium">Openclaw权限较大，不建议使用含有重要文件的工作电脑。</span></li>  
-          <li>对于开发者：当前Openclaw 要求 Node.js 版本高于22.16，如果您本地的 Node.js 低于22.16，Qclaw 会自动安装最新版node，可能造成node版本覆盖。</li>  
-        </ul>
-        </Text>
+            <li><span className="app-text-warning font-medium">Openclaw权限较大，不建议使用含有重要文件的工作电脑。</span></li>
+            <li>对于开发者：当前Openclaw 要求 Node.js 版本高于22.16，如果您本地的 Node.js 低于22.16，Qclaw 会自动安装最新版node，可能造成node版本覆盖。</li>
+          </ul>
+        </div>
       </div>
 
       {/* Checkbox */}

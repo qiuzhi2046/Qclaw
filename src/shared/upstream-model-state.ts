@@ -78,8 +78,10 @@ export async function readOpenClawUpstreamModelState(
 export function logUpstreamModelStateFallback(
   scope: string,
   state: RendererUpstreamModelStateResult,
-  logger: (...args: unknown[]) => void = console.info
+  logger: (...args: unknown[]) => void = console.info,
+  enabled = true
 ): void {
+  if (!enabled) return
   if (!state.fallbackUsed || !state.fallbackReason) return
   logger(`[${scope}] upstream model state fallback:`, state.fallbackReason)
 }

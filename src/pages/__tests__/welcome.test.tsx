@@ -27,4 +27,14 @@ describe('Welcome', () => {
     expect(html).toContain('使用 AI 服务可能产生费用，具体取决于你选择的服务商和使用量。')
     expect(html).toContain('本地数据存储（所有配置和数据默认只保存在此电脑上）')
   })
+
+  it('does not render list markup inside paragraph tags', () => {
+    const html = renderToStaticMarkup(
+      <MantineProvider>
+        <Welcome onAccept={vi.fn()} />
+      </MantineProvider>
+    )
+
+    expect(html).not.toMatch(/<p[^>]*>\s*<ul/)
+  })
 })

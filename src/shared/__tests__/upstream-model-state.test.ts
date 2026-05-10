@@ -146,6 +146,19 @@ describe('upstream model state helpers', () => {
       'control-ui-down'
     )
   })
+
+  it('stays silent when fallback logging is explicitly disabled', () => {
+    const logger = vi.fn()
+
+    logUpstreamModelStateFallback(
+      'Dashboard',
+      createUnavailableUpstreamModelState('control-ui-down'),
+      logger,
+      false
+    )
+
+    expect(logger).not.toHaveBeenCalled()
+  })
 })
 
 describe('selectPreferredRendererCatalogItems', () => {
