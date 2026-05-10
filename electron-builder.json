@@ -64,6 +64,21 @@
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": false
   },
+  "linux": {
+    "target": [
+      "AppImage"
+    ],
+    "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}.${ext}",
+    "category": "Development",
+    "icon": "build/icon.png",
+    "maintainer": "join@qiuzhi2046.com"
+  },
+  "deb": {
+    "artifactName": "Qclaw-Lite_${env.QCLAW_DISPLAY_VERSION}_amd64.${ext}"
+  },
+  "rpm": {
+    "artifactName": "Qclaw-Lite_${env.QCLAW_VERSION}-${env.QCLAW_DISPLAY_VERSION}.x86_64.${ext}"
+  },
   "publish": {
     "provider": "generic",
     "channel": "latest",
