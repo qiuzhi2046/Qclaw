@@ -75,8 +75,8 @@ describe('combined update orchestrator', () => {
     runOpenClawUpgradeMock.mockResolvedValue({
       ok: true,
       blocked: false,
-      currentVersion: '2026.3.24',
-      targetVersion: '2026.3.24',
+      currentVersion: '2026.3.28',
+      targetVersion: '2026.3.28',
       installSource: 'npm-global',
       backupCreated: null,
       gatewayWasRunning: false,
@@ -103,7 +103,7 @@ describe('combined update orchestrator', () => {
       ok: true,
       activeCandidate: null,
       currentVersion: '2026.3.23',
-      targetVersion: '2026.3.24',
+      targetVersion: '2026.3.28',
       latestCheck: null,
       policyState: 'supported_not_target',
       enforcement: 'optional_upgrade',
@@ -125,8 +125,8 @@ describe('combined update orchestrator', () => {
     checkOpenClawUpgradeMock.mockResolvedValue({
       ok: false,
       activeCandidate: null,
-      currentVersion: '2026.3.25',
-      targetVersion: '2026.3.24',
+      currentVersion: '2026.3.29',
+      targetVersion: '2026.3.28',
       latestCheck: null,
       policyState: 'above_max',
       enforcement: 'manual_block',
@@ -137,7 +137,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请手动回退到 2026.3.24',
+      manualHint: '请手动回退到 2026.3.28',
       errorCode: 'manual_only',
     })
 
@@ -151,7 +151,7 @@ describe('combined update orchestrator', () => {
       ok: true,
       activeCandidate: null,
       currentVersion: '2026.3.21',
-      targetVersion: '2026.3.24',
+      targetVersion: '2026.3.28',
       latestCheck: null,
       policyState: 'below_min',
       enforcement: 'auto_correct',
@@ -173,8 +173,8 @@ describe('combined update orchestrator', () => {
     checkOpenClawUpgradeMock.mockResolvedValue({
       ok: false,
       activeCandidate: null,
-      currentVersion: '2026.3.25',
-      targetVersion: '2026.3.24',
+      currentVersion: '2026.3.29',
+      targetVersion: '2026.3.28',
       latestCheck: null,
       policyState: 'above_max',
       enforcement: 'manual_block',
@@ -185,7 +185,7 @@ describe('combined update orchestrator', () => {
       upToDate: false,
       gatewayRunning: false,
       warnings: [],
-      manualHint: '请手动回退到 2026.3.24',
+      manualHint: '请手动回退到 2026.3.28',
       errorCode: 'manual_only',
     })
 

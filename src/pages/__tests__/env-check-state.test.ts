@@ -222,7 +222,7 @@ describe('createEnvCheckRestartState', () => {
     expect(isSupportedOpenClawVersion?.('2026.3.23-7')).toBe(true)
     expect(isSupportedOpenClawVersion?.('2026.3.24')).toBe(true)
     expect(isSupportedOpenClawVersion?.('2026.3.21')).toBe(false)
-    expect(isSupportedOpenClawVersion?.('2026.3.25')).toBe(false)
+    expect(isSupportedOpenClawVersion?.('2026.3.29')).toBe(false)
   })
 
   it('maps supported-but-not-pinned installs into an optional upgrade gate', () => {
@@ -275,7 +275,7 @@ describe('createEnvCheckRestartState', () => {
           baselineBackupBypass: null,
         },
         currentVersion: '2026.3.23',
-        targetVersion: '2026.3.24',
+        targetVersion: '2026.3.28',
         latestCheck: null,
         policyState: 'supported_not_target',
         enforcement: 'optional_upgrade',
@@ -292,7 +292,7 @@ describe('createEnvCheckRestartState', () => {
     expect(gateState.canUpgrade).toBe(true)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(false)
-    expect(gateState.statusLabel).toContain('2026.3.24')
+    expect(gateState.statusLabel).toContain('2026.3.28')
   })
 
   it('maps unsupported high versions into a manual blocker when the source cannot self-heal', () => {
@@ -305,7 +305,7 @@ describe('createEnvCheckRestartState', () => {
             binaryPath: '/opt/tools/openclaw/bin/openclaw',
             resolvedBinaryPath: '/opt/tools/openclaw/bin/openclaw',
             packageRoot: '/opt/tools/openclaw',
-            version: '2026.3.25',
+            version: '2026.3.29',
             installSource: 'custom',
             isPathActive: true,
             configPath: '/Users/test/.openclaw/openclaw.json',
@@ -332,7 +332,7 @@ describe('createEnvCheckRestartState', () => {
           binaryPath: '/opt/tools/openclaw/bin/openclaw',
           resolvedBinaryPath: '/opt/tools/openclaw/bin/openclaw',
           packageRoot: '/opt/tools/openclaw',
-          version: '2026.3.25',
+          version: '2026.3.29',
           installSource: 'custom',
           isPathActive: true,
           configPath: '/Users/test/.openclaw/openclaw.json',
@@ -344,8 +344,8 @@ describe('createEnvCheckRestartState', () => {
           baselineBackup: null,
           baselineBackupBypass: null,
         },
-        currentVersion: '2026.3.25',
-        targetVersion: '2026.3.24',
+        currentVersion: '2026.3.29',
+        targetVersion: '2026.3.28',
         latestCheck: null,
         policyState: 'above_max',
         enforcement: 'manual_block',
@@ -356,7 +356,7 @@ describe('createEnvCheckRestartState', () => {
         upToDate: false,
         gatewayRunning: false,
         warnings: [],
-        manualHint: '请在原安装位置手动切换到 2026.3.24',
+        manualHint: '请在原安装位置手动切换到 2026.3.28',
         errorCode: 'manual_only',
       }
     )
@@ -364,7 +364,7 @@ describe('createEnvCheckRestartState', () => {
     expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(true)
-    expect(gateState.manualHint).toContain('2026.3.24')
+    expect(gateState.manualHint).toContain('2026.3.28')
   })
 
   it('builds a clear consent message before automatic openclaw correction runs', () => {
@@ -390,7 +390,7 @@ describe('createEnvCheckRestartState', () => {
         ok: false,
         activeCandidate: null,
         currentVersion: '2026.3.28',
-        targetVersion: '2026.3.24',
+        targetVersion: '2026.3.28',
         latestCheck: null,
         policyState: 'above_max',
         enforcement: 'auto_correct',
@@ -405,7 +405,7 @@ describe('createEnvCheckRestartState', () => {
     })
 
     expect(message).toContain('当前版本：2026.3.28')
-    expect(message).toContain('目标版本：2026.3.24')
+    expect(message).toContain('目标版本：2026.3.28')
     expect(message).toContain('自动回退 OpenClaw')
     expect(message).toContain('Qclaw 将立即退出')
   })
@@ -460,7 +460,7 @@ describe('createEnvCheckRestartState', () => {
           baselineBackupBypass: null,
         },
         currentVersion: '2026.3.23',
-        targetVersion: '2026.3.24',
+        targetVersion: '2026.3.28',
         latestCheck: null,
         policyState: 'supported_not_target',
         enforcement: 'manual_block',
@@ -471,14 +471,14 @@ describe('createEnvCheckRestartState', () => {
         upToDate: false,
         gatewayRunning: false,
         warnings: [],
-        manualHint: '请在原安装位置手动切换到 2026.3.24',
+        manualHint: '请在原安装位置手动切换到 2026.3.28',
       }
     )
 
     expect(gateState.canUpgrade).toBe(false)
     expect(gateState.canAutoCorrect).toBe(false)
     expect(gateState.blocksContinue).toBe(false)
-    expect(gateState.manualHint).toContain('2026.3.24')
+    expect(gateState.manualHint).toContain('2026.3.28')
   })
 
   it('hides the openclaw action button when takeover backup is still blocking auto-correction', () => {

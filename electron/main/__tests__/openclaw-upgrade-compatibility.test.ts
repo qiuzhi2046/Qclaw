@@ -25,8 +25,9 @@ describe('openclaw upgrade compatibility', () => {
     expect(detectOpenClawVersionBand('2026.3.13-1')).toBe('openclaw_2026_3_12_to_2026_3_13')
     expect(detectOpenClawVersionBand('2026.3.20')).toBe('openclaw_2026_3_14_to_2026_3_21')
     expect(detectOpenClawVersionBand('2026.3.22')).toBe('openclaw_2026_3_22')
-    expect(detectOpenClawVersionBand('2026.3.23')).toBe('openclaw_2026_3_23_to_2026_3_24')
-    expect(detectOpenClawVersionBand('2026.3.24')).toBe('openclaw_2026_3_23_to_2026_3_24')
+    expect(detectOpenClawVersionBand('2026.3.23')).toBe('openclaw_2026_3_23_to_2026_3_28')
+    expect(detectOpenClawVersionBand('2026.3.28')).toBe('openclaw_2026_3_23_to_2026_3_28')
+    expect(detectOpenClawVersionBand('2026.3.29')).toBe('unknown_future')
   })
 
   it('marks unaudited future versions as conservative mode', () => {
@@ -62,19 +63,19 @@ describe('openclaw upgrade compatibility', () => {
     expect(assessment.summary).toContain('doctor --fix')
   })
 
-  it('treats the pinned 2026.3.24 target as an audited downgrade destination', () => {
+  it('treats the pinned 2026.3.28 target as an audited downgrade destination', () => {
     const assessment = assessOpenClawUpgradeCompatibility({
-      currentVersion: '2026.3.24',
-      previousVersion: '2026.3.25',
+      currentVersion: '2026.3.28',
+      previousVersion: '2026.3.29',
       assessedAt: '2026-03-29T10:00:00.000Z',
     })
 
     expect(assessment.status).toBe('downgrade_detected')
-    expect(assessment.currentBand).toBe('openclaw_2026_3_23_to_2026_3_24')
+    expect(assessment.currentBand).toBe('openclaw_2026_3_23_to_2026_3_28')
     expect(assessment.conservativeMode).toBe(false)
     expect(assessment.warningCodes).toContain('runtime_reconcile_required')
-    expect(assessment.summary).toContain('2026.3.25')
-    expect(assessment.summary).toContain('2026.3.24')
+    expect(assessment.summary).toContain('2026.3.29')
+    expect(assessment.summary).toContain('2026.3.28')
     expect(assessment.summary).toContain('doctor --fix')
   })
 })
