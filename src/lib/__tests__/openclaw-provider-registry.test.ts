@@ -79,6 +79,21 @@ describe('openclaw-provider-registry', () => {
     expect(getProviderMetadata('ollama')?.description).toBe('本地 LLM 环境')
   })
 
+  it('refreshes the minimax provider metadata for the current global and China variants', () => {
+    const minimax = getProviderMetadata('minimax')
+    expect(minimax?.region).toBe('global')
+    expect(minimax?.signupUrl).toBe('https://platform.minimax.io/')
+    expect(minimax?.description).toBe('MiniMax M3, MiniMax M2.7')
+    expect(minimax?.methods).toEqual([
+      { authChoice: 'minimax-api-key', envKey: 'MINIMAX_API_KEY' },
+      { authChoice: 'minimax-api-key-cn', envKey: 'MINIMAX_API_KEY' },
+    ])
+    expect(resolveKnownProviderIdForAuthChoice('minimax-api-key')).toBe('minimax')
+    expect(resolveKnownProviderIdForAuthChoice('minimax-api-key-cn')).toBe('minimax')
+    expect(resolveProviderMethodEnvKey('minimax', 'minimax-api-key')).toBe('MINIMAX_API_KEY')
+    expect(resolveProviderMethodEnvKey('minimax', 'minimax-api-key-cn')).toBe('MINIMAX_API_KEY')
+  })
+
   it('builds dashboard catalog entries from the centralized registry', () => {
     const catalog = getKnownProviderCatalog()
     expect(catalog.find((provider) => provider.id === 'openai')).toEqual({

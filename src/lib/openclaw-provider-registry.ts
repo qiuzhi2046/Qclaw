@@ -70,11 +70,14 @@ const KNOWN_PROVIDER_METADATA: ProviderMetadata[] = [
     id: 'minimax',
     name: 'MiniMax',
     logo: '⚡',
-    region: 'china',
-    signupUrl: 'https://api.minimax.chat/',
-    description: 'MiniMax M2.5',
+    region: 'global',
+    signupUrl: 'https://platform.minimax.io/',
+    description: 'MiniMax M3, MiniMax M2.7',
     primaryEnvKey: 'MINIMAX_API_KEY',
-    methods: [{ authChoice: 'minimax-api-key-cn', envKey: 'MINIMAX_API_KEY' }],
+    methods: [
+      { authChoice: 'minimax-api-key', envKey: 'MINIMAX_API_KEY' },
+      { authChoice: 'minimax-api-key-cn', envKey: 'MINIMAX_API_KEY' },
+    ],
   },
   {
     id: 'moonshot',
